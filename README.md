@@ -37,14 +37,15 @@ tracks are implemented:
 
 ```bash
 # Backend (from backend/)
-cd backend && uv sync && uv run uvicorn jai.main:app --reload
+cd backend && uv sync
+uv run uvicorn jai.main:app --reload --port "${APP_PORT:-8000}"
 
 # Frontend (from frontend/)
 cd frontend && npm install && npm run dev
 
 # Deployment
 docker compose up --build
-# App available at http://localhost:8000
+# App available at http://localhost:${APP_PORT:-8000}
 ```
 
 ## License

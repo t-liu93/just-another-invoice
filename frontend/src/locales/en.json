@@ -1,0 +1,10 @@
+{
+  "app": {
+    "title": "Just Another Invoice",
+    "subtitle": "Self-hosted invoicing & business management"
+  },
+  "health": {
+    "backend": "backend: {status}",
+    "unreachable": "backend: unreachable"
+  }
+}

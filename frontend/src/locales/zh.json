@@ -1,0 +1,10 @@
+{
+  "app": {
+    "title": "Just Another Invoice",
+    "subtitle": "自托管发票与业务管理"
+  },
+  "health": {
+    "backend": "后端：{status}",
+    "unreachable": "后端：无法连接"
+  }
+}
