@@ -42,3 +42,7 @@ python_version = "3.12"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: tests that require a running PostgreSQL (skipped by default; run with `pytest -m integration`)",
+]

@@ -66,8 +66,14 @@ jobs:
       - name: Mypy (strict)
         run: uv run mypy --strict src
 
-      - name: Pytest
+      - name: Pytest unit
         run: uv run pytest
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+
+      - name: Pytest integration
+        run: uv run pytest -m integration
         env:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432

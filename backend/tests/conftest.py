@@ -185,8 +185,25 @@ async def _override_session(
 
 
 @pytest.fixture
-async def client(_override_session: None) -> AsyncIterator[AsyncClient]:
-    """``AsyncClient`` bound to the app with ``get_session`` pointed at the test DB."""
+async def client() -> AsyncIterator[AsyncClient]:
+    """``AsyncClient`` bound to the app — no database dependency.
+
+    Suitable for HTTP-level tests (routing, middleware, static files) that
+    don't need a real database session.  For integration tests that need DB
+    access through the app, use the ``db_client`` fixture instead.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def db_client(_override_session: None) -> AsyncIterator[AsyncClient]:
+    """``AsyncClient`` with ``get_session`` pointed at the test DB.
+
+    Only use this for integration tests that exercise DB-backed endpoints.
+    Requires a running PostgreSQL instance.
+    """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

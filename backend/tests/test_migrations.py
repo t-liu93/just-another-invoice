@@ -2,6 +2,9 @@
 
 Runs ``alembic`` in a subprocess (because ``env.py`` calls ``asyncio.run``,
 which would clash with pytest-asyncio's event loop).
+
+Marked ``@pytest.mark.integration`` — requires a running PostgreSQL instance.
+Skipped by default; run with ``pytest -m integration``.
 """
 
 from __future__ import annotations
@@ -9,6 +12,8 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from jai.config import get_settings
 
@@ -48,7 +53,6 @@ def _ensure_database(url: str) -> None:
     async def _create() -> None:
         engine = create_async_engine(maint_url, isolation_level="AUTOCOMMIT")
         async with engine.begin() as conn:
-            # Terminate any existing connections
             await conn.execute(
                 text(
                     f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
@@ -89,6 +93,7 @@ def _drop_database(url: str) -> None:
     asyncio.run(_drop())
 
 
+@pytest.mark.integration
 class TestMigrations:
     """Verify ``alembic upgrade head`` and ``alembic downgrade base``."""
 
@@ -110,10 +115,8 @@ class TestMigrations:
 
     def test_downgrade_base(self) -> None:
         """``alembic downgrade base`` should succeed after upgrade."""
-        # First upgrade.
         result = _run_alembic("upgrade", "head", url=self.url)
         assert result.returncode == 0
-        # Then downgrade.
         result = _run_alembic("downgrade", "base", url=self.url)
         assert result.returncode == 0, (
             f"downgrade base failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
