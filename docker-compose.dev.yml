@@ -1,0 +1,4 @@
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_DEV_PORT:-5433}:5432"

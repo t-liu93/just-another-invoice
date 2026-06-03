@@ -1,0 +1,39 @@
+# --- Environment ---
+.env
+.env.dev
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+.eggs/
+build/
+htmlcov/
+.coverage
+.coverage.*
+pip-wheel-metadata/
+
+# --- Node.js ---
+node_modules/
+dist/
+.vite/
+
+# --- Data ---
+/data/
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+
+# --- Review notes ---
+review-notes/*
+!review-notes/
+!review-notes/track0-implementation-brief.md
+review notes/

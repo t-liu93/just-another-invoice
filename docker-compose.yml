@@ -1,0 +1,14 @@
+services:
+  postgres:
+    container_name: jai-postgres
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jai}
+      POSTGRES_DB: ${POSTGRES_DB:-jai}
+    volumes:
+      - pgdata_jai:/var/lib/postgresql
+    restart: unless-stopped
+
+volumes:
+  pgdata_jai:
