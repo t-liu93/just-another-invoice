@@ -35,5 +35,5 @@ dist/
 # --- Review notes ---
 review-notes/*
 !review-notes/
-!review-notes/track0-implementation-brief.md
+!review-notes/*.md
 review notes/
