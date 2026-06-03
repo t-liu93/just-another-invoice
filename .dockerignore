@@ -1,0 +1,26 @@
+# Build artifacts / dependencies (rebuilt inside the image)
+**/node_modules
+**/dist
+**/.venv
+.venv
+
+# Local data & secrets (never bake into the image)
+data
+.env
+.env.*
+
+# Python caches
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# VCS, docs, tooling — not needed at runtime
+.git
+.gitignore
+docs
+review-notes
+.codex
+.agents
+.claude

@@ -1,0 +1,207 @@
+name: Test and Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  # =========================================================================
+  # 4.1  Backend quality gate — ruff, mypy --strict, pytest
+  # =========================================================================
+  backend-quality:
+    name: Backend quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: jai
+          POSTGRES_PASSWORD: jai
+          POSTGRES_DB: jai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jai"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Mypy (strict)
+        run: uv run mypy --strict src
+
+      - name: Pytest
+        run: uv run pytest
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+
+  # =========================================================================
+  # 4.2  CodeGen freshness — ensures schema.d.ts is in sync with the backend
+  # =========================================================================
+  codegen-freshness:
+    name: CodeGen freshness
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: jai
+          POSTGRES_PASSWORD: jai
+          POSTGRES_DB: jai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jai"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backend dependencies
+        run: uv sync --frozen
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Alembic migrations
+        run: uv run alembic upgrade head
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+
+      - name: Start backend server
+        run: |
+          uv run uvicorn jai.main:app \
+            --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/api/health > /dev/null 2>&1; then
+              echo "Backend is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend did not start in 30s" >&2
+          exit 1
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+
+      - name: Regenerate schema.d.ts
+        working-directory: frontend
+        run: npm run codegen
+
+      - name: Check for drift
+        working-directory: .
+        run: git diff --exit-code -- frontend/src/api/schema.d.ts
+
+      - name: Stop backend server
+        if: always()
+        run: pkill -f "uvicorn jai.main:app" || true
+
+  # =========================================================================
+  # 4.3  Frontend build — vue-tsc + vite build
+  # =========================================================================
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (vue-tsc + vite)
+        run: npm run build
+
+  # =========================================================================
+  # 4.4  Docker build — native only, verifies the Dockerfile stays green
+  # =========================================================================
+  docker-build:
+    name: Docker build
+    needs: [backend-quality]
+    runs-on: ubuntu-latest
+    # Only on main pushes and PRs to main (not every feature branch).
+    if: >
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (native)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from jai.config import Settings, get_settings
 
 
@@ -87,18 +91,33 @@ class TestURLOverride:
 
 
 class TestEnvFile:
-    """Integration with the repo-root .env file."""
+    """Integration with explicit env files without relying on local repo state."""
 
-    def test_env_file_overrides_port(self) -> None:
-        """Repo-root .env overrides the code default port (5432 → 5433)."""
-        s = Settings()
-        # Code default is 5432; the .env in the repo root sets 5433.
+    def test_env_file_overrides_port(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An env file can override the code default port (5432 -> 5433)."""
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.delenv("POSTGRES_PORT", raising=False)
+        env_file = tmp_path / ".env"
+        env_file.write_text("POSTGRES_PORT=5433\n", encoding="utf-8")
+
+        s = Settings(_env_file=env_file)
+
         assert "5433" in s.database_url
 
-    def test_env_file_overrides_host(self) -> None:
-        """Repo-root .env sets host to localhost (explicit in .env)."""
-        s = Settings()
-        assert "localhost" in (s.database_url or "")
+    def test_env_file_overrides_host(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An env file can override the code default host."""
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.delenv("POSTGRES_HOST", raising=False)
+        env_file = tmp_path / ".env"
+        env_file.write_text("POSTGRES_HOST=postgres\n", encoding="utf-8")
+
+        s = Settings(_env_file=env_file)
+
+        assert "postgres" in (s.database_url or "")
 
 
 class TestCaching:

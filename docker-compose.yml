@@ -1,4 +1,42 @@
 services:
+  db-migration:
+    container_name: jai-db-migration
+    image: ${JAI_IMAGE:-ghcr.io/tianyuliu/just-another-invoice:latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-jai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jai}
+      POSTGRES_DB: ${POSTGRES_DB:-jai}
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  app:
+    container_name: jai-app
+    image: ${JAI_IMAGE:-ghcr.io/tianyuliu/just-another-invoice:latest}
+    depends_on:
+      db-migration:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-jai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jai}
+      POSTGRES_DB: ${POSTGRES_DB:-jai}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+    ports:
+      - "127.0.0.1:${APP_HOST_PORT:-12000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   postgres:
     container_name: jai-postgres
     image: postgres:18
@@ -8,6 +46,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-jai}
     volumes:
       - pgdata_jai:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jai}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
 
 volumes:

@@ -1,49 +1,17 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const EXPECTED_OPENAPI_TITLE = 'Just Another Invoice'
+const DEFAULT_SCHEMA_URL = 'http://localhost:8000/api/v1/openapi.json'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const frontendRoot = resolve(scriptDir, '..')
-const repoRoot = resolve(frontendRoot, '..')
-
-function parseEnvFile(filePath) {
-  if (!existsSync(filePath)) return {}
-
-  const env = {}
-  const lines = readFileSync(filePath, 'utf8').split(/\r?\n/)
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
-
-    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!match) continue
-
-    const [, key, rawValue] = match
-    let value = rawValue.trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    env[key] = value
-  }
-
-  return env
-}
 
 function buildSchemaUrl() {
-  if (process.env.OPENAPI_URL) return process.env.OPENAPI_URL
-
-  const rootEnv = parseEnvFile(resolve(repoRoot, '.env'))
-  const appPort = process.env.APP_PORT || rootEnv.APP_PORT || '8000'
-  return `http://localhost:${appPort}/api/v1/openapi.json`
+  return process.env.OPENAPI_URL || DEFAULT_SCHEMA_URL
 }
 
 async function assertExpectedOpenApi(schemaUrl) {

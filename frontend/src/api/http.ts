@@ -1,8 +1,8 @@
 /**
  * Lightweight fetch wrapper for the JAI backend API.
  *
- * - All requests go through the Vite dev proxy (``/api`` → APP_PORT-configured
- *   backend) or directly to the backend in production (single-container deployment).
+ * - All requests go through the Vite dev proxy (``/api`` -> fixed backend port
+ *   8000) or directly to the backend in production (single-container deployment).
  * - Throws ``ApiError`` on non-2xx responses with a best-effort human-readable
  *   message extracted from the FastAPI / Pydantic error shape.
  */

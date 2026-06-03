@@ -116,11 +116,11 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 ### M0 · 地基骨架（walking skeleton）｜对应 P0
 - **目标**：单容器跑通的最薄端到端链路。
 - **关键内容**：仿母版搭 `jai` 后端骨架 + Vue 前端骨架；接入 **PostgreSQL + asyncpg**；Alembic 基线迁移；三阶段 Dockerfile + entrypoint；CI 四关；`/api/health`；**Money/Decimal 货币基础类型**（`NUMERIC` 约定 + 舍入工具）；i18n 脚手架（EN/ZH 骨架）；`openapi-typescript` codegen 接好。
-- **两种运行方式（M0 都要打通，基础 `docker-compose.yml` 含 `app` + `postgres`，DB 不发布宿主机端口；本地开发叠加 `docker-compose.dev.yml` 只绑定 `127.0.0.1`，端口可由 dev-only `POSTGRES_DEV_PORT` 调整）**：
+- **两种运行方式（M0 都要打通，基础 `docker-compose.yml` 含 `app` + `postgres`，DB 不发布宿主机端口；app 只发布到 `127.0.0.1:${APP_HOST_PORT:-12000}` 给本机反代，容器内固定 8000；本地开发叠加 `docker-compose.dev.yml` 只绑定 Postgres 到 `127.0.0.1`，端口可由 dev-only `POSTGRES_DEV_PORT` 调整）**：
   - **开发态**：前端 `npm run dev`（Vite）｜后端 `uv run uvicorn jai.main:app --reload`｜数据库 **`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres`（只起 Postgres 这一个 service）**。
-  - **部署态**：`docker compose up`（起 **单容器 app = 前端构建产物 + 后端**，外加 **Postgres**），entrypoint 自动 `alembic upgrade head`。
+  - **部署态**：`docker compose up -d`（起 **单容器 app = 前端构建产物 + 后端**，外加 **Postgres**；生产从 GHCR 拉镜像，本地集成用 dev override `up --build`），migration service 自动 `alembic upgrade head`。
 - **建表/预留**：Alembic 起始；约定 RLS 会话钩子留空实现位。
-- **🟢 部署自测点**：`docker compose up` 起 app + Postgres → 浏览器打开（空）占位页 + `/api/health` 返回 ok；CI 全绿。
+- **🟢 部署自测点**：本地集成 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` 起 app + Postgres，生产 `docker compose up -d` 从 GHCR 拉镜像；浏览器打开 `http://localhost:${APP_HOST_PORT:-12000}` 看到（空）占位页 + `/api/health` 返回 ok；CI 全绿。
 
 ### M1 · 认证 + 邮件底座｜对应 P1
 - **目标**：能注册/登录的私有应用，且邮件能发出去。
@@ -213,7 +213,7 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 ## 6. 部署与自测 loop
 
 - **开发态**：前后端分离——前端 `npm run dev`（Vite，代理 `/api`），后端 `uv run uvicorn jai.main:app --reload`，数据库用 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres`（只起 Postgres 这一个 service，DB 端口只绑定 `127.0.0.1`，host 端口可由 dev-only `POSTGRES_DEV_PORT` 调整）。
-- **部署态 / 里程碑验收**：`docker compose up`（**单容器 app + Postgres**，entrypoint 自动 `alembic upgrade head`）→ 浏览器走该里程碑的「🟢 部署自测点」。
+- **部署态 / 里程碑验收**：生产 `docker compose up -d`（**单容器 app + Postgres**，从 GHCR 拉镜像；migration service 自动 `alembic upgrade head`），本地集成用 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` → 浏览器走该里程碑的「🟢 部署自测点」。
 - **CI**：每次 push 跑四关；`main`/PR 额外跑 docker-build；打 `v*` tag 发布多架构镜像。绿即可合 `main`（单人开发不强制 PR）。
 - 每个里程碑结束在 `docs/plan/milestones/M<x>.md` 记一行验收结论 + 已知遗留。
 
