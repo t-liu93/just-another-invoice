@@ -178,7 +178,7 @@ export interface paths {
         };
         /**
          * Me
-         * @description Return the currently authenticated user.
+         * @description Return the currently authenticated user (requires MFA completed).
          */
         get: operations["me_api_v1_users_me_get"];
         put?: never;
