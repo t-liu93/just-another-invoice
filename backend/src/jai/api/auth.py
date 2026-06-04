@@ -1,38 +1,42 @@
-"""Authentication API routes – register, login, logout, bootstrap, /me.
+"""Authentication API routes – register, login, logout, bootstrap, /me, MFA.
 
 The login flow is custom (JSON body instead of OAuth2 form) while leveraging
 fastapi-users' ``JWTStrategy`` for token creation and ``CookieTransport``
 parameters for cookie management.
 
-Step 2 (this file):
-  - Login: password correct → issue full session cookie directly.
-  - Register: gated by ``is_registration_open`` (no users in DB).
-  - Logout: clear session cookie.
-
-Step 3 will change login to two-step (password → pre-auth → MFA verify → session).
+Step 3 (this file):
+  - Login: password correct → issue pre-auth cookie → ``{next: "mfa_setup"|"mfa_verify"}``.
+  - MFA setup: generate pending TOTP secret, return to client.
+  - MFA verify: validate TOTP code → upgrade to full session cookie.
+    First binding also persists ``totp_secret`` + ``mfa_enabled`` +
+    ``onboarding.completed``.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi_users.authentication.strategy.jwt import JWTStrategy
 from fastapi_users.authentication.transport.cookie import CookieTransport
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.auth.backends import cookie_backend
+from jai.auth.backends import cookie_backend, pre_auth_backend
 from jai.auth.deps import (
-    current_active_user,
+    current_mfa_user,
     is_onboarding_completed,
     is_registration_open,
 )
 from jai.auth.user_manager import UserManager, get_user_manager, verify_password
 from jai.db import get_session
+from jai.models._enums import SettingLevel
 from jai.models.user import User
+from jai.schemas.setting import SETTING_KEY_ONBOARDING_COMPLETED, OnboardingState
 from jai.schemas.user import UserCreate, UserRead
+from jai.services import mfa as mfa_svc
+from jai.services.settings import set_setting
 
 # ---------------------------------------------------------------------------
 # Request / response schemas
@@ -68,11 +72,25 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     """Returned by ``POST /auth/login``.
 
-    Step 2 always returns ``{"next": "dashboard"}``.  Step 3 will narrow
-    ``next`` to ``"mfa_setup" | "mfa_verify"`` once two-step login lands.
+    ``next`` indicates the required next step:
+    - ``"mfa_setup"``: user has not yet bound TOTP → show setup wizard.
+    - ``"mfa_verify"``: user already has TOTP → prompt for verification code.
     """
 
-    next: str
+    next: Literal["mfa_setup", "mfa_verify"]
+
+
+class MfaSetupResponse(BaseModel):
+    """Returned by ``POST /auth/mfa/setup``."""
+
+    secret: str
+    otpauth_uri: str
+
+
+class MfaVerifyRequest(BaseModel):
+    """Body for ``POST /auth/mfa/verify``."""
+
+    code: str
 
 
 # ---------------------------------------------------------------------------
@@ -88,20 +106,22 @@ users_router = APIRouter(prefix="/api/v1/users", tags=["users"])
 #: check and create two owners.
 _REGISTRATION_LOCK_KEY = 4915_0001
 
+# ---------------------------------------------------------------------------
+# Cookie helpers
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+_CookieTransportT = CookieTransport  # alias for line-length
+_JWTStrategyT = JWTStrategy[User, object]
 
 
 async def _set_session_cookie(user: User, response: Response) -> str:
-    """Create a JWT token and set it as a session cookie.
+    """Create a full-session JWT and set it as the ``jai_session`` cookie.
 
     Returns the raw token (rarely needed, but useful for testing).
     """
-    strategy = cast(JWTStrategy[User, object], cookie_backend.get_strategy())
+    strategy = cast(_JWTStrategyT, cookie_backend.get_strategy())
     token = await strategy.write_token(user)
-    transport = cast(CookieTransport, cookie_backend.transport)
+    transport = cast(_CookieTransportT, cookie_backend.transport)
     response.set_cookie(
         transport.cookie_name,
         token,
@@ -116,8 +136,8 @@ async def _set_session_cookie(user: User, response: Response) -> str:
 
 
 def _clear_session_cookie(response: Response) -> None:
-    """Clear the session cookie."""
-    transport = cast(CookieTransport, cookie_backend.transport)
+    """Clear the ``jai_session`` cookie."""
+    transport = cast(_CookieTransportT, cookie_backend.transport)
     response.set_cookie(
         transport.cookie_name,
         "",
@@ -128,6 +148,71 @@ def _clear_session_cookie(response: Response) -> None:
         httponly=transport.cookie_httponly,
         samesite=transport.cookie_samesite,
     )
+
+
+async def _set_pre_auth_cookie(user: User, response: Response) -> str:
+    """Create a short-lived pre-auth JWT and set ``jai_pre_auth`` cookie."""
+    strategy = cast(_JWTStrategyT, pre_auth_backend.get_strategy())
+    token = await strategy.write_token(user)
+    transport = cast(_CookieTransportT, pre_auth_backend.transport)
+    response.set_cookie(
+        transport.cookie_name,
+        token,
+        max_age=transport.cookie_max_age,
+        path=transport.cookie_path,
+        domain=transport.cookie_domain,
+        secure=transport.cookie_secure,
+        httponly=transport.cookie_httponly,
+        samesite=transport.cookie_samesite,
+    )
+    return token
+
+
+def _clear_pre_auth_cookie(response: Response) -> None:
+    """Clear the ``jai_pre_auth`` cookie."""
+    transport = cast(_CookieTransportT, pre_auth_backend.transport)
+    response.set_cookie(
+        transport.cookie_name,
+        "",
+        max_age=0,
+        path=transport.cookie_path,
+        domain=transport.cookie_domain,
+        secure=transport.cookie_secure,
+        httponly=transport.cookie_httponly,
+        samesite=transport.cookie_samesite,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pre-auth user extraction
+# ---------------------------------------------------------------------------
+
+
+async def _get_pre_auth_user(
+    request: Request,
+    user_manager: UserManager,
+) -> User:
+    """Extract and validate the user from the ``jai_pre_auth`` cookie."""
+    transport = cast(_CookieTransportT, pre_auth_backend.transport)
+    token = request.cookies.get(transport.cookie_name)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Pre-authentication required.",
+        )
+    strategy = cast(_JWTStrategyT, pre_auth_backend.get_strategy())
+    user = await strategy.read_token(token, user_manager)  # type: ignore[arg-type]
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired pre-auth token.",
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user.",
+        )
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +248,6 @@ async def register(
 ) -> UserRead:
     """Register a new user.  Only allowed when no users exist (first-boot)."""
     # Serialise the gate check + create against concurrent first registrations.
-    # The transaction-scoped lock is released when ``user_manager.create``
-    # commits (it shares this request's session), after which any waiter sees
-    # the new owner and is rejected by the gate below.
     await session.execute(
         text("SELECT pg_advisory_xact_lock(:key)").bindparams(
             key=_REGISTRATION_LOCK_KEY
@@ -192,7 +274,7 @@ async def register(
 
 
 # ---------------------------------------------------------------------------
-# Login (step 2: password → direct session cookie)
+# Login (step 3: password → pre-auth cookie → {next: mfa_setup|mfa_verify})
 # ---------------------------------------------------------------------------
 
 
@@ -202,11 +284,10 @@ async def login(
     body: LoginRequest,
     user_manager: UserManager = Depends(get_user_manager),
 ) -> LoginResponse:
-    """Verify credentials and issue a full session cookie.
+    """Verify credentials and issue a pre-auth cookie.
 
-    Returns ``{"next": "dashboard"}`` on success (step 2 shortcut).
-    Step 3 changes this to return ``{"next": "mfa_setup"|"mfa_verify"}``
-    and issue a short-lived pre-auth cookie instead.
+    Returns ``{"next": "mfa_setup"}`` if the user has not yet bound TOTP,
+    or ``{"next": "mfa_verify"}`` if TOTP is already configured.
     """
     try:
         user = await user_manager.get_by_email(str(body.email))
@@ -226,8 +307,109 @@ async def login(
             detail="Inactive user.",
         )
 
+    await _set_pre_auth_cookie(user, response)
+
+    if user.mfa_enabled and user.totp_secret:
+        next_step: Literal["mfa_setup", "mfa_verify"] = "mfa_verify"
+    else:
+        next_step = "mfa_setup"
+
+    return LoginResponse(next=next_step)
+
+
+# ---------------------------------------------------------------------------
+# MFA setup
+# ---------------------------------------------------------------------------
+
+
+@router.post("/mfa/setup", response_model=MfaSetupResponse)
+async def mfa_setup(
+    request: Request,
+    user_manager: UserManager = Depends(get_user_manager),
+) -> MfaSetupResponse:
+    """Generate a pending TOTP secret for the authenticated user.
+
+    Requires the ``jai_pre_auth`` cookie (set by the login endpoint).
+    The secret is **not** persisted until the user successfully verifies a
+    code via ``POST /auth/mfa/verify``.
+    """
+    user = await _get_pre_auth_user(request, user_manager)
+
+    secret = mfa_svc.generate_totp_secret()
+    mfa_svc.store_pending_secret(str(user.id), secret)
+    otpauth_uri = mfa_svc.build_otpauth_uri(secret, user.email)
+
+    return MfaSetupResponse(secret=secret, otpauth_uri=otpauth_uri)
+
+
+# ---------------------------------------------------------------------------
+# MFA verify
+# ---------------------------------------------------------------------------
+
+
+@router.post("/mfa/verify", status_code=status.HTTP_204_NO_CONTENT)
+async def mfa_verify(
+    request: Request,
+    response: Response,
+    body: MfaVerifyRequest,
+    session: AsyncSession = Depends(get_session),
+    user_manager: UserManager = Depends(get_user_manager),
+) -> None:
+    """Verify a TOTP code and upgrade the pre-auth cookie to a full session.
+
+    Two cases:
+
+    1. **First binding** (user has no ``totp_secret``): the code is verified
+       against the pending secret generated by ``/mfa/setup``.  On success,
+       ``totp_secret`` is persisted, ``mfa_enabled`` is set to ``True``, and
+       ``onboarding.completed`` is set.
+    2. **Subsequent login** (user has ``mfa_enabled=True``): the code is
+       verified against the stored ``totp_secret``.
+
+    On success the ``jai_pre_auth`` cookie is cleared and a ``jai_session``
+    cookie is set.
+    """
+    user = await _get_pre_auth_user(request, user_manager)
+
+    code = body.code.strip()
+
+    if user.mfa_enabled and user.totp_secret:
+        # Subsequent login – verify against stored secret.
+        if not mfa_svc.verify_totp_code(user.totp_secret, code):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid verification code.",
+            )
+    else:
+        # First binding – verify against pending secret.
+        pending = mfa_svc.get_pending_secret(str(user.id))
+        if pending is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No pending MFA setup. Please start setup again.",
+            )
+        if not mfa_svc.verify_totp_code(pending, code):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid verification code.",
+            )
+        # Persist the secret.
+        user.totp_secret = pending
+        user.mfa_enabled = True
+        # Mark onboarding as completed.
+        await set_setting(
+            session,
+            SETTING_KEY_ONBOARDING_COMPLETED,
+            OnboardingState(completed=True),
+            level=SettingLevel.GLOBAL,
+        )
+        mfa_svc.pop_pending_secret(str(user.id))
+
+    await session.commit()
+
+    # Upgrade: clear pre-auth, set full session.
+    _clear_pre_auth_cookie(response)
     await _set_session_cookie(user, response)
-    return LoginResponse(next="dashboard")
 
 
 # ---------------------------------------------------------------------------
@@ -237,15 +419,16 @@ async def login(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(response: Response) -> None:
-    """Clear the session cookie.
+    """Clear the session cookie and pre-auth cookie.
 
-    Public and idempotent: it always returns a cookie-clearing response, even
-    when the incoming cookie is missing, expired, or no longer verifiable
-    (e.g. after a secret rotation).  Since the cookie is ``httpOnly`` the
-    frontend cannot clear it on its own, so the server must do so
-    unconditionally.
+    Public and idempotent: it always returns cookie-clearing response headers,
+    even when the incoming cookies are missing, expired, or no longer
+    verifiable (e.g. after a secret rotation).  Since the cookies are
+    ``httpOnly`` the frontend cannot clear them on its own, so the server must
+    do so unconditionally.
     """
     _clear_session_cookie(response)
+    _clear_pre_auth_cookie(response)
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +438,7 @@ async def logout(response: Response) -> None:
 
 @users_router.get("/me", response_model=UserRead)
 async def me(
-    user: Annotated[User, Depends(current_active_user)],
+    user: Annotated[User, Depends(current_mfa_user)],
 ) -> UserRead:
-    """Return the currently authenticated user."""
+    """Return the currently authenticated user (requires MFA completed)."""
     return UserRead.model_validate(user)

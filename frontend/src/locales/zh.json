@@ -24,7 +24,19 @@
     "logout": "登出",
     "loginFailed": "邮箱或密码错误。",
     "registerFailed": "注册失败。",
-    "registrationClosed": "注册已关闭。"
+    "registrationClosed": "注册已关闭。",
+    "mfaSetupTitle": "设置两步验证",
+    "mfaVerifyTitle": "两步验证",
+    "mfaSetupInstructions": "使用身份验证器应用扫描二维码，然后输入 6 位验证码。",
+    "mfaVerifyInstructions": "输入身份验证器应用中的 6 位验证码。",
+    "mfaManualEntry": "手动输入",
+    "mfaCode": "验证码",
+    "mfaCodePlaceholder": "000000",
+    "mfaCodeRequired": "请输入验证码。",
+    "mfaVerify": "验证",
+    "mfaSetupFailed": "两步验证设置失败。",
+    "mfaVerifyFailed": "验证码无效。",
+    "copy": "复制"
   },
   "dashboard": {
     "welcome": "欢迎使用 Just Another Invoice",

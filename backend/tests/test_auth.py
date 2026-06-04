@@ -1,13 +1,17 @@
-"""Unit tests for authentication flows.
+"""Unit tests for authentication and MFA flows.
 
 Covers:
 - Bootstrap endpoint (registration open / closed, onboarding state)
 - Registration gate (first user → owner + 201, second → 403)
-- Login (valid credentials → cookie set + JSON body, invalid → 400)
-- Logout (clears cookie, public + idempotent)
+- Login (two-step: password → pre-auth cookie → {next: mfa_setup|mfa_verify})
+- MFA setup (generate pending TOTP secret)
+- MFA verify (first binding → persist + onboarding, subsequent login → verify)
+- Logout (clears both cookies, public + idempotent)
 - /users/me (authenticated → user data, unauthenticated → 401)
+- TOTP code verification (valid / invalid / time-window tolerance)
+- Pre-auth isolation (pre-auth cookie cannot access /me)
+- CLI set-password / reset-mfa logic
 - Password hashing / verification (Argon2)
-- CLI set-password logic
 """
 
 from __future__ import annotations
@@ -15,17 +19,98 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 
+import pyotp
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import jai.auth.secret as secret_mod
+import jai.services.mfa as mfa_svc
 import jai.services.settings as settings_svc
 from jai.auth.secret import get_auth_secret, resolve_auth_secret
 from jai.auth.user_manager import hash_password, verify_password
 from jai.config import get_settings
 from jai.models._enums import SettingLevel
 from jai.schemas.setting import SETTING_KEY_AUTH_SECRET, AuthSecretState
+
+# ---------------------------------------------------------------------------
+# MFA state cleanup (between tests)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clean_mfa_pending() -> Iterator[None]:
+    """Reset MFA pending-secret store around each test."""
+    mfa_svc._clear_pending_secrets()
+    yield
+    mfa_svc._clear_pending_secrets()
+
+
+# ---------------------------------------------------------------------------
+# Helpers – full authentication flow
+# ---------------------------------------------------------------------------
+
+
+async def _register(
+    client: AsyncClient,
+    email: str = "user@example.com",
+    password: str = "testpassword1",
+) -> None:
+    """Register the first (owner) user."""
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": password},
+    )
+    assert resp.status_code == 201
+
+
+async def _login(
+    client: AsyncClient,
+    email: str = "user@example.com",
+    password: str = "testpassword1",
+) -> None:
+    """Login (password step) — sets pre-auth cookie on the client."""
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert resp.status_code == 200
+
+
+async def _mfa_setup(client: AsyncClient) -> str:
+    """Call MFA setup and return the pending TOTP secret."""
+    resp = await client.post("/api/v1/auth/mfa/setup")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "secret" in data
+    assert "otpauth_uri" in data
+    assert data["otpauth_uri"].startswith("otpauth://totp/")
+    return data["secret"]
+
+
+async def _mfa_verify(client: AsyncClient, code: str) -> int:
+    """Call MFA verify and return the status code."""
+    resp = await client.post(
+        "/api/v1/auth/mfa/verify",
+        json={"code": code},
+    )
+    return resp.status_code
+
+
+async def _full_auth(
+    client: AsyncClient,
+    email: str = "user@example.com",
+    password: str = "testpassword1",
+) -> str:
+    """Register → login → MFA setup → MFA verify → return the TOTP secret."""
+    await _register(client, email, password)
+    await _login(client, email, password)
+    secret = await _mfa_setup(client)
+    code = pyotp.TOTP(secret).now()
+    status_code = await _mfa_verify(client, code)
+    assert status_code == 204
+    return secret
+
 
 # ---------------------------------------------------------------------------
 # Password hashing (Argon2)
@@ -62,6 +147,87 @@ class TestPasswordHashing:
 
 
 # ---------------------------------------------------------------------------
+# TOTP verification (unit)
+# ---------------------------------------------------------------------------
+
+
+class TestTotpVerification:
+    """Unit tests for TOTP code generation and verification."""
+
+    def test_valid_code_verifies(self) -> None:
+        """A freshly generated code verifies against the same secret."""
+        secret = pyotp.random_base32()
+        code = pyotp.TOTP(secret).now()
+        assert mfa_svc.verify_totp_code(secret, code) is True
+
+    def test_invalid_code_fails(self) -> None:
+        """A wrong code does not verify."""
+        secret = pyotp.random_base32()
+        assert mfa_svc.verify_totp_code(secret, "000000") is False
+
+    def test_valid_window_one_accepts_adjacent(self) -> None:
+        """With valid_window=1, the previous/next step codes are accepted."""
+        import time
+
+        secret = pyotp.random_base32()
+        totp = pyotp.TOTP(secret)
+        prev_code = totp.at(time.time() - 30)
+        assert mfa_svc.verify_totp_code(secret, prev_code, valid_window=1) is True
+
+    def test_valid_window_zero_rejects_adjacent(self) -> None:
+        """With valid_window=0, only the exact current step is accepted."""
+        import time
+
+        secret = pyotp.random_base32()
+        totp = pyotp.TOTP(secret)
+        prev_code = totp.at(time.time() - 30)
+        assert mfa_svc.verify_totp_code(secret, prev_code, valid_window=0) is False
+
+    def test_totally_wrong_code(self) -> None:
+        """A completely wrong 6-digit code fails."""
+        secret = pyotp.random_base32()
+        # Generate a code then change it
+        code = pyotp.TOTP(secret).now()
+        bad_code = str((int(code) + 123456) % 1000000).zfill(6)
+        # It's theoretically possible they collide but extremely unlikely.
+        assert mfa_svc.verify_totp_code(secret, bad_code) is False
+
+
+# ---------------------------------------------------------------------------
+# Pending secret store
+# ---------------------------------------------------------------------------
+
+
+class TestPendingSecretStore:
+    """Tests for the in-memory pending TOTP secret store."""
+
+    def test_store_and_get(self) -> None:
+        mfa_svc.store_pending_secret("uid-1", "secret-abc")
+        assert mfa_svc.get_pending_secret("uid-1") == "secret-abc"
+
+    def test_get_nonexistent(self) -> None:
+        assert mfa_svc.get_pending_secret("no-such-id") is None
+
+    def test_pop_removes(self) -> None:
+        mfa_svc.store_pending_secret("uid-2", "secret-xyz")
+        assert mfa_svc.pop_pending_secret("uid-2") == "secret-xyz"
+        assert mfa_svc.get_pending_secret("uid-2") is None
+
+    def test_pop_nonexistent(self) -> None:
+        assert mfa_svc.pop_pending_secret("nope") is None
+
+    def test_get_does_not_remove(self) -> None:
+        mfa_svc.store_pending_secret("uid-3", "secret-123")
+        mfa_svc.get_pending_secret("uid-3")
+        assert mfa_svc.get_pending_secret("uid-3") == "secret-123"
+
+    def test_overwrite(self) -> None:
+        mfa_svc.store_pending_secret("uid-4", "old")
+        mfa_svc.store_pending_secret("uid-4", "new")
+        assert mfa_svc.get_pending_secret("uid-4") == "new"
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap endpoint
 # ---------------------------------------------------------------------------
 
@@ -79,22 +245,17 @@ class TestBootstrap:
         assert data["onboarding_completed"] is False
 
     @pytest.mark.asyncio
-    async def test_bootstrap_after_register(
+    async def test_bootstrap_after_full_auth(
         self, db_client: AsyncClient
     ) -> None:
-        """After registering a user, registration is closed."""
-        # Register first user.
-        resp = await db_client.post(
-            "/api/v1/auth/register",
-            json={"email": "owner@example.com", "password": "testpassword1"},
-        )
-        assert resp.status_code == 201
+        """After full auth flow (register + MFA), both flags are set."""
+        await _full_auth(db_client)
 
-        # Bootstrap should now show registration closed.
         resp = await db_client.get("/api/v1/auth/bootstrap")
         assert resp.status_code == 200
         data = resp.json()
         assert data["registration_open"] is False
+        assert data["onboarding_completed"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -130,14 +291,8 @@ class TestRegister:
         self, db_client: AsyncClient
     ) -> None:
         """Second registration attempt is rejected with 403."""
-        # First registration.
-        resp = await db_client.post(
-            "/api/v1/auth/register",
-            json={"email": "owner@example.com", "password": "testpassword1"},
-        )
-        assert resp.status_code == 201
+        await _register(db_client)
 
-        # Second registration → 403.
         resp = await db_client.post(
             "/api/v1/auth/register",
             json={"email": "other@example.com", "password": "testpassword2"},
@@ -166,19 +321,13 @@ class TestRegister:
             json={"email": "user@example.com", "password": "testpassword1"},
         )
         data = resp.json()
-        # Should be a valid UUID string.
         uuid.UUID(data["id"])
 
     @pytest.mark.asyncio
     async def test_concurrent_first_registration_creates_one_owner(
         self, db_client: AsyncClient
     ) -> None:
-        """Two concurrent first registrations must yield exactly one owner.
-
-        Guards the ``pg_advisory_xact_lock`` serialisation: without it, both
-        requests could read an empty DB and create two owners.  With it, one
-        wins (201) and the other sees the gate closed (403).
-        """
+        """Two concurrent first registrations must yield exactly one owner."""
         import asyncio
 
         async def _register(email: str) -> int:
@@ -198,46 +347,53 @@ class TestRegister:
 
 
 # ---------------------------------------------------------------------------
-# Login
+# Login (two-step)
 # ---------------------------------------------------------------------------
 
 
 class TestLogin:
-    """Tests for ``POST /api/v1/auth/login``."""
+    """Tests for ``POST /api/v1/auth/login`` (step 3: password → pre-auth)."""
 
     @pytest.mark.asyncio
-    async def test_login_success_sets_cookie(
+    async def test_login_returns_mfa_setup_for_new_user(
         self, db_client: AsyncClient
     ) -> None:
-        """Successful login returns JSON body and sets session cookie."""
-        # Register.
-        await db_client.post(
-            "/api/v1/auth/register",
-            json={"email": "user@example.com", "password": "testpassword1"},
-        )
+        """New user (no MFA) gets {next: "mfa_setup"} and pre-auth cookie."""
+        await _register(db_client)
 
-        # Login.
         resp = await db_client.post(
             "/api/v1/auth/login",
             json={"email": "user@example.com", "password": "testpassword1"},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["next"] == "dashboard"
+        assert data["next"] == "mfa_setup"
+        # Pre-auth cookie should be set.
+        assert "jai_pre_auth" in resp.cookies
 
-        # Cookie should be set.
-        cookies = resp.cookies
-        assert "jai_session" in cookies
+    @pytest.mark.asyncio
+    async def test_login_returns_mfa_verify_after_binding(
+        self, db_client: AsyncClient
+    ) -> None:
+        """User with MFA bound gets {next: "mfa_verify"}."""
+        await _full_auth(db_client)
+        # Logout to clear session.
+        await db_client.post("/api/v1/auth/logout")
+
+        resp = await db_client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "testpassword1"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["next"] == "mfa_verify"
 
     @pytest.mark.asyncio
     async def test_login_wrong_password(
         self, db_client: AsyncClient
     ) -> None:
         """Wrong password returns 400."""
-        await db_client.post(
-            "/api/v1/auth/register",
-            json={"email": "user@example.com", "password": "testpassword1"},
-        )
+        await _register(db_client)
 
         resp = await db_client.post(
             "/api/v1/auth/login",
@@ -259,42 +415,418 @@ class TestLogin:
 
 
 # ---------------------------------------------------------------------------
-# Logout
+# MFA setup
 # ---------------------------------------------------------------------------
+
+
+class TestMfaSetup:
+    """Tests for ``POST /api/v1/auth/mfa/setup``."""
+
+    @pytest.mark.asyncio
+    async def test_setup_returns_secret_and_uri(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Setup returns a valid secret and otpauth URI."""
+        await _register(db_client)
+        await _login(db_client)
+
+        resp = await db_client.post("/api/v1/auth/mfa/setup")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "secret" in data
+        assert "otpauth_uri" in data
+        assert data["otpauth_uri"].startswith("otpauth://totp/")
+        assert "JAI" in data["otpauth_uri"]
+        assert "user%40example.com" in data["otpauth_uri"]
+
+    @pytest.mark.asyncio
+    async def test_setup_without_pre_auth_returns_401(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Calling setup without pre-auth cookie returns 401."""
+        await _register(db_client)
+        # No login — no pre-auth cookie.
+
+        resp = await db_client.post("/api/v1/auth/mfa/setup")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_setup_stores_pending_secret(
+        self, db_client: AsyncClient
+    ) -> None:
+        """After setup, a pending secret is stored for the user."""
+        await _register(db_client)
+        await _login(db_client)
+
+        resp = await db_client.post("/api/v1/auth/mfa/setup")
+        secret = resp.json()["secret"]
+        # There should be exactly one pending secret stored.
+        assert len(mfa_svc._pending_totp_secrets) == 1
+        stored = list(mfa_svc._pending_totp_secrets.values())[0]
+        assert stored == secret
+
+
+# ---------------------------------------------------------------------------
+# MFA verify
+# ---------------------------------------------------------------------------
+
+
+class TestMfaVerify:
+    """Tests for ``POST /api/v1/auth/mfa/verify``."""
+
+    @pytest.mark.asyncio
+    async def test_first_binding_persists_secret_and_sets_onboarding(
+        self, db_client: AsyncClient
+    ) -> None:
+        """First MFA binding persists totp_secret, mfa_enabled, onboarding."""
+        await _register(db_client)
+        await _login(db_client)
+        secret = await _mfa_setup(db_client)
+
+        code = pyotp.TOTP(secret).now()
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": code},
+        )
+        assert resp.status_code == 204
+        # Pending secret should be consumed.
+        assert len(mfa_svc._pending_totp_secrets) == 0
+
+        # Session cookie should be set.
+        assert "jai_session" in resp.cookies
+
+        # /users/me should show mfa_enabled=True.
+        me_resp = await db_client.get("/api/v1/users/me")
+        assert me_resp.status_code == 200
+        me_data = me_resp.json()
+        assert me_data["mfa_enabled"] is True
+
+        # Onboarding should be completed.
+        bootstrap = await db_client.get("/api/v1/auth/bootstrap")
+        assert bootstrap.json()["onboarding_completed"] is True
+
+    @pytest.mark.asyncio
+    async def test_subsequent_login_with_valid_code(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Subsequent login verifies against stored secret."""
+        secret = await _full_auth(db_client)
+        # Logout.
+        await db_client.post("/api/v1/auth/logout")
+
+        # Login again → mfa_verify.
+        resp = await db_client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "testpassword1"},
+        )
+        assert resp.json()["next"] == "mfa_verify"
+
+        # Verify with current code.
+        code = pyotp.TOTP(secret).now()
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": code},
+        )
+        assert resp.status_code == 204
+
+        # Should be able to access /me.
+        me_resp = await db_client.get("/api/v1/users/me")
+        assert me_resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_invalid_code_returns_400(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Wrong TOTP code returns 400."""
+        await _register(db_client)
+        await _login(db_client)
+        await _mfa_setup(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": "000000"},
+        )
+        assert resp.status_code == 400
+        assert "invalid" in resp.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_verify_without_pre_auth_returns_401(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Calling verify without pre-auth cookie returns 401."""
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": "123456"},
+        )
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_verify_without_setup_returns_400(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Calling verify (first binding) without prior setup returns 400."""
+        await _register(db_client)
+        await _login(db_client)
+        # No setup call — no pending secret.
+
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": "123456"},
+        )
+        assert resp.status_code == 400
+        assert "pending" in resp.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_wrong_code_does_not_consume_pending_secret(
+        self, db_client: AsyncClient
+    ) -> None:
+        """A wrong code does not remove the pending secret (allows retry)."""
+        await _register(db_client)
+        await _login(db_client)
+        secret = await _mfa_setup(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": "000000"},
+        )
+        assert resp.status_code == 400
+        # Pending secret should still be there.
+        assert len(mfa_svc._pending_totp_secrets) == 1
+
+        # Retry with correct code.
+        code = pyotp.TOTP(secret).now()
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": code},
+        )
+        assert resp.status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# Pre-auth isolation
+# ---------------------------------------------------------------------------
+
+
+class TestPreAuthIsolation:
+    """Pre-auth cookie must not grant access to protected endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_pre_auth_cannot_access_me(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Having only a pre-auth cookie does not grant access to /me."""
+        await _register(db_client)
+        await _login(db_client)
+
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_session_cookie_does_not_work_for_mfa_setup(
+        self, db_client: AsyncClient
+    ) -> None:
+        """A full session cookie cannot be used to call MFA setup."""
+        await _full_auth(db_client)
+
+        resp = await db_client.post("/api/v1/auth/mfa/setup")
+        # MFA setup reads jai_pre_auth cookie, not jai_session.
+        # Since we have a session cookie but no pre-auth cookie, it should 401.
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_pre_auth_token_in_session_cookie_is_rejected(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Putting a pre-auth token into the session cookie must 401 (Finding 1).
+
+        The two token types use different JWT audiences; swapping them must fail.
+        """
+        await _register(db_client)
+        await _login(db_client)
+
+        # Extract the pre-auth token from the cookie jar.
+        transport_name = "jai_pre_auth"
+        pre_auth_token = db_client.cookies.get(transport_name)
+        assert pre_auth_token is not None, "Pre-auth cookie should be set after login."
+
+        # Forge: put the pre-auth token into the session cookie slot.
+        db_client.cookies.set("jai_session", pre_auth_token)
+        # Remove the pre-auth cookie so only the forged session cookie is sent.
+        db_client.cookies.delete(transport_name)
+
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.status_code == 401, (
+            "Pre-auth token must not be accepted as session token (audience isolation)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_token_in_pre_auth_cookie_is_rejected(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Putting a session token into the pre-auth cookie must 401 (Finding 1)."""
+        await _full_auth(db_client)
+
+        # Extract the session token.
+        session_token = db_client.cookies.get("jai_session")
+        assert session_token is not None, "Session cookie should be set after full auth."
+
+        # Forge: put the session token into the pre-auth cookie slot.
+        db_client.cookies.set("jai_pre_auth", session_token)
+        db_client.cookies.delete("jai_session")
+
+        resp = await db_client.post("/api/v1/auth/mfa/setup")
+        assert resp.status_code == 401, (
+            "Session token must not be accepted as pre-auth token (audience isolation)."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Token audience isolation (Finding 1 – cross-use regression)
+# ---------------------------------------------------------------------------
+
+
+class TestTokenAudienceIsolation:
+    """Regression tests for Finding 1: pre-auth / session tokens must not be
+    interchangeable.  Both directions must fail even though they share the
+    same signing secret.
+    """
+
+    @pytest.mark.asyncio
+    async def test_pre_auth_rejected_by_session_endpoint(
+        self, db_client: AsyncClient
+    ) -> None:
+        """A pre-auth JWT used as a session cookie → 401 on /me."""
+        await _register(db_client)
+        await _login(db_client)
+
+        pre_auth_token = db_client.cookies.get("jai_pre_auth")
+        assert pre_auth_token is not None
+
+        # Replace session cookie with the pre-auth token.
+        db_client.cookies.set("jai_session", pre_auth_token)
+        db_client.cookies.delete("jai_pre_auth")
+
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_session_rejected_by_pre_auth_endpoint(
+        self, db_client: AsyncClient
+    ) -> None:
+        """A session JWT used as a pre-auth cookie → 401 on /mfa/setup."""
+        await _full_auth(db_client)
+
+        session_token = db_client.cookies.get("jai_session")
+        assert session_token is not None
+
+        db_client.cookies.set("jai_pre_auth", session_token)
+        db_client.cookies.delete("jai_session")
+
+        resp = await db_client.post("/api/v1/auth/mfa/setup")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# MFA-aware dependency (Finding 2 – reset-mfa / step-2 legacy sessions)
+# ---------------------------------------------------------------------------
+
+
+class TestMfaAwareDependency:
+    """Regression tests for Finding 2: protected endpoints reject sessions
+    where MFA is not fully configured.
+    """
+
+    @pytest.mark.asyncio
+    async def test_session_without_mfa_rejected(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """A valid session with mfa_enabled=False is rejected by /me.
+
+        Simulates a Step 2-era session that was issued before MFA existed.
+        """
+        await _register(db_client)
+        await _login(db_client)
+
+        # Bypass MFA: directly create a session cookie via the strategy.
+        from sqlalchemy import select
+
+        from jai.auth.backends import cookie_backend
+        from jai.models.user import User
+
+        # Get the user from DB.
+        async with db_session_maker() as session:
+            stmt = select(User).where(User.email == "user@example.com")
+            result = await session.execute(stmt)
+            user = result.scalar_one()
+
+        # Build a session token without going through MFA.
+        strategy = cookie_backend.get_strategy()
+        token = await strategy.write_token(user)
+        db_client.cookies.set("jai_session", token)
+        # Remove pre-auth if any.
+        db_client.cookies.delete("jai_pre_auth")
+
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.status_code == 401, (
+            "Session without MFA completed must be rejected (Finding 2)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_after_reset_mfa_rejected(
+        self, db_client: AsyncClient, db_session_maker: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """After reset-mfa, an existing session cookie is rejected by /me."""
+        await _full_auth(db_client)
+
+        # Verify access works before reset.
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.status_code == 200
+
+        # Simulate CLI reset-mfa.
+        async with db_session_maker() as session:
+            from sqlalchemy import select
+
+            from jai.models.user import User
+
+            stmt = select(User).where(User.email == "user@example.com")
+            result = await session.execute(stmt)
+            user = result.scalar_one()
+            user.totp_secret = None
+            user.mfa_enabled = False
+            session.add(user)
+            await session.commit()
+
+        # The same session cookie should now be rejected.
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.status_code == 401, (
+            "Session must be rejected after MFA reset (Finding 2)."
+        )
 
 
 class TestLogout:
     """Tests for ``POST /api/v1/auth/logout``."""
 
     @pytest.mark.asyncio
-    async def test_logout_clears_cookie(
+    async def test_logout_clears_cookies(
         self, db_client: AsyncClient
     ) -> None:
-        """Logout clears the session cookie."""
-        # Register + login.
-        await db_client.post(
-            "/api/v1/auth/register",
-            json={"email": "user@example.com", "password": "testpassword1"},
-        )
-        login_resp = await db_client.post(
-            "/api/v1/auth/login",
-            json={"email": "user@example.com", "password": "testpassword1"},
-        )
-        assert "jai_session" in login_resp.cookies
+        """Logout clears both session and pre-auth cookies."""
+        await _full_auth(db_client)
 
-        # Logout.
         resp = await db_client.post("/api/v1/auth/logout")
         assert resp.status_code == 204
+
+        # After logout, /me should return 401.
+        me_resp = await db_client.get("/api/v1/users/me")
+        assert me_resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_logout_unauthenticated_is_idempotent(
         self, client: AsyncClient
     ) -> None:
-        """Logout without a session still returns 204 and clears the cookie.
-
-        The endpoint is public and idempotent so a stale/invalid httpOnly
-        cookie can always be cleared by the server.
-        """
+        """Logout without a session still returns 204 and clears cookies."""
         resp = await client.post("/api/v1/auth/logout")
         assert resp.status_code == 204
         # A cookie-clearing Set-Cookie (max-age=0) must be present.
@@ -323,46 +855,81 @@ class TestUsersMe:
     async def test_me_authenticated(
         self, db_client: AsyncClient
     ) -> None:
-        """Authenticated request returns the current user."""
-        # Register + login.
-        await db_client.post(
-            "/api/v1/auth/register",
-            json={"email": "user@example.com", "password": "testpassword1"},
-        )
-        await db_client.post(
-            "/api/v1/auth/login",
-            json={"email": "user@example.com", "password": "testpassword1"},
-        )
+        """Authenticated request (after full MFA flow) returns the user."""
+        await _full_auth(db_client)
 
-        # Get current user.
         resp = await db_client.get("/api/v1/users/me")
         assert resp.status_code == 200
         data = resp.json()
         assert data["email"] == "user@example.com"
         assert data["role"] == "owner"
-        assert data["mfa_enabled"] is False
+        assert data["mfa_enabled"] is True
 
     @pytest.mark.asyncio
     async def test_me_after_logout(
         self, db_client: AsyncClient
     ) -> None:
         """After logout, /me returns 401."""
-        # Register + login.
-        await db_client.post(
-            "/api/v1/auth/register",
-            json={"email": "user@example.com", "password": "testpassword1"},
-        )
-        await db_client.post(
+        await _full_auth(db_client)
+        await db_client.post("/api/v1/auth/logout")
+
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Reset MFA (simulates CLI reset-mfa)
+# ---------------------------------------------------------------------------
+
+
+class TestResetMfa:
+    """Tests for the MFA reset behaviour (what the CLI does)."""
+
+    @pytest.mark.asyncio
+    async def test_reset_mfa_forces_rebinding(
+        self, db_client: AsyncClient, db_session_maker: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """After reset-mfa, the user must go through MFA setup again."""
+        secret = await _full_auth(db_client)
+
+        # Simulate CLI reset-mfa: clear totp_secret + mfa_enabled.
+        async with db_session_maker() as session:
+            from sqlalchemy import select
+
+            from jai.models.user import User
+
+            stmt = select(User).where(User.email == "user@example.com")
+            result = await session.execute(stmt)
+            user = result.scalar_one()
+            user.totp_secret = None  # type: ignore[assignment]
+            user.mfa_enabled = False  # type: ignore[assignment]
+            session.add(user)
+            await session.commit()
+
+        # Logout and login again.
+        await db_client.post("/api/v1/auth/logout")
+        resp = await db_client.post(
             "/api/v1/auth/login",
             json={"email": "user@example.com", "password": "testpassword1"},
         )
+        assert resp.json()["next"] == "mfa_setup"
 
-        # Logout.
-        await db_client.post("/api/v1/auth/logout")
+        # Old secret should no longer work for verify (no pending secret).
+        old_code = pyotp.TOTP(secret).now()
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": old_code},
+        )
+        assert resp.status_code == 400  # No pending setup.
 
-        # /me should be 401 now.
-        resp = await db_client.get("/api/v1/users/me")
-        assert resp.status_code == 401
+        # Must go through setup again.
+        new_secret = await _mfa_setup(db_client)
+        new_code = pyotp.TOTP(new_secret).now()
+        resp = await db_client.post(
+            "/api/v1/auth/mfa/verify",
+            json={"code": new_code},
+        )
+        assert resp.status_code == 204
 
 
 # ---------------------------------------------------------------------------

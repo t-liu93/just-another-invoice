@@ -2,6 +2,11 @@
  * Auth store – manages current user state and authentication actions.
  *
  * Uses cookie-based session auth (credentials: 'include' in http.ts).
+ *
+ * Step 3 additions:
+ * - `mfaSetup()`: call POST /auth/mfa/setup → returns {secret, otpauth_uri}.
+ * - `mfaVerify(code)`: call POST /auth/mfa/verify → on success fetches user profile.
+ * - `login()` no longer fetches the user (only pre-auth'd until MFA verify).
  */
 
 import { defineStore } from 'pinia'
@@ -12,6 +17,7 @@ import type { components } from '../api/schema'
 type UserRead = components['schemas']['UserRead']
 type BootstrapResponse = components['schemas']['BootstrapResponse']
 type LoginResponse = components['schemas']['LoginResponse']
+type MfaSetupResponse = components['schemas']['MfaSetupResponse']
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserRead | null>(null)
@@ -64,14 +70,49 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  /** Login with email and password. Sets session cookie on success. */
+  /**
+   * Login with email and password.
+   *
+   * Sets a pre-auth cookie on success. The caller must inspect `next`
+   * (`"mfa_setup"` or `"mfa_verify"`) and drive the appropriate MFA step.
+   * The user profile is NOT fetched here — only after MFA verification.
+   */
   async function login(email: string, password: string): Promise<string> {
     loading.value = true
     try {
       const result = await post<LoginResponse>('/api/v1/auth/login', { email, password })
-      // After successful login, fetch the full user profile.
-      await fetchUser()
       return result.next
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * MFA setup – generate a pending TOTP secret.
+   *
+   * Requires a pre-auth cookie (set by login).  Returns the secret and
+   * otpauth URI so the frontend can render a QR code.
+   */
+  async function mfaSetup(): Promise<MfaSetupResponse> {
+    loading.value = true
+    try {
+      return await post<MfaSetupResponse>('/api/v1/auth/mfa/setup', {})
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * MFA verify – validate a TOTP code and complete authentication.
+   *
+   * On success, clears the pre-auth cookie, sets the full session cookie,
+   * and fetches the user profile.
+   */
+  async function mfaVerify(code: string): Promise<void> {
+    loading.value = true
+    try {
+      await post('/api/v1/auth/mfa/verify', { code })
+      await fetchUser()
     } finally {
       loading.value = false
     }
@@ -101,6 +142,8 @@ export const useAuthStore = defineStore('auth', () => {
     initialise,
     register,
     login,
+    mfaSetup,
+    mfaVerify,
     logout,
   }
 })

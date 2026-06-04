@@ -24,7 +24,19 @@
     "logout": "Sign out",
     "loginFailed": "Invalid email or password.",
     "registerFailed": "Registration failed.",
-    "registrationClosed": "Registration is closed."
+    "registrationClosed": "Registration is closed.",
+    "mfaSetupTitle": "Set up two-factor authentication",
+    "mfaVerifyTitle": "Two-factor verification",
+    "mfaSetupInstructions": "Scan the QR code with your authenticator app, then enter the 6-digit code below.",
+    "mfaVerifyInstructions": "Enter the 6-digit code from your authenticator app.",
+    "mfaManualEntry": "Manual entry",
+    "mfaCode": "Verification code",
+    "mfaCodePlaceholder": "000000",
+    "mfaCodeRequired": "Please enter the verification code.",
+    "mfaVerify": "Verify",
+    "mfaSetupFailed": "MFA setup failed.",
+    "mfaVerifyFailed": "Invalid verification code.",
+    "copy": "Copy"
   },
   "dashboard": {
     "welcome": "Welcome to Just Another Invoice",
