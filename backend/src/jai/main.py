@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -9,7 +12,28 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import jai.config as _cfg
+from jai.api.auth import router as auth_router
+from jai.api.auth import users_router
 from jai.api.health import router as health_router
+from jai.auth.secret import resolve_auth_secret
+from jai.db import get_engine, get_session_maker
+from jai.startup import check_db_migration
+
+logger = logging.getLogger("jai")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Application lifespan – runs startup checks, then yields."""
+    # -- Startup: fail-closed migration check --------------------------------
+    engine = get_engine()
+    await check_db_migration(engine)
+    # -- Startup: resolve the JWT signing secret -----------------------------
+    # Env override wins; otherwise an auto-generated secret is loaded from /
+    # persisted to the DB (first boot).  Runs after the migration check so
+    # the ``setting`` table is guaranteed to exist.
+    await resolve_auth_secret(get_session_maker())
+    yield
 
 
 def create_app() -> FastAPI:
@@ -25,6 +49,7 @@ def create_app() -> FastAPI:
         title="Just Another Invoice",
         version=settings.app_version,
         openapi_url="/api/v1/openapi.json",
+        lifespan=lifespan,
     )
 
     # -- Dev CORS -----------------------------------------------------------
@@ -42,6 +67,8 @@ def create_app() -> FastAPI:
 
     # -- API routes ---------------------------------------------------------
     app.include_router(health_router)
+    app.include_router(auth_router)
+    app.include_router(users_router)
 
     # -- Static files + SPA fallback (deployment mode) ----------------------
     if settings.static_dir is not None:

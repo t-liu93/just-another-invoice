@@ -12,24 +12,33 @@ PostgreSQL's template-database mechanism.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
-import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import (
+# The test client talks to the app over plain HTTP via ASGITransport, where
+# (unlike a browser on localhost) ``Secure`` cookies are not echoed back. Pin
+# COOKIE_SECURE=false BEFORE importing the app so the cookie transports — built
+# once at import time — never set the Secure flag. This keeps the suite
+# deterministic regardless of the developer's .env (which may set it true for
+# HTTPS deployments).  Must run before any ``jai`` import.
+os.environ["COOKIE_SECURE"] = "false"
+
+import pytest  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from jai.db import get_session
-from jai.main import app
+from jai.db import get_session  # noqa: E402
+from jai.main import app  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 

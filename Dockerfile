@@ -40,6 +40,11 @@ COPY backend/alembic.ini ./alembic.ini
 COPY --from=frontend /app/frontend/dist/ ./static/
 COPY backend/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# CLI wrapper so operators can run `docker compose run --rm app jai <cmd>`
+# (e.g. `jai set-password <email>`).  The project itself is not pip-installed
+# in this image — it runs via PYTHONPATH — so we invoke it as a module.
+RUN printf '#!/bin/sh\nexec python -m jai.cli "$@"\n' > /usr/local/bin/jai \
+    && chmod +x /usr/local/bin/jai
 EXPOSE 8000
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["uvicorn", "jai.main:app", "--host", "0.0.0.0", "--port", "8000"]

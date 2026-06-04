@@ -5,6 +5,32 @@
   },
   "health": {
     "backend": "backend: {status}",
-    "unreachable": "backend: unreachable"
+    "unreachable": "backend: unreachable",
+    "status": "Health"
+  },
+  "auth": {
+    "registerTitle": "Create your account",
+    "loginTitle": "Sign in",
+    "email": "Email",
+    "emailPlaceholder": "you{'@'}example.com",
+    "password": "Password",
+    "passwordPlaceholder": "Enter password",
+    "confirmPassword": "Confirm password",
+    "confirmPasswordPlaceholder": "Re-enter password",
+    "passwordMismatch": "Passwords do not match.",
+    "passwordTooShort": "Password must be at least 8 characters.",
+    "register": "Create account",
+    "login": "Sign in",
+    "logout": "Sign out",
+    "loginFailed": "Invalid email or password.",
+    "registerFailed": "Registration failed.",
+    "registrationClosed": "Registration is closed."
+  },
+  "dashboard": {
+    "welcome": "Welcome to Just Another Invoice",
+    "emptyHint": "Your dashboard is empty. More features coming soon!"
+  },
+  "theme": {
+    "toggle": "Toggle theme"
   }
 }

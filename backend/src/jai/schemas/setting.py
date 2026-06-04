@@ -25,6 +25,11 @@ SETTING_KEY_ONBOARDING_COMPLETED: str = "onboarding.completed"
 #: SMTP connection parameters (nested dict via ``SmtpSettings``).
 SETTING_KEY_SMTP: str = "smtp"
 
+#: Auto-generated JWT signing secret (nested via ``AuthSecretState``).  Lives
+#: at ``GLOBAL`` level; generated on first boot when no ``AUTH_SECRET`` env
+#: override is provided.  Never exposed by any API endpoint.
+SETTING_KEY_AUTH_SECRET: str = "auth.secret"
+
 
 # ---------------------------------------------------------------------------
 # Onboarding state (GLOBAL level)
@@ -39,6 +44,22 @@ class OnboardingState(BaseModel):
     """
 
     completed: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Auth secret (GLOBAL level)
+# ---------------------------------------------------------------------------
+
+
+class AuthSecretState(BaseModel):
+    """The JWT signing secret, auto-generated and persisted on first boot.
+
+    Stored at ``GLOBAL`` level with key ``SETTING_KEY_AUTH_SECRET``
+    (``"auth.secret"``).  An explicit ``AUTH_SECRET`` environment variable
+    takes precedence over this stored value (see ``jai.auth.secret``).
+    """
+
+    secret: str
 
 
 # ---------------------------------------------------------------------------

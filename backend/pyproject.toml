@@ -14,6 +14,9 @@ dependencies = [
     "alembic>=1.14.0",
     "pydantic-settings>=2.7.0",
     "uvicorn[standard]>=0.34.0",
+    "fastapi-users[sqlalchemy]>=14.0.0",
+    "pwdlib[argon2]>=0.2.0",
+    "pyotp>=2.9.0",
 ]
 
 [dependency-groups]
@@ -28,12 +31,16 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/jai"]
 
+[project.scripts]
+jai = "jai.cli:main"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC"]
+ignore = ["B008"]  # Depends() in argument defaults is idiomatic FastAPI
 
 [tool.mypy]
 strict = true

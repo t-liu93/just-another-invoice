@@ -33,7 +33,7 @@ docker compose --env-file .env --env-file .env.dev -f docker-compose.yml -f dock
 ## Ports
 
 - Production Compose: the app container listens on `8000` internally and is
-  published only as `127.0.0.1:${APP_HOST_PORT:-12000}:8000` for Nginx or another
+  published only as `127.0.0.1:${APP_HOST_PORT:-8000}:8000` for Nginx or another
   local reverse proxy. PostgreSQL is not published to the host; app containers
   reach it on the Compose network as `postgres:5432`.
 - Split development: start the backend manually on port `8000` with
@@ -55,7 +55,7 @@ cd frontend && npm install && npm run dev
 
 # Local single-container integration build
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-# App available at http://localhost:${APP_HOST_PORT:-12000}
+# App available at http://localhost:${APP_HOST_PORT:-8000}
 
 # Production deployment after an image has been published to GHCR
 docker compose up -d

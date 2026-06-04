@@ -63,6 +63,7 @@ export async function http<T>(
   const res = await fetch(url, {
     ...options,
     headers,
+    credentials: 'include',
   })
 
   if (res.status === 204) return null as T

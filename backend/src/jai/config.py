@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     # -- Application metadata -----------------------------------------------
     app_version: str = "0.1.0"
 
+    # -- Authentication / session --------------------------------------------
+    auth_secret: str = (
+        "change-me-in-production-use-at-least-32-chars"
+    )  # JWT signing key (≥32 bytes for HMAC-SHA256)
+    cookie_secure: bool = False  # True in production (HTTPS only)
+    session_ttl_days: int = 7  # Full session cookie lifetime
+    pre_auth_ttl_minutes: int = 5  # Pre-auth (post-password, pre-MFA) window
+
     @model_validator(mode="after")
     def _assemble_database_url(self) -> Settings:
         """Build ``database_url`` from parts if not explicitly provided.
