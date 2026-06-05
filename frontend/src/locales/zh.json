@@ -36,11 +36,52 @@
     "mfaVerify": "验证",
     "mfaSetupFailed": "两步验证设置失败。",
     "mfaVerifyFailed": "验证码无效。",
-    "copy": "复制"
+    "copy": "复制",
+    "forgotPassword": "忘记密码？",
+    "forgotTitle": "重置密码",
+    "forgotFailed": "出错了，请重试。",
+    "forgotSent": "如果该邮箱已注册，重置链接已发送。",
+    "sendResetLink": "发送重置链接",
+    "backToLogin": "返回登录",
+    "resetTitle": "设置新密码",
+    "resetPassword": "重置密码",
+    "resetFailed": "重置失败，链接可能已过期。",
+    "resetSuccess": "密码已重置，请使用新密码登录。",
+    "resetTokenMissing": "无效或缺失的重置令牌。",
+    "newPassword": "新密码",
+    "confirmNewPassword": "确认新密码"
   },
   "dashboard": {
     "welcome": "欢迎使用 Just Another Invoice",
-    "emptyHint": "仪表盘暂无内容，更多功能即将上线！"
+    "emptyHint": "仪表盘暂无内容，更多功能即将上线！",
+    "settings": "设置"
+  },
+  "settings": {
+    "smtp": {
+      "title": "SMTP 邮件设置",
+      "host": "主机",
+      "hostPlaceholder": "smtp.example.com",
+      "port": "端口",
+      "username": "用户名",
+      "usernamePlaceholder": "可选",
+      "password": "密码",
+      "passwordPlaceholder": "留空保持当前密码",
+      "passwordPlaceholderNew": "输入密码",
+      "passwordHint": "密码已设置，留空保持不变。",
+      "clearPassword": "清除已保存密码",
+      "fromEmail": "发件邮箱",
+      "fromName": "发件人名称",
+      "fromNamePlaceholder": "可选显示名称",
+      "security": "安全",
+      "useTls": "STARTTLS",
+      "useSsl": "SSL/TLS",
+      "save": "保存",
+      "saveSuccess": "SMTP 设置已保存。",
+      "saveFailed": "保存 SMTP 设置失败。",
+      "testEmail": "发送测试邮件",
+      "testSuccess": "测试邮件已发送。",
+      "testFailed": "发送测试邮件失败。"
+    }
   },
   "theme": {
     "toggle": "切换主题"

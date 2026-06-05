@@ -11,6 +11,7 @@
     "codegen": "node scripts/codegen.mjs"
   },
   "dependencies": {
+    "@vicons/ionicons5": "^0.13.0",
     "echarts": "^5.6.0",
     "naive-ui": "^2.44.1",
     "pinia": "^3.0.4",

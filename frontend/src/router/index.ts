@@ -19,9 +19,27 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true },
   },
   {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: () => import('../views/ForgotPassword.vue'),
+    meta: { public: true },
+  },
+  {
+    path: '/reset-password',
+    name: 'reset-password',
+    component: () => import('../views/ResetPassword.vue'),
+    meta: { public: true },
+  },
+  {
     path: '/dashboard',
     name: 'dashboard',
     component: () => import('../views/Dashboard.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/settings/smtp',
+    name: 'smtp-settings',
+    component: () => import('../views/settings/SmtpSettings.vue'),
     meta: { requiresAuth: true },
   },
   {

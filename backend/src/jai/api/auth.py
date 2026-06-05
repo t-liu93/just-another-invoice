@@ -1,21 +1,32 @@
-"""Authentication API routes – register, login, logout, bootstrap, /me, MFA.
+"""Authentication API routes – register, login, logout, bootstrap, /me, MFA,
+forgot-password, reset-password.
 
 The login flow is custom (JSON body instead of OAuth2 form) while leveraging
 fastapi-users' ``JWTStrategy`` for token creation and ``CookieTransport``
 parameters for cookie management.
 
-Step 3 (this file):
+Step 3:
   - Login: password correct → issue pre-auth cookie → ``{next: "mfa_setup"|"mfa_verify"}``.
   - MFA setup: generate pending TOTP secret, return to client.
   - MFA verify: validate TOTP code → upgrade to full session cookie.
     First binding also persists ``totp_secret`` + ``mfa_enabled`` +
     ``onboarding.completed``.
+
+Step 4:
+  - Forgot-password: ``POST /auth/forgot-password`` → always 202 (anti-enumeration).
+    Sends a reset-token email when the user exists and SMTP is configured.
+  - Reset-password: ``POST /auth/reset-password`` → validates the token and
+    sets the new password.
 """
 
 from __future__ import annotations
 
+import logging
+import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, cast
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi_users.authentication.strategy.jwt import JWTStrategy
 from fastapi_users.authentication.transport.cookie import CookieTransport
@@ -29,14 +40,19 @@ from jai.auth.deps import (
     is_onboarding_completed,
     is_registration_open,
 )
+from jai.auth.secret import get_auth_secret
 from jai.auth.user_manager import UserManager, get_user_manager, verify_password
+from jai.config import get_settings
 from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.user import User
 from jai.schemas.setting import SETTING_KEY_ONBOARDING_COMPLETED, OnboardingState
 from jai.schemas.user import UserCreate, UserRead
+from jai.services import email as email_svc
 from jai.services import mfa as mfa_svc
 from jai.services.settings import set_setting
+
+logger = logging.getLogger("jai.auth")
 
 # ---------------------------------------------------------------------------
 # Request / response schemas
@@ -91,6 +107,19 @@ class MfaVerifyRequest(BaseModel):
     """Body for ``POST /auth/mfa/verify``."""
 
     code: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Body for ``POST /auth/forgot-password``."""
+
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Body for ``POST /auth/reset-password``."""
+
+    token: str
+    password: str
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +458,136 @@ async def logout(response: Response) -> None:
     """
     _clear_session_cookie(response)
     _clear_pre_auth_cookie(response)
+
+
+# ---------------------------------------------------------------------------
+# Password reset (step 4)
+# ---------------------------------------------------------------------------
+
+#: JWT audience for password-reset tokens.
+_RESET_TOKEN_AUDIENCE = "jai:reset-password"
+
+
+def _generate_reset_token(user_id: str) -> str:
+    """Create a signed JWT for password reset (short-lived)."""
+    settings = get_settings()
+    expires_at = datetime.now(UTC) + timedelta(
+        minutes=settings.reset_password_ttl_minutes
+    )
+    payload = {
+        "sub": user_id,
+        "aud": _RESET_TOKEN_AUDIENCE,
+        "exp": expires_at,
+        "iat": datetime.now(UTC),
+    }
+    return jwt.encode(payload, get_auth_secret(), algorithm="HS256")
+
+
+def _verify_reset_token(token: str) -> str | None:
+    """Validate a password-reset JWT and return the user ID (or ``None``)."""
+    try:
+        payload = jwt.decode(
+            token,
+            get_auth_secret(),
+            algorithms=["HS256"],
+            audience=_RESET_TOKEN_AUDIENCE,
+        )
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+    user_id: str | None = payload.get("sub")
+    return user_id
+
+
+@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    session: AsyncSession = Depends(get_session),
+    user_manager: UserManager = Depends(get_user_manager),
+) -> dict[str, str]:
+    """Request a password reset.
+
+    **Always returns 202** to prevent email-enumeration.  When the user exists
+    and SMTP is configured, a reset-token email is sent in the background.
+    """
+    try:
+        user = await user_manager.get_by_email(str(body.email))
+    except Exception:
+        # User does not exist – still return 202.
+        return {"status": "accepted"}
+
+    if not user or not user.is_active:
+        return {"status": "accepted"}
+
+    # Everything below must be wrapped so that SMTP config errors or send
+    # failures never produce a non-202 response (anti-enumeration guarantee).
+    try:
+        if not await email_svc.is_smtp_configured(session):
+            logger.warning(
+                "SMTP not configured – password-reset email skipped for %s",
+                body.email,
+            )
+            return {"status": "accepted"}
+
+        token = _generate_reset_token(str(user.id))
+        # Build an absolute reset URL for the frontend.
+        # Email clients cannot resolve relative URLs, so ``base_url`` must be set.
+        settings = get_settings()
+        reset_url = f"{settings.base_url.rstrip('/')}/reset-password?token={token}"
+
+        await email_svc.send_password_reset_email(
+            session, user.email, reset_url
+        )
+    except Exception:
+        logger.exception(
+            "Unexpected error during password-reset for %s – still returning 202",
+            user.email,
+        )
+
+    return {"status": "accepted"}
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(
+    body: ResetPasswordRequest,
+    session: AsyncSession = Depends(get_session),
+    user_manager: UserManager = Depends(get_user_manager),
+) -> None:
+    """Reset a user's password using a valid reset token.
+
+    Returns 204 on success, 400 on invalid/expired token or password validation
+    failure.
+    """
+    user_id = _verify_reset_token(body.token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token.",
+        )
+
+    try:
+        user = await user_manager.get(uuid.UUID(user_id))
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token.",
+        ) from None
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token.",
+        )
+
+    try:
+        await user_manager._update(user, {"password": body.password})
+    except Exception as exc:
+        detail = getattr(exc, "reason", None) or str(exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=detail,
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

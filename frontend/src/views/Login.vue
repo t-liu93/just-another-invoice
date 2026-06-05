@@ -3,13 +3,11 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
-import { useTheme } from '../composables/useTheme'
 import QRCode from 'qrcode'
 
 const router = useRouter()
 const auth = useAuthStore()
 const { t } = useI18n()
-const { toggle } = useTheme()
 
 type LoginStep = 'password' | 'mfa_setup' | 'mfa_verify'
 
@@ -128,6 +126,12 @@ function copyText(text: string) {
         <n-button type="primary" block :loading="loading" attr-type="submit">
           {{ t('auth.login') }}
         </n-button>
+
+        <div style="text-align: center; margin-top: 12px">
+          <n-button text @click="router.push('/forgot-password')">
+            {{ t('auth.forgotPassword') }}
+          </n-button>
+        </div>
       </n-form>
 
       <!-- Step 2a: MFA Setup (first-time binding) -->
@@ -214,12 +218,6 @@ function copyText(text: string) {
           {{ t('auth.mfaVerify') }}
         </n-button>
       </n-form>
-
-      <div class="auth-footer">
-        <n-button text @click="toggle">
-          {{ t('theme.toggle') }}
-        </n-button>
-      </div>
     </div>
   </div>
 </template>

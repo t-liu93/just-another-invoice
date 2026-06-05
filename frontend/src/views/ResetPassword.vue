@@ -1,41 +1,45 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { post } from '../api/http'
 
 const router = useRouter()
-const auth = useAuthStore()
+const route = useRoute()
 const { t } = useI18n()
 
-const email = ref('')
+const token = (route.query.token as string) || ''
 const password = ref('')
 const confirmPassword = ref('')
-const errorMsg = ref('')
 const loading = ref(false)
+const errorMsg = ref('')
+const success = ref(false)
 
-async function handleRegister() {
+async function handleSubmit() {
   errorMsg.value = ''
+  if (password.value.length < 8) {
+    errorMsg.value = t('auth.passwordTooShort')
+    return
+  }
   if (password.value !== confirmPassword.value) {
     errorMsg.value = t('auth.passwordMismatch')
     return
   }
-  if (password.value.length < 8) {
-    errorMsg.value = t('auth.passwordTooShort')
+  if (!token) {
+    errorMsg.value = t('auth.resetTokenMissing')
     return
   }
 
   loading.value = true
   try {
-    await auth.register(email.value, password.value)
-    router.push('/login')
+    await post('/api/v1/auth/reset-password', {
+      token,
+      password: password.value,
+    })
+    success.value = true
   } catch (e: unknown) {
-    const err = e as { status?: number; message?: string }
-    if (err.status === 403) {
-      errorMsg.value = t('auth.registrationClosed')
-    } else {
-      errorMsg.value = err.message || t('auth.registerFailed')
-    }
+    const err = e as { message?: string }
+    errorMsg.value = err.message || t('auth.resetFailed')
   } finally {
     loading.value = false
   }
@@ -47,37 +51,32 @@ async function handleRegister() {
     <div class="auth-card">
       <div class="auth-header">
         <h1>{{ t('app.title') }}</h1>
-        <p>{{ t('auth.registerTitle') }}</p>
+        <p>{{ t('auth.resetTitle') }}</p>
       </div>
 
-      <n-form @submit.prevent="handleRegister">
-        <n-form-item :label="t('auth.email')">
-          <n-input
-            v-model:value="email"
-            type="text"
-            inputmode="email"
-            :input-props="{ autocomplete: 'email', name: 'email' }"
-            :placeholder="t('auth.emailPlaceholder')"
-          />
-        </n-form-item>
+      <n-alert v-if="success" type="success" style="margin-bottom: 16px">
+        {{ t('auth.resetSuccess') }}
+      </n-alert>
 
-        <n-form-item :label="t('auth.password')">
+      <n-form v-if="!success" @submit.prevent="handleSubmit">
+        <n-form-item :label="t('auth.newPassword')">
           <n-input
             v-model:value="password"
             type="password"
             show-password-on="click"
-            :input-props="{ autocomplete: 'new-password', name: 'new-password' }"
+            :input-props="{ autocomplete: 'new-password', name: 'password' }"
             :placeholder="t('auth.passwordPlaceholder')"
           />
         </n-form-item>
 
-        <n-form-item :label="t('auth.confirmPassword')">
+        <n-form-item :label="t('auth.confirmNewPassword')">
           <n-input
             v-model:value="confirmPassword"
             type="password"
             show-password-on="click"
-            :input-props="{ autocomplete: 'new-password', name: 'confirm-password' }"
+            :input-props="{ autocomplete: 'new-password', name: 'confirmPassword' }"
             :placeholder="t('auth.confirmPasswordPlaceholder')"
+            @keyup.enter="handleSubmit"
           />
         </n-form-item>
 
@@ -86,9 +85,15 @@ async function handleRegister() {
         </n-alert>
 
         <n-button type="primary" block :loading="loading" attr-type="submit">
-          {{ t('auth.register') }}
+          {{ t('auth.resetPassword') }}
         </n-button>
       </n-form>
+
+      <div style="text-align: center; margin-top: 16px">
+        <n-button text @click="router.push('/login')">
+          {{ t('auth.backToLogin') }}
+        </n-button>
+      </div>
     </div>
   </div>
 </template>

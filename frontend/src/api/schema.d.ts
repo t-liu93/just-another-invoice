@@ -169,6 +169,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/forgot-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Forgot Password
+         * @description Request a password reset.
+         *
+         *     **Always returns 202** to prevent email-enumeration.  When the user exists
+         *     and SMTP is configured, a reset-token email is sent in the background.
+         */
+        post: operations["forgot_password_api_v1_auth_forgot_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Password
+         * @description Reset a user's password using a valid reset token.
+         *
+         *     Returns 204 on success, 400 on invalid/expired token or password validation
+         *     failure.
+         */
+        post: operations["reset_password_api_v1_auth_reset_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me": {
         parameters: {
             query?: never;
@@ -189,6 +235,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/smtp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Smtp Settings
+         * @description Return the current SMTP settings (password desensitised).
+         */
+        get: operations["get_smtp_settings_api_v1_settings_smtp_get"];
+        /**
+         * Update Smtp Settings
+         * @description Update SMTP settings. If ``password`` is ``None``, the existing password is kept.
+         */
+        put: operations["update_smtp_settings_api_v1_settings_smtp_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/smtp/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Smtp Settings
+         * @description Send a test email to the owner's address using current SMTP config.
+         *
+         *     Returns ``{"status": "sent"}`` on success or raises 400 with error detail.
+         */
+        post: operations["test_smtp_settings_api_v1_settings_smtp_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -202,6 +294,17 @@ export interface components {
             registration_open: boolean;
             /** Onboarding Completed */
             onboarding_completed: boolean;
+        };
+        /**
+         * ForgotPasswordRequest
+         * @description Body for ``POST /auth/forgot-password``.
+         */
+        ForgotPasswordRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -280,6 +383,102 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /**
+         * ResetPasswordRequest
+         * @description Body for ``POST /auth/reset-password``.
+         */
+        ResetPasswordRequest: {
+            /** Token */
+            token: string;
+            /** Password */
+            password: string;
+        };
+        /**
+         * SmtpSettingsRead
+         * @description SMTP settings as returned by the API – password is desensitised.
+         */
+        SmtpSettingsRead: {
+            /**
+             * Host
+             * @default
+             */
+            host?: string;
+            /**
+             * Port
+             * @default 587
+             */
+            port?: number;
+            /**
+             * Username
+             * @default
+             */
+            username?: string;
+            /**
+             * Password Set
+             * @default false
+             */
+            password_set?: boolean;
+            /**
+             * From Email
+             * @default
+             */
+            from_email?: string;
+            /**
+             * From Name
+             * @default
+             */
+            from_name?: string;
+            /**
+             * Use Tls
+             * @default true
+             */
+            use_tls?: boolean;
+            /**
+             * Use Ssl
+             * @default false
+             */
+            use_ssl?: boolean;
+        };
+        /**
+         * SmtpSettingsUpdate
+         * @description Body for ``PUT /settings/smtp``.
+         */
+        SmtpSettingsUpdate: {
+            /** Host */
+            host: string;
+            /**
+             * Port
+             * @default 587
+             */
+            port?: number;
+            /**
+             * Username
+             * @default
+             */
+            username?: string;
+            /** Password */
+            password?: string | null;
+            /**
+             * From Email
+             * Format: email
+             */
+            from_email: string;
+            /**
+             * From Name
+             * @default
+             */
+            from_name?: string;
+            /**
+             * Use Tls
+             * @default true
+             */
+            use_tls?: boolean;
+            /**
+             * Use Ssl
+             * @default false
+             */
+            use_ssl?: boolean;
         };
         /**
          * UserRead
@@ -521,6 +720,72 @@ export interface operations {
             };
         };
     };
+    forgot_password_api_v1_auth_forgot_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForgotPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_password_api_v1_auth_reset_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     me_api_v1_users_me_get: {
         parameters: {
             query?: never;
@@ -537,6 +802,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserRead"];
+                };
+            };
+        };
+    };
+    get_smtp_settings_api_v1_settings_smtp_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmtpSettingsRead"];
+                };
+            };
+        };
+    };
+    update_smtp_settings_api_v1_settings_smtp_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmtpSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmtpSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_smtp_settings_api_v1_settings_smtp_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
         };

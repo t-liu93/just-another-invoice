@@ -75,11 +75,24 @@ class SmtpSettings(BaseModel):
     ``SmtpSettingsRead`` in the API layer, step 4).
     """
 
-    host: str
+    host: str = ""
     port: int = 587
     username: str = ""
     password: str = ""
-    from_email: EmailStr
+    from_email: EmailStr = ""
+    from_name: str = ""
+    use_tls: bool = True
+    use_ssl: bool = False
+
+
+class SmtpSettingsRead(BaseModel):
+    """SMTP settings as returned by the API – password is desensitised."""
+
+    host: str = ""
+    port: int = 587
+    username: str = ""
+    password_set: bool = False
+    from_email: str = ""
     from_name: str = ""
     use_tls: bool = True
     use_ssl: bool = False

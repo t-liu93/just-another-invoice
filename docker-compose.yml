@@ -35,6 +35,9 @@ services:
       # (unique per deployment).  Only set it here to override with an
       # externally managed secret.
       AUTH_SECRET: ${AUTH_SECRET:-}
+      # Public-facing URL used to build absolute links in emails (e.g. password
+      # reset).  Must be set to the real domain in production.
+      BASE_URL: ${BASE_URL:-http://localhost:8000}
     ports:
       - "127.0.0.1:${APP_HOST_PORT:-8000}:8000"
     healthcheck:

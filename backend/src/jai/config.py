@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     # -- Application metadata -----------------------------------------------
     app_version: str = "0.1.0"
 
+    # -- Base URL (for generating absolute links in emails) -----------------
+    # Must be set in production (e.g. ``https://invoice.example.com``).
+    # Defaults to ``http://localhost:8000`` for local dev.
+    base_url: str = "http://localhost:8000"
+
     # -- Authentication / session --------------------------------------------
     auth_secret: str = (
         "change-me-in-production-use-at-least-32-chars"
@@ -80,6 +85,18 @@ class Settings(BaseSettings):
     cookie_secure: bool = False  # True in production (HTTPS only)
     session_ttl_days: int = 7  # Full session cookie lifetime
     pre_auth_ttl_minutes: int = 5  # Pre-auth (post-password, pre-MFA) window
+    reset_password_ttl_minutes: int = 60  # Password-reset token lifetime
+
+    # -- SMTP env fallback (step 4) -----------------------------------------
+    # These are used as fallback when no SMTP settings exist in the DB.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = ""
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
 
     @model_validator(mode="after")
     def _assemble_database_url(self) -> Settings:

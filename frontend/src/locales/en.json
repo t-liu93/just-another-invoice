@@ -36,11 +36,52 @@
     "mfaVerify": "Verify",
     "mfaSetupFailed": "MFA setup failed.",
     "mfaVerifyFailed": "Invalid verification code.",
-    "copy": "Copy"
+    "copy": "Copy",
+    "forgotPassword": "Forgot password?",
+    "forgotTitle": "Reset your password",
+    "forgotFailed": "Something went wrong. Please try again.",
+    "forgotSent": "If an account exists with this email, a reset link has been sent.",
+    "sendResetLink": "Send reset link",
+    "backToLogin": "Back to login",
+    "resetTitle": "Set new password",
+    "resetPassword": "Reset password",
+    "resetFailed": "Failed to reset password. The link may have expired.",
+    "resetSuccess": "Password has been reset. You can now sign in with your new password.",
+    "resetTokenMissing": "Invalid or missing reset token.",
+    "newPassword": "New password",
+    "confirmNewPassword": "Confirm new password"
   },
   "dashboard": {
     "welcome": "Welcome to Just Another Invoice",
-    "emptyHint": "Your dashboard is empty. More features coming soon!"
+    "emptyHint": "Your dashboard is empty. More features coming soon!",
+    "settings": "Settings"
+  },
+  "settings": {
+    "smtp": {
+      "title": "SMTP Settings",
+      "host": "Host",
+      "hostPlaceholder": "smtp.example.com",
+      "port": "Port",
+      "username": "Username",
+      "usernamePlaceholder": "Optional",
+      "password": "Password",
+      "passwordPlaceholder": "Leave blank to keep current",
+      "passwordPlaceholderNew": "Enter password",
+      "passwordHint": "Password is already set. Leave blank to keep it.",
+      "clearPassword": "Clear saved password",
+      "fromEmail": "From email",
+      "fromName": "From name",
+      "fromNamePlaceholder": "Optional display name",
+      "security": "Security",
+      "useTls": "STARTTLS",
+      "useSsl": "SSL/TLS",
+      "save": "Save",
+      "saveSuccess": "SMTP settings saved.",
+      "saveFailed": "Failed to save SMTP settings.",
+      "testEmail": "Send test email",
+      "testSuccess": "Test email sent successfully.",
+      "testFailed": "Failed to send test email."
+    }
   },
   "theme": {
     "toggle": "Toggle theme"

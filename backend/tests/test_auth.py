@@ -232,6 +232,7 @@ class TestPendingSecretStore:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestBootstrap:
     """Tests for ``GET /api/v1/auth/bootstrap``."""
 
@@ -263,6 +264,7 @@ class TestBootstrap:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestRegister:
     """Tests for ``POST /api/v1/auth/register``."""
 
@@ -351,6 +353,7 @@ class TestRegister:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestLogin:
     """Tests for ``POST /api/v1/auth/login`` (step 3: password → pre-auth)."""
 
@@ -419,6 +422,7 @@ class TestLogin:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestMfaSetup:
     """Tests for ``POST /api/v1/auth/mfa/setup``."""
 
@@ -471,6 +475,7 @@ class TestMfaSetup:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestMfaVerify:
     """Tests for ``POST /api/v1/auth/mfa/verify``."""
 
@@ -607,6 +612,7 @@ class TestMfaVerify:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestPreAuthIsolation:
     """Pre-auth cookie must not grant access to protected endpoints."""
 
@@ -685,6 +691,7 @@ class TestPreAuthIsolation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestTokenAudienceIsolation:
     """Regression tests for Finding 1: pre-auth / session tokens must not be
     interchangeable.  Both directions must fail even though they share the
@@ -731,6 +738,7 @@ class TestTokenAudienceIsolation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestMfaAwareDependency:
     """Regression tests for Finding 2: protected endpoints reject sessions
     where MFA is not fully configured.
@@ -805,6 +813,7 @@ class TestMfaAwareDependency:
         )
 
 
+@pytest.mark.integration
 class TestLogout:
     """Tests for ``POST /api/v1/auth/logout``."""
 
@@ -840,6 +849,7 @@ class TestLogout:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestUsersMe:
     """Tests for ``GET /api/v1/users/me``."""
 
@@ -882,6 +892,7 @@ class TestUsersMe:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestResetMfa:
     """Tests for the MFA reset behaviour (what the CLI does)."""
 
@@ -937,6 +948,7 @@ class TestResetMfa:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestAuthSecret:
     """Tests for ``jai.auth.secret.resolve_auth_secret``.
 
