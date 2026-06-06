@@ -57,6 +57,29 @@
     "settings": "设置"
   },
   "settings": {
+    "company": {
+      "title": "公司档案",
+      "name": "公司名称",
+      "namePlaceholder": "您的公司名称",
+      "vatId": "增值税号 (VAT)",
+      "cocNumber": "商会注册号 (KvK)",
+      "cocNumberPlaceholder": "12345678",
+      "email": "公司邮箱",
+      "phone": "电话",
+      "website": "网站",
+      "addressSection": "地址",
+      "addressLine1": "街道地址",
+      "addressLine1Placeholder": "Keizersgracht 1",
+      "addressLine2": "地址行 2",
+      "postalCode": "邮政编码",
+      "city": "城市",
+      "countryCode": "国家代码",
+      "financialSection": "财务",
+      "baseCurrency": "本位币",
+      "save": "保存",
+      "saveSuccess": "公司档案已保存。",
+      "saveFailed": "保存公司档案失败。"
+    },
     "smtp": {
       "title": "SMTP 邮件设置",
       "host": "主机",

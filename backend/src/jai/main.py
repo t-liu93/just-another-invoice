@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 import jai.config as _cfg
 from jai.api.auth import router as auth_router
 from jai.api.auth import users_router
+from jai.api.company import router as company_router
 from jai.api.health import router as health_router
 from jai.api.settings import router as settings_router
 from jai.auth.secret import resolve_auth_secret
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(users_router)
+    app.include_router(company_router)
     app.include_router(settings_router)
 
     # -- Static files + SPA fallback (deployment mode) ----------------------

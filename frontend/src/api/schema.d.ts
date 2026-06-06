@@ -235,6 +235,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/company": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Company
+         * @description Return the company profile.
+         *
+         *     Returns ``204 No Content`` if the company has not been created yet.
+         */
+        get: operations["read_company_api_v1_company_get"];
+        /**
+         * Write Company
+         * @description Create or update the singleton company profile.
+         *
+         *     On first creation, also:
+         *       - Set ``onboarding.completed = true``.
+         *       - Link the owner's ``company_id`` to the new company.
+         */
+        put: operations["write_company_api_v1_company_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/smtp": {
         parameters: {
             query?: never;
@@ -294,6 +324,88 @@ export interface components {
             registration_open: boolean;
             /** Onboarding Completed */
             onboarding_completed: boolean;
+        };
+        /**
+         * CompanyRead
+         * @description Response body for ``GET /api/v1/company`` and ``PUT``.
+         */
+        CompanyRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Vat Id */
+            vat_id?: string | null;
+            /** Coc Number */
+            coc_number?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Website */
+            website?: string | null;
+            /** Address Line1 */
+            address_line1?: string | null;
+            /** Address Line2 */
+            address_line2?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Country Code */
+            country_code?: string | null;
+            /** Base Currency */
+            base_currency: string;
+            /**
+             * Has Logo
+             * @default false
+             */
+            has_logo?: boolean;
+            /** Logo Url */
+            logo_url?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * CompanyWrite
+         * @description Request body for ``PUT /api/v1/company``.
+         */
+        CompanyWrite: {
+            /** Name */
+            name: string;
+            /** Vat Id */
+            vat_id?: string | null;
+            /** Coc Number */
+            coc_number?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Website */
+            website?: string | null;
+            /** Address Line1 */
+            address_line1?: string | null;
+            /** Address Line2 */
+            address_line2?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Country Code */
+            country_code?: string | null;
+            /** Base Currency */
+            base_currency: string;
         };
         /**
          * ForgotPasswordRequest
@@ -802,6 +914,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserRead"];
+                };
+            };
+        };
+    };
+    read_company_api_v1_company_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyRead"];
+                };
+            };
+            /** @description No company profile yet */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    write_company_api_v1_company_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

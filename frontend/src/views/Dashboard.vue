@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useTheme } from '../composables/useTheme'
 import { get } from '../api/http'
 import type { components } from '../api/schema'
-import { SunnyOutline, MoonOutline, GlobeOutline, SettingsOutline, LogOutOutline } from '@vicons/ionicons5'
+import { SunnyOutline, MoonOutline, GlobeOutline, SettingsOutline, BusinessOutline, LogOutOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 
 type HealthResponse = components['schemas']['HealthResponse']
@@ -49,6 +49,11 @@ async function handleLogout() {
           <h2>{{ t('app.title') }}</h2>
         </div>
         <div class="header-right">
+          <n-button quaternary size="small" @click="router.push('/settings/company')">
+            <template #icon>
+              <n-icon><BusinessOutline /></n-icon>
+            </template>
+          </n-button>
           <n-button quaternary size="small" @click="router.push('/settings/smtp')">
             <template #icon>
               <n-icon><SettingsOutline /></n-icon>

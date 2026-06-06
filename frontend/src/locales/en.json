@@ -57,6 +57,29 @@
     "settings": "Settings"
   },
   "settings": {
+    "company": {
+      "title": "Company Profile",
+      "name": "Company name",
+      "namePlaceholder": "Your business name",
+      "vatId": "VAT number",
+      "cocNumber": "Chamber of Commerce (KvK)",
+      "cocNumberPlaceholder": "12345678",
+      "email": "Business email",
+      "phone": "Phone",
+      "website": "Website",
+      "addressSection": "Address",
+      "addressLine1": "Street address",
+      "addressLine1Placeholder": "Keizersgracht 1",
+      "addressLine2": "Address line 2",
+      "postalCode": "Postal code",
+      "city": "City",
+      "countryCode": "Country code",
+      "financialSection": "Financial",
+      "baseCurrency": "Base currency",
+      "save": "Save",
+      "saveSuccess": "Company profile saved.",
+      "saveFailed": "Failed to save company profile."
+    },
     "smtp": {
       "title": "SMTP Settings",
       "host": "Host",

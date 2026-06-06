@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
-from sqlalchemy import Boolean, DateTime, String, Text, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,12 +26,12 @@ from jai.db import Base
 class User(SQLAlchemyBaseUserTableUUID, Base):
     """Application user with MFA and multi-tenant reserved columns."""
 
-    # -- Reserved for M2: company relationship + RBAC -----------------------
+    # -- Company FK (M2: company table landed) + RBAC -----------------------
     company_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
-        comment="FK to company table (added in M2).",
     )
     role: Mapped[str] = mapped_column(
         String(32),
