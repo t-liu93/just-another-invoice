@@ -78,7 +78,15 @@
       "baseCurrency": "本位币",
       "save": "保存",
       "saveSuccess": "公司档案已保存。",
-      "saveFailed": "保存公司档案失败。"
+      "saveFailed": "保存公司档案失败。",
+      "logoSection": "Logo",
+      "noLogo": "无 Logo",
+      "uploadLogo": "上传 Logo",
+      "replaceLogo": "替换",
+      "deleteLogo": "删除",
+      "logoUploadFailed": "上传 Logo 失败。",
+      "logoDeleteFailed": "删除 Logo 失败。",
+      "identitySection": "身份信息"
     },
     "smtp": {
       "title": "SMTP 邮件设置",

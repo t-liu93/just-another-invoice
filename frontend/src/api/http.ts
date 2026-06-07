@@ -31,7 +31,14 @@ function humanMessage(status: number, body: unknown): string {
     if ('detail' in body) {
       const d = (body as { detail: unknown }).detail
       if (Array.isArray(d)) {
-        return d.map((e: unknown) => String(e)).join('; ')
+        return d
+          .map((e: unknown) => {
+            if (typeof e === 'object' && e !== null && 'msg' in e) {
+              return String((e as { msg: string }).msg)
+            }
+            return String(e)
+          })
+          .join('; ')
       }
       if (typeof d === 'object' && d !== null && 'reason' in d) {
         return String((d as { reason: string }).reason)
@@ -56,7 +63,11 @@ export async function http<T>(
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> | undefined),
   }
-  if (options.body !== undefined && !headers['Content-Type']) {
+  if (
+    options.body !== undefined &&
+    !headers['Content-Type'] &&
+    !(options.body instanceof FormData)
+  ) {
     headers['Content-Type'] = 'application/json'
   }
 
@@ -109,5 +120,20 @@ export function postForm<T>(url: string, data: Record<string, string>): Promise<
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(data).toString(),
+  })
+}
+
+/** PUT with multipart/form-data (e.g. file upload). */
+export function uploadFile<T>(
+  url: string,
+  file: File,
+  fieldName: string = 'file',
+): Promise<T> {
+  const formData = new FormData()
+  formData.append(fieldName, file)
+  // Do NOT set Content-Type — the browser sets it with the multipart boundary.
+  return http<T>(url, {
+    method: 'PUT',
+    body: formData,
   })
 }

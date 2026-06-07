@@ -99,3 +99,11 @@ class CompanyRead(BaseModel):
     logo_url: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class CompanyLogoRead(BaseModel):
+    """Response body for ``PUT /api/v1/company/logo``."""
+
+    logo_url: str
+    mime_type: str
+    byte_size: int

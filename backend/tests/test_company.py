@@ -156,7 +156,7 @@ class TestCompanyReadMapping:
         orm = _make_company_orm(logo_id=logo_id)
         read = company_to_read(orm)
         assert read.has_logo is True
-        assert read.logo_url == "/api/v1/company/logo"
+        assert read.logo_url.startswith("/api/v1/company/logo?v=")
 
     def test_logo_fields_when_absent(self) -> None:
         """has_logo=False and logo_url=None when logo_id is None."""

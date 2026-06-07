@@ -41,6 +41,12 @@ async def get_company(session: AsyncSession) -> Company | None:
 
 def company_to_read(company: Company) -> CompanyRead:
     """Convert a ``Company`` ORM instance to a ``CompanyRead`` schema."""
+    logo_url: str | None = None
+    if company.logo_id is not None:
+        # Cache-bust with logo_id hex prefix (changes on every replacement
+        # because each upload creates a new BinaryAsset with a fresh UUID).
+        version = company.logo_id.hex[:16]
+        logo_url = f"/api/v1/company/logo?v={version}"
     return CompanyRead(
         id=company.id,
         name=company.name,
@@ -56,7 +62,7 @@ def company_to_read(company: Company) -> CompanyRead:
         country_code=company.country_code,
         base_currency=company.base_currency,
         has_logo=company.logo_id is not None,
-        logo_url="/api/v1/company/logo" if company.logo_id is not None else None,
+        logo_url=logo_url,
         created_at=company.created_at,
         updated_at=company.updated_at,
     )

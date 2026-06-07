@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text, func, text
+from sqlalchemy import DateTime, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -60,11 +60,12 @@ class Company(Base):
         comment="ISO 4217 3-letter currency code.",
     )
 
-    # -- Logo (FK to binary_asset, added in step 2) ----------------------------
+    # -- Logo (FK to binary_asset) ----------------------------------------------
     logo_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey("binary_asset.id", ondelete="SET NULL"),
         nullable=True,
-        comment="FK to binary_asset.id (ON DELETE SET NULL, added in step 2).",
+        comment="FK to binary_asset.id (ON DELETE SET NULL).",
     )
 
     # -- Timestamps -------------------------------------------------------------

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useCompanyStore } from '../../stores/company'
@@ -7,7 +7,6 @@ import { useI18n } from 'vue-i18n'
 import { useTheme } from '../../composables/useTheme'
 import { SunnyOutline, MoonOutline, GlobeOutline, LogOutOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import { computed } from 'vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -42,7 +41,13 @@ const saving = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
 
+// Logo state
+const uploadingLogo = ref(false)
+const logoError = ref('')
+
 const loadError = computed(() => companyStore.error)
+const hasLogo = computed(() => companyStore.company?.has_logo ?? false)
+const logoUrl = computed(() => companyStore.company?.logo_url ?? null)
 
 onMounted(async () => {
   loading.value = true
@@ -100,6 +105,36 @@ async function handleSave() {
   }
 }
 
+async function handleLogoUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.files?.length) return
+  const file = input.files[0]
+
+  uploadingLogo.value = true
+  logoError.value = ''
+  try {
+    await companyStore.uploadLogo(file)
+  } catch {
+    logoError.value = companyStore.error || t('settings.company.logoUploadFailed')
+  } finally {
+    uploadingLogo.value = false
+    // Reset input so the same file can be re-selected.
+    input.value = ''
+  }
+}
+
+async function handleLogoDelete() {
+  uploadingLogo.value = true
+  logoError.value = ''
+  try {
+    await companyStore.deleteLogo()
+  } catch {
+    logoError.value = companyStore.error || t('settings.company.logoDeleteFailed')
+  } finally {
+    uploadingLogo.value = false
+  }
+}
+
 async function handleLogout() {
   await auth.logout()
   router.push('/login')
@@ -150,6 +185,63 @@ async function handleLogout() {
               <n-alert v-if="loadError" type="error" style="margin-bottom: 16px">
                 {{ loadError }}
               </n-alert>
+
+              <!-- Logo section -->
+              <n-divider>{{ t('settings.company.logoSection') }}</n-divider>
+              <div class="logo-section">
+                <div class="logo-preview">
+                  <img
+                    v-if="hasLogo && logoUrl"
+                    :src="logoUrl"
+                    alt="Company Logo"
+                    class="logo-image"
+                  />
+                  <div v-else class="logo-placeholder">
+                    {{ t('settings.company.noLogo') }}
+                  </div>
+                </div>
+                <div class="logo-actions">
+                  <n-button
+                    type="primary"
+                    size="small"
+                    :loading="uploadingLogo"
+                    @click="($refs.logoInput as HTMLInputElement | undefined)?.click()"
+                  >
+                    {{ hasLogo ? t('settings.company.replaceLogo') : t('settings.company.uploadLogo') }}
+                  </n-button>
+                  <n-button
+                    v-if="hasLogo"
+                    type="error"
+                    size="small"
+                    :loading="uploadingLogo"
+                    @click="handleLogoDelete"
+                  >
+                    {{ t('settings.company.deleteLogo') }}
+                  </n-button>
+                  <input
+                    ref="logoInput"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    style="display: none"
+                    @change="handleLogoUpload"
+                  />
+                  <n-text depth="3" style="font-size: 12px">
+                    PNG, JPEG, WebP, SVG · max 512 KB
+                  </n-text>
+                </div>
+              </div>
+              <n-alert
+                v-if="logoError"
+                type="error"
+                style="margin-top: 12px"
+                closable
+                @close="logoError = ''"
+              >
+                {{ logoError }}
+              </n-alert>
+
+              <n-divider>{{ t('settings.company.identitySection') }}</n-divider>
+
               <n-form label-placement="left" label-width="140" :disabled="!!loadError" @submit.prevent="handleSave">
                 <n-form-item :label="t('settings.company.name')" required>
                   <n-input v-model:value="name" :placeholder="t('settings.company.namePlaceholder')" />
@@ -252,5 +344,44 @@ export default {
   max-width: 640px;
   margin: 24px auto;
   padding: 0 24px;
+}
+
+.logo-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.logo-preview {
+  width: 80px;
+  height: 80px;
+  border: 1px dashed var(--n-border-color);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--n-color);
+}
+
+.logo-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.logo-placeholder {
+  font-size: 12px;
+  color: var(--n-text-color-3);
+  text-align: center;
+  padding: 8px;
+}
+
+.logo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 </style>

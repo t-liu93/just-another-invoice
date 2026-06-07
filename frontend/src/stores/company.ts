@@ -12,7 +12,8 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { get, put } from '../api/http'
+import { del, get, put } from '../api/http'
+import { uploadFile } from '../api/http'
 import { ApiError } from '../api/http'
 import type { components } from '../api/schema'
 
@@ -61,6 +62,47 @@ export const useCompanyStore = defineStore('company', () => {
   /** Whether the company profile has been created. */
   const hasCompany = computed(() => company.value !== null)
 
+  /** Upload or replace the company logo. */
+  async function uploadLogo(file: File): Promise<void> {
+    error.value = null
+    try {
+      const result = await uploadFile<{
+        logo_url: string
+        mime_type: string
+        byte_size: number
+      }>('/api/v1/company/logo', file)
+      // Refresh company to update has_logo / logo_url.
+      if (company.value) {
+        company.value = { ...company.value, has_logo: true, logo_url: result.logo_url }
+      }
+    } catch (e: unknown) {
+      if (e instanceof ApiError) {
+        error.value = e.message
+      } else {
+        error.value = String(e)
+      }
+      throw e
+    }
+  }
+
+  /** Delete the company logo. */
+  async function deleteLogo(): Promise<void> {
+    error.value = null
+    try {
+      await del('/api/v1/company/logo')
+      if (company.value) {
+        company.value = { ...company.value, has_logo: false, logo_url: null }
+      }
+    } catch (e: unknown) {
+      if (e instanceof ApiError) {
+        error.value = e.message
+      } else {
+        error.value = String(e)
+      }
+      throw e
+    }
+  }
+
   return {
     company,
     loading,
@@ -69,5 +111,7 @@ export const useCompanyStore = defineStore('company', () => {
     hasCompany,
     fetchCompany,
     saveCompany,
+    uploadLogo,
+    deleteLogo,
   }
 })

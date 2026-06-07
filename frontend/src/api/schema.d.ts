@@ -265,6 +265,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/company/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Serve Logo
+         * @description Serve the company logo binary with caching headers.
+         */
+        get: operations["serve_logo_api_v1_company_logo_get"];
+        /**
+         * Upload Logo
+         * @description Upload or replace the company logo.
+         *
+         *     Accepts PNG, JPEG, WebP, or SVG.  SVG content is sanitized (red-line 7).
+         *     Maximum size: 512 KB.
+         */
+        put: operations["upload_logo_api_v1_company_logo_put"];
+        post?: never;
+        /**
+         * Delete Logo
+         * @description Remove the company logo.
+         */
+        delete: operations["delete_logo_api_v1_company_logo_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/smtp": {
         parameters: {
             query?: never;
@@ -315,6 +346,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Body_upload_logo_api_v1_company_logo_put */
+        Body_upload_logo_api_v1_company_logo_put: {
+            /** File */
+            file: string;
+        };
         /**
          * BootstrapResponse
          * @description Returned by ``GET /auth/bootstrap`` – drives frontend routing.
@@ -324,6 +360,18 @@ export interface components {
             registration_open: boolean;
             /** Onboarding Completed */
             onboarding_completed: boolean;
+        };
+        /**
+         * CompanyLogoRead
+         * @description Response body for ``PUT /api/v1/company/logo``.
+         */
+        CompanyLogoRead: {
+            /** Logo Url */
+            logo_url: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Byte Size */
+            byte_size: number;
         };
         /**
          * CompanyRead
@@ -975,6 +1023,101 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    serve_logo_api_v1_company_logo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                    "image/webp": string;
+                    "image/svg+xml": string;
+                };
+            };
+            /** @description No logo uploaded */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upload_logo_api_v1_company_logo_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_logo_api_v1_company_logo_put"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyLogoRead"];
+                };
+            };
+            /** @description Invalid file type, too large, or no company */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_logo_api_v1_company_logo_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No logo to delete */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

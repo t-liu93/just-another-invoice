@@ -78,7 +78,15 @@
       "baseCurrency": "Base currency",
       "save": "Save",
       "saveSuccess": "Company profile saved.",
-      "saveFailed": "Failed to save company profile."
+      "saveFailed": "Failed to save company profile.",
+      "logoSection": "Logo",
+      "noLogo": "No logo",
+      "uploadLogo": "Upload logo",
+      "replaceLogo": "Replace",
+      "deleteLogo": "Delete",
+      "logoUploadFailed": "Failed to upload logo.",
+      "logoDeleteFailed": "Failed to delete logo.",
+      "identitySection": "Identity"
     },
     "smtp": {
       "title": "SMTP Settings",
