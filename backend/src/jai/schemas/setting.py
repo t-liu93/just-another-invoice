@@ -12,7 +12,9 @@ strings.  All keys match the names used in ``docs/plan/milestones/M1.md``.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr
+from typing import Literal
+
+from pydantic import BaseModel, EmailStr, Field
 
 # ---------------------------------------------------------------------------
 # Setting key constants – single source of truth
@@ -29,6 +31,13 @@ SETTING_KEY_SMTP: str = "smtp"
 #: at ``GLOBAL`` level; generated on first boot when no ``AUTH_SECRET`` env
 #: override is provided.  Never exposed by any API endpoint.
 SETTING_KEY_AUTH_SECRET: str = "auth.secret"
+
+#: Invoice numbering template config (COMPANY level).  M2 stores only the
+#: configuration; the rendering engine is implemented in M5.
+SETTING_KEY_INVOICE_NUMBERING: str = "invoice.numbering"
+
+#: User-level preferences (theme, locale, …).
+SETTING_KEY_USER_PREFERENCES: str = "user.preferences"
 
 
 # ---------------------------------------------------------------------------
@@ -96,3 +105,49 @@ class SmtpSettingsRead(BaseModel):
     from_name: str = ""
     use_tls: bool = True
     use_ssl: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Invoice numbering config (COMPANY level, stored only – M5 consumes)
+# ---------------------------------------------------------------------------
+
+
+class InvoiceNumberingConfig(BaseModel):
+    """Invoice numbering template and sequence configuration.
+
+    Stored at ``COMPANY`` level with key ``SETTING_KEY_INVOICE_NUMBERING``
+    (``"invoice.numbering"``).  M2 only persists the configuration; the
+    rendering / sequence / concurrency-safe engine is implemented in M5.
+
+    Fields are intentionally minimal — M5 will extend when the engine is built.
+    """
+
+    template: str = Field(
+        default="{{SERIES:INV}}-{{SEQUENCE:6}}",
+        description="Numbering template with placeholders.  M5 implements rendering.",
+    )
+    sequence_start: int = Field(
+        default=1,
+        ge=1,
+        description="Starting number for the sequence counter.  M5 uses this.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# User preferences (USER level)
+# ---------------------------------------------------------------------------
+
+
+class UserPreferences(BaseModel):
+    """Per-user preferences stored at USER level.
+
+    Stored at ``USER`` level with key ``SETTING_KEY_USER_PREFERENCES``
+    (``"user.preferences"``).  The first real USER-level preference is the
+    theme selection (dark mode).  More preferences will be added in later
+    milestones.
+    """
+
+    theme: Literal["system", "light", "dark"] = Field(
+        default="system",
+        description="UI theme preference: 'system' follows OS, 'light' or 'dark' overrides.",
+    )

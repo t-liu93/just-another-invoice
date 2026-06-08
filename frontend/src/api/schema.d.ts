@@ -342,6 +342,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/numbering": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Numbering Config
+         * @description Return the invoice numbering configuration for the current company.
+         *
+         *     Returns the COMPANY-level setting, or the default if not yet configured.
+         *     The actual numbering engine is implemented in M5; M2 only persists the
+         *     configuration.
+         */
+        get: operations["get_numbering_config_api_v1_settings_numbering_get"];
+        /**
+         * Update Numbering Config
+         * @description Update the invoice numbering configuration for the current company.
+         *
+         *     Stored at COMPANY level (scope = company.id).  Requires owner role.
+         */
+        put: operations["update_numbering_config_api_v1_settings_numbering_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get User Preferences
+         * @description Return the current user's effective preferences.
+         *
+         *     Resolves via ``USER(user.id) → COMPANY(user.company_id) → GLOBAL``.
+         *     Returns defaults when no setting exists at any level.
+         */
+        get: operations["get_user_preferences_api_v1_settings_me_get"];
+        /**
+         * Update User Preferences
+         * @description Update the current user's preferences (USER level, scope = user.id).
+         */
+        put: operations["update_user_preferences_api_v1_settings_me_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -480,6 +537,30 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * InvoiceNumberingConfig
+         * @description Invoice numbering template and sequence configuration.
+         *
+         *     Stored at ``COMPANY`` level with key ``SETTING_KEY_INVOICE_NUMBERING``
+         *     (``"invoice.numbering"``).  M2 only persists the configuration; the
+         *     rendering / sequence / concurrency-safe engine is implemented in M5.
+         *
+         *     Fields are intentionally minimal — M5 will extend when the engine is built.
+         */
+        InvoiceNumberingConfig: {
+            /**
+             * Template
+             * @description Numbering template with placeholders.  M5 implements rendering.
+             * @default {{SERIES:INV}}-{{SEQUENCE:6}}
+             */
+            template?: string;
+            /**
+             * Sequence Start
+             * @description Starting number for the sequence counter.  M5 uses this.
+             * @default 1
+             */
+            sequence_start?: number;
         };
         /**
          * LoginRequest
@@ -639,6 +720,24 @@ export interface components {
              * @default false
              */
             use_ssl?: boolean;
+        };
+        /**
+         * UserPreferences
+         * @description Per-user preferences stored at USER level.
+         *
+         *     Stored at ``USER`` level with key ``SETTING_KEY_USER_PREFERENCES``
+         *     (``"user.preferences"``).  The first real USER-level preference is the
+         *     theme selection (dark mode).  More preferences will be added in later
+         *     milestones.
+         */
+        UserPreferences: {
+            /**
+             * Theme
+             * @description UI theme preference: 'system' follows OS, 'light' or 'dark' overrides.
+             * @default system
+             * @enum {string}
+             */
+            theme?: "system" | "light" | "dark";
         };
         /**
          * UserRead
@@ -1192,6 +1291,112 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    get_numbering_config_api_v1_settings_numbering_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceNumberingConfig"];
+                };
+            };
+        };
+    };
+    update_numbering_config_api_v1_settings_numbering_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceNumberingConfig"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceNumberingConfig"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_preferences_api_v1_settings_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPreferences"];
+                };
+            };
+        };
+    };
+    update_user_preferences_api_v1_settings_me_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserPreferences"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPreferences"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

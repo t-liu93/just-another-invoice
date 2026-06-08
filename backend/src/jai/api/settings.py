@@ -1,9 +1,13 @@
-"""Settings API routes – SMTP configuration (owner-only).
+"""Settings API routes – SMTP configuration, numbering config, user preferences.
 
-Step 4 endpoints:
-  - ``GET  /api/v1/settings/smtp``  – read current SMTP config (password desensitised).
-  - ``PUT  /api/v1/settings/smtp``  – update SMTP config.
-  - ``POST /api/v1/settings/smtp/test`` – send a test email using the current config.
+Endpoints:
+  - ``GET  /api/v1/settings/smtp``         – read current SMTP config (password desensitised).
+  - ``PUT  /api/v1/settings/smtp``         – update SMTP config.
+  - ``POST /api/v1/settings/smtp/test``    – send a test email using the current config.
+  - ``GET  /api/v1/settings/numbering``    – read invoice numbering config (COMPANY level).
+  - ``PUT  /api/v1/settings/numbering``    – update invoice numbering config (COMPANY level).
+  - ``GET  /api/v1/settings/me``           – read current user's preferences (USER level).
+  - ``PUT  /api/v1/settings/me``           – update current user's preferences (USER level).
 """
 
 from __future__ import annotations
@@ -16,9 +20,17 @@ from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.user import User
-from jai.schemas.setting import SETTING_KEY_SMTP, SmtpSettings, SmtpSettingsRead
+from jai.schemas.setting import (
+    SETTING_KEY_INVOICE_NUMBERING,
+    SETTING_KEY_SMTP,
+    SETTING_KEY_USER_PREFERENCES,
+    InvoiceNumberingConfig,
+    SmtpSettings,
+    SmtpSettingsRead,
+    UserPreferences,
+)
 from jai.services import email as email_svc
-from jai.services.settings import get_setting, set_setting
+from jai.services.settings import get_effective_setting, get_setting, set_setting
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
@@ -156,3 +168,104 @@ async def test_smtp_settings(
         ) from exc
 
     return {"status": "sent"}
+
+
+# ---------------------------------------------------------------------------
+# Invoice numbering configuration (COMPANY level, owner-only)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/numbering", response_model=InvoiceNumberingConfig)
+async def get_numbering_config(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceNumberingConfig:
+    """Return the invoice numbering configuration for the current company.
+
+    Returns the COMPANY-level setting, or the default if not yet configured.
+    The actual numbering engine is implemented in M5; M2 only persists the
+    configuration.
+    """
+    _owner_only(user)
+    if user.company_id is None:
+        # No company yet – return defaults.
+        return InvoiceNumberingConfig()
+
+    cfg = await get_setting(
+        session,
+        SETTING_KEY_INVOICE_NUMBERING,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+        value_type=InvoiceNumberingConfig,
+    )
+    return cfg if cfg is not None else InvoiceNumberingConfig()
+
+
+@router.put("/numbering", response_model=InvoiceNumberingConfig)
+async def update_numbering_config(
+    body: InvoiceNumberingConfig,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceNumberingConfig:
+    """Update the invoice numbering configuration for the current company.
+
+    Stored at COMPANY level (scope = company.id).  Requires owner role.
+    """
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile must be created before configuring numbering.",
+        )
+
+    await set_setting(
+        session,
+        SETTING_KEY_INVOICE_NUMBERING,
+        body,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+    )
+    await session.commit()
+    return body
+
+
+# ---------------------------------------------------------------------------
+# User preferences (USER level)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/me", response_model=UserPreferences)
+async def get_user_preferences(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserPreferences:
+    """Return the current user's effective preferences.
+
+    Resolves via ``USER(user.id) → COMPANY(user.company_id) → GLOBAL``.
+    Returns defaults when no setting exists at any level.
+    """
+    prefs = await get_effective_setting(
+        session,
+        SETTING_KEY_USER_PREFERENCES,
+        user=user,
+        value_type=UserPreferences,
+    )
+    return prefs if prefs is not None else UserPreferences()
+
+
+@router.put("/me", response_model=UserPreferences)
+async def update_user_preferences(
+    body: UserPreferences,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserPreferences:
+    """Update the current user's preferences (USER level, scope = user.id)."""
+    await set_setting(
+        session,
+        SETTING_KEY_USER_PREFERENCES,
+        body,
+        level=SettingLevel.USER,
+        scope_id=user.id,
+    )
+    await session.commit()
+    return body

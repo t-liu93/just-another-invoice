@@ -3,7 +3,10 @@
 Public API
 ----------
 - ``get_setting`` – retrieve a typed setting with ``user → company → global``
-  fallback.
+  fallback.  The caller provides the starting *level* and *scope_id* manually.
+- ``get_effective_setting`` – convenience wrapper that resolves the correct
+  scope IDs for each layer from a logged-in ``User`` object (``USER(user.id)
+  → COMPANY(user.company_id) → GLOBAL``).
 - ``set_setting`` – persist a Pydantic model as the setting value (upsert).
 
 Design (red-line 5)
@@ -31,6 +34,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.models._enums import SettingLevel
 from jai.models.setting import Setting
+
+# Avoid circular import: ``User`` is only used as a type hint for the
+# convenience wrapper.  Import at runtime inside the function body.
+from jai.models.user import User
 
 # Fallback order: most specific first.
 _FALLBACK_ORDER: list[SettingLevel] = [
@@ -60,6 +67,7 @@ async def get_setting[T: BaseModel](
     level: SettingLevel,
     scope_id: uuid.UUID | None = None,
     value_type: type[T],
+    _scope_map: dict[SettingLevel, uuid.UUID | None] | None = None,
 ) -> T | None: ...
 
 
@@ -71,6 +79,7 @@ async def get_setting(
     level: SettingLevel,
     scope_id: uuid.UUID | None = None,
     value_type: None = None,
+    _scope_map: dict[SettingLevel, uuid.UUID | None] | None = None,
 ) -> dict[str, Any] | None: ...
 
 
@@ -81,6 +90,7 @@ async def get_setting[T: BaseModel](
     level: SettingLevel,
     scope_id: uuid.UUID | None = None,
     value_type: type[T] | None = None,
+    _scope_map: dict[SettingLevel, uuid.UUID | None] | None = None,
 ) -> T | dict[str, Any] | None:
     """Retrieve a typed setting, with level-based fallback.
 
@@ -97,10 +107,15 @@ async def get_setting[T: BaseModel](
     level:
         Most-specific level to start the lookup from.
     scope_id:
-        Entity UUID for ``COMPANY`` / ``USER`` levels; ``None`` for ``GLOBAL``.
+        Entity UUID for the *starting* level; ``None`` for ``GLOBAL``.
     value_type:
         Pydantic model class to parse the raw JSONB dict into.  If ``None``,
         the raw dict is returned.
+    _scope_map:
+        Optional explicit mapping ``{SettingLevel: scope_id}`` used during
+        fallback.  When provided, each probed level uses its mapped scope ID.
+        When absent, ``scope_id`` is used only for the starting level and
+        ``None`` for all deeper levels (i.e. falls straight to GLOBAL).
 
     Returns
     -------
@@ -111,10 +126,13 @@ async def get_setting[T: BaseModel](
     levels_to_check = _FALLBACK_ORDER[start_idx:]
 
     for lvl in levels_to_check:
-        # For levels other than the starting one, scope_id is None (GLOBAL)
-        # or needs to be resolved (M2 will add the logic).  For now we only
-        # probe GLOBAL when falling back beyond the starting level.
-        sid = scope_id if lvl == level else None
+        # Resolve scope_id for this level.
+        if _scope_map is not None and lvl in _scope_map:
+            sid = _scope_map[lvl]
+        elif lvl == level:
+            sid = scope_id
+        else:
+            sid = None
 
         cache_hit = _cache.get(_cache_key(lvl, sid, key))
         if cache_hit is not None:
@@ -128,6 +146,69 @@ async def get_setting[T: BaseModel](
             return parsed
 
     return None
+
+
+@overload
+async def get_effective_setting[T: BaseModel](
+    session: AsyncSession,
+    key: str,
+    *,
+    user: User,
+    value_type: type[T],
+) -> T | None: ...
+
+
+@overload
+async def get_effective_setting(
+    session: AsyncSession,
+    key: str,
+    *,
+    user: User,
+    value_type: None = None,
+) -> dict[str, Any] | None: ...
+
+
+async def get_effective_setting[T: BaseModel](
+    session: AsyncSession,
+    key: str,
+    *,
+    user: User,
+    value_type: type[T] | None = None,
+) -> T | dict[str, Any] | None:
+    """Convenience wrapper that resolves scope IDs from a ``User`` object.
+
+    Probes ``USER(user.id) → COMPANY(user.company_id) → GLOBAL`` and returns
+    the first hit.  This is the preferred entry point for API routes that
+    have access to the authenticated user.
+
+    Parameters
+    ----------
+    session:
+        Database session.
+    key:
+        Setting key.
+    user:
+        The authenticated ``User`` ORM instance (must have ``company_id``
+        populated for COMPANY-level lookup).
+    value_type:
+        Pydantic model class to parse the raw JSONB dict into.
+
+    Returns
+    -------
+    Parsed Pydantic model instance or ``None`` if no setting found.
+    """
+    scope_map: dict[SettingLevel, uuid.UUID | None] = {
+        SettingLevel.USER: user.id,
+        SettingLevel.COMPANY: user.company_id,
+        SettingLevel.GLOBAL: None,
+    }
+    return await get_setting(
+        session,
+        key,
+        level=SettingLevel.USER,
+        value_type=value_type,
+        _scope_map=scope_map,
+    )
 
 
 async def set_setting(

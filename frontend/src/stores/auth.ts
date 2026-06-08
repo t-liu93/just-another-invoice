@@ -14,6 +14,15 @@ import { computed, ref } from 'vue'
 import { get, post } from '../api/http'
 import type { components } from '../api/schema'
 
+// Lazy import to avoid circular dependency (useTheme → http → nothing circular,
+// but the store should not depend on UI composables at import time).
+let _themeLoader: (() => Promise<void>) | null = null
+
+/** Register the theme loader callback (called from App.vue or similar). */
+export function registerThemeLoader(loader: () => Promise<void>) {
+  _themeLoader = loader
+}
+
 type UserRead = components['schemas']['UserRead']
 type BootstrapResponse = components['schemas']['BootstrapResponse']
 type LoginResponse = components['schemas']['LoginResponse']
@@ -34,6 +43,12 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchUser() {
     try {
       user.value = await get<UserRead>('/api/v1/users/me')
+      // Load theme preference from server when user is already authenticated
+      // (e.g. on page reload or after MFA verify).
+      if (user.value && _themeLoader) {
+        // Fire-and-forget: don't block user loading on theme sync.
+        void _themeLoader()
+      }
     } catch {
       user.value = null
     }
@@ -113,6 +128,8 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await post('/api/v1/auth/mfa/verify', { code })
       await fetchUser()
+      // Theme loader is already triggered by fetchUser() above.
+      // No need to call it again here.
     } finally {
       loading.value = false
     }

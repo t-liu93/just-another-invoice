@@ -8,13 +8,24 @@ touching a real database.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from jai.models._enums import SettingLevel
-from jai.schemas.setting import SETTING_KEY_ONBOARDING_COMPLETED, OnboardingState
-from jai.services.settings import _cache, get_setting, set_setting
+from jai.schemas.setting import (
+    SETTING_KEY_ONBOARDING_COMPLETED,
+    SETTING_KEY_USER_PREFERENCES,
+    OnboardingState,
+    UserPreferences,
+)
+from jai.services.settings import (
+    _cache,
+    get_effective_setting,
+    get_setting,
+    set_setting,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -22,14 +33,16 @@ from jai.services.settings import _cache, get_setting, set_setting
 
 
 @pytest.fixture(autouse=True)
-def _clear_cache() -> None:
+def _clear_cache() -> Generator[None, None, None]:
     """Clear the settings cache before and after each test."""
     _cache.clear()
     yield
     _cache.clear()
 
 
-def _make_fetch_mock(return_map: dict) -> AsyncMock:
+def _make_fetch_mock(
+    return_map: dict[tuple[SettingLevel, object], dict[str, object]],
+) -> AsyncMock:
     """Build an async mock for ``_fetch_row`` that returns values from a map.
 
     *return_map* keys are ``(level, scope_id)`` tuples; values are dicts
@@ -41,10 +54,21 @@ def _make_fetch_mock(return_map: dict) -> AsyncMock:
         level: SettingLevel,
         scope_id: object,  # noqa: ARG001
         key: str,  # noqa: ARG001
-    ) -> dict | None:  # type: ignore[type-arg]
+    ) -> dict[str, object] | None:
         return return_map.get((level, scope_id))
 
     return AsyncMock(side_effect=_fetch)
+
+
+def _make_user_mock(
+    user_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
+) -> AsyncMock:
+    """Build a mock User object with id and company_id."""
+    user = AsyncMock()
+    user.id = user_id or uuid.uuid4()
+    user.company_id = company_id
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -150,25 +174,6 @@ class TestFallback:
         assert result is not None
         assert result.completed is False  # USER-level value
 
-    async def test_falls_back_to_company(self) -> None:
-        user_id = uuid.uuid4()
-        with patch(
-            "jai.services.settings._fetch_row",
-            new_callable=lambda: _make_fetch_mock(
-                {(SettingLevel.COMPANY, None): {"completed": True}}
-            ),
-        ):
-            result = await get_setting(
-                AsyncMock(),
-                SETTING_KEY_ONBOARDING_COMPLETED,
-                level=SettingLevel.USER,
-                scope_id=user_id,
-                value_type=OnboardingState,
-            )
-
-        assert result is not None
-        assert result.completed is True  # COMPANY-level fallback
-
     async def test_falls_back_to_global(self) -> None:
         user_id = uuid.uuid4()
         with patch(
@@ -206,15 +211,14 @@ class TestFallback:
 
         assert result is None  # USER entry not checked
 
-    async def test_all_levels_set_user_wins(self) -> None:
-        """When all three levels have a value, USER takes priority."""
+    async def test_all_levels_set_user_wins_no_scope_map(self) -> None:
+        """Without _scope_map, fallback from USER skips to GLOBAL."""
         user_id = uuid.uuid4()
         with patch(
             "jai.services.settings._fetch_row",
             new_callable=lambda: _make_fetch_mock(
                 {
                     (SettingLevel.GLOBAL, None): {"completed": True},
-                    (SettingLevel.COMPANY, None): {"completed": True},
                     (SettingLevel.USER, user_id): {"completed": False},
                 }
             ),
@@ -229,6 +233,243 @@ class TestFallback:
 
         assert result is not None
         assert result.completed is False  # USER wins
+
+    async def test_scope_map_enables_company_fallback(self) -> None:
+        """With _scope_map, USER → COMPANY(company_id) → GLOBAL works."""
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        scope_map = {
+            SettingLevel.USER: user_id,
+            SettingLevel.COMPANY: company_id,
+            SettingLevel.GLOBAL: None,
+        }
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {(SettingLevel.COMPANY, company_id): {"completed": True}}
+            ),
+        ):
+            result = await get_setting(
+                AsyncMock(),
+                SETTING_KEY_ONBOARDING_COMPLETED,
+                level=SettingLevel.USER,
+                value_type=OnboardingState,
+                _scope_map=scope_map,
+            )
+
+        assert result is not None
+        assert result.completed is True  # COMPANY-level hit
+
+    async def test_scope_map_user_overrides_company(self) -> None:
+        """With _scope_map, USER value takes priority over COMPANY."""
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        scope_map = {
+            SettingLevel.USER: user_id,
+            SettingLevel.COMPANY: company_id,
+            SettingLevel.GLOBAL: None,
+        }
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {
+                    (SettingLevel.COMPANY, company_id): {"completed": True},
+                    (SettingLevel.USER, user_id): {"completed": False},
+                }
+            ),
+        ):
+            result = await get_setting(
+                AsyncMock(),
+                SETTING_KEY_ONBOARDING_COMPLETED,
+                level=SettingLevel.USER,
+                value_type=OnboardingState,
+                _scope_map=scope_map,
+            )
+
+        assert result is not None
+        assert result.completed is False  # USER wins over COMPANY
+
+    async def test_scope_map_full_fallback_to_global(self) -> None:
+        """With _scope_map, falls USER → COMPANY → GLOBAL when USER and COMPANY absent."""
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        scope_map = {
+            SettingLevel.USER: user_id,
+            SettingLevel.COMPANY: company_id,
+            SettingLevel.GLOBAL: None,
+        }
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {(SettingLevel.GLOBAL, None): {"completed": True}}
+            ),
+        ):
+            result = await get_setting(
+                AsyncMock(),
+                SETTING_KEY_ONBOARDING_COMPLETED,
+                level=SettingLevel.USER,
+                value_type=OnboardingState,
+                _scope_map=scope_map,
+            )
+
+        assert result is not None
+        assert result.completed is True  # GLOBAL fallback
+
+
+# ---------------------------------------------------------------------------
+# get_effective_setting – convenience wrapper
+# ---------------------------------------------------------------------------
+
+
+class TestGetEffectiveSetting:
+    """Verify the convenience wrapper resolves scope from a User object."""
+
+    async def test_returns_user_level_value(self) -> None:
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        user = _make_user_mock(user_id=user_id, company_id=company_id)
+
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {(SettingLevel.USER, user_id): {"theme": "dark"}}
+            ),
+        ):
+            result = await get_effective_setting(
+                AsyncMock(),
+                SETTING_KEY_USER_PREFERENCES,
+                user=user,
+                value_type=UserPreferences,
+            )
+
+        assert result is not None
+        assert result.theme == "dark"
+
+    async def test_falls_back_to_company(self) -> None:
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        user = _make_user_mock(user_id=user_id, company_id=company_id)
+
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {(SettingLevel.COMPANY, company_id): {"theme": "light"}}
+            ),
+        ):
+            result = await get_effective_setting(
+                AsyncMock(),
+                SETTING_KEY_USER_PREFERENCES,
+                user=user,
+                value_type=UserPreferences,
+            )
+
+        assert result is not None
+        assert result.theme == "light"
+
+    async def test_falls_back_to_global(self) -> None:
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        user = _make_user_mock(user_id=user_id, company_id=company_id)
+
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {(SettingLevel.GLOBAL, None): {"theme": "system"}}
+            ),
+        ):
+            result = await get_effective_setting(
+                AsyncMock(),
+                SETTING_KEY_USER_PREFERENCES,
+                user=user,
+                value_type=UserPreferences,
+            )
+
+        assert result is not None
+        assert result.theme == "system"
+
+    async def test_returns_none_when_all_absent(self) -> None:
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        user = _make_user_mock(user_id=user_id, company_id=company_id)
+
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock({}),
+        ):
+            result = await get_effective_setting(
+                AsyncMock(),
+                SETTING_KEY_USER_PREFERENCES,
+                user=user,
+                value_type=UserPreferences,
+            )
+
+        assert result is None
+
+    async def test_user_overrides_company_and_global(self) -> None:
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        user = _make_user_mock(user_id=user_id, company_id=company_id)
+
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {
+                    (SettingLevel.GLOBAL, None): {"theme": "system"},
+                    (SettingLevel.COMPANY, company_id): {"theme": "light"},
+                    (SettingLevel.USER, user_id): {"theme": "dark"},
+                }
+            ),
+        ):
+            result = await get_effective_setting(
+                AsyncMock(),
+                SETTING_KEY_USER_PREFERENCES,
+                user=user,
+                value_type=UserPreferences,
+            )
+
+        assert result is not None
+        assert result.theme == "dark"  # USER wins
+
+    async def test_company_null_falls_to_global(self) -> None:
+        """When user has no company_id, COMPANY layer is skipped."""
+        user_id = uuid.uuid4()
+        user = _make_user_mock(user_id=user_id, company_id=None)
+
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {(SettingLevel.GLOBAL, None): {"theme": "light"}}
+            ),
+        ):
+            result = await get_effective_setting(
+                AsyncMock(),
+                SETTING_KEY_USER_PREFERENCES,
+                user=user,
+                value_type=UserPreferences,
+            )
+
+        assert result is not None
+        assert result.theme == "light"  # Fell to GLOBAL (no COMPANY scope)
+
+    async def test_raw_dict_without_type(self) -> None:
+        """Without value_type, raw dict is returned."""
+        user_id = uuid.uuid4()
+        user = _make_user_mock(user_id=user_id, company_id=None)
+
+        with patch(
+            "jai.services.settings._fetch_row",
+            new_callable=lambda: _make_fetch_mock(
+                {(SettingLevel.USER, user_id): {"theme": "dark"}}
+            ),
+        ):
+            result = await get_effective_setting(
+                AsyncMock(),
+                SETTING_KEY_USER_PREFERENCES,
+                user=user,
+            )
+
+        assert isinstance(result, dict)
+        assert result["theme"] == "dark"
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +544,57 @@ class TestCache:
                 value_type=OnboardingState,
             )
             assert fetch_count == 2
+
+    async def test_cache_hit_with_scope_map(self) -> None:
+        """Cache works correctly when _scope_map is used."""
+        user_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        scope_map = {
+            SettingLevel.USER: user_id,
+            SettingLevel.COMPANY: company_id,
+            SettingLevel.GLOBAL: None,
+        }
+        call_count = 0
+
+        async def _fetch(  # noqa: ARG001
+            session: object,
+            level: SettingLevel,
+            scope_id: object,
+            key: str,  # noqa: ARG001
+        ) -> dict[str, str] | None:
+            nonlocal call_count
+            call_count += 1
+            if level == SettingLevel.USER:
+                return None  # USER miss
+            if level == SettingLevel.COMPANY:
+                return {"theme": "light"}
+            return {"theme": "system"}
+
+        with patch("jai.services.settings._fetch_row", side_effect=_fetch):
+            session = AsyncMock()
+            r1 = await get_setting(
+                session,
+                SETTING_KEY_USER_PREFERENCES,
+                level=SettingLevel.USER,
+                value_type=UserPreferences,
+                _scope_map=scope_map,
+            )
+            assert call_count == 2  # USER miss, COMPANY hit
+            assert r1 is not None
+
+            r2 = await get_setting(
+                session,
+                SETTING_KEY_USER_PREFERENCES,
+                level=SettingLevel.USER,
+                value_type=UserPreferences,
+                _scope_map=scope_map,
+            )
+            # Second call: USER miss (not cached because None), but COMPANY
+            # cache should be hit.  However, USER-level query still fires
+            # because it returns None (None is never cached).
+            # So call_count should be 2 + 1 (USER probe) = 3.
+            assert call_count == 3
+            assert r2 is not None
 
 
 # ---------------------------------------------------------------------------

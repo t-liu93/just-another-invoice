@@ -112,6 +112,25 @@
       "testEmail": "Send test email",
       "testSuccess": "Test email sent successfully.",
       "testFailed": "Failed to send test email."
+    },
+    "numbering": {
+      "section": "Invoice Numbering",
+      "template": "Numbering template",
+      "sequenceStart": "Starting number",
+      "save": "Save numbering",
+      "saveSuccess": "Numbering config saved.",
+      "saveFailed": "Failed to save numbering config.",
+      "m5hint": "Numbering takes effect from M5. Currently only the configuration is stored."
+    },
+    "preferences": {
+      "title": "Preferences",
+      "theme": "Theme",
+      "themeSystem": "System",
+      "themeLight": "Light",
+      "themeDark": "Dark",
+      "saveSuccess": "Preference saved.",
+      "saveFailed": "Failed to save preference.",
+      "companyProfile": "Company"
     }
   },
   "theme": {

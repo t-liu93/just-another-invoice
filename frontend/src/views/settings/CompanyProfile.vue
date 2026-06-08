@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n'
 import { useTheme } from '../../composables/useTheme'
 import { SunnyOutline, MoonOutline, GlobeOutline, LogOutOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
+import { get, put } from '../../api/http'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -45,6 +46,14 @@ const messageType = ref<'success' | 'error'>('success')
 const uploadingLogo = ref(false)
 const logoError = ref('')
 
+// Numbering state
+const numberingTemplate = ref('{{SERIES:INV}}-{{SEQUENCE:6}}')
+const numberingSequenceStart = ref(1)
+const numberingLoaded = ref(false)
+const numberingSaving = ref(false)
+const numberingMessage = ref('')
+const numberingMessageType = ref<'success' | 'error'>('success')
+
 const loadError = computed(() => companyStore.error)
 const hasLogo = computed(() => companyStore.company?.has_logo ?? false)
 const logoUrl = computed(() => companyStore.company?.logo_url ?? null)
@@ -72,6 +81,18 @@ onMounted(async () => {
     // fetchCompany sets companyStore.error on real errors; component reads it.
   } finally {
     loading.value = false
+  }
+
+  // Load numbering config
+  try {
+    const data = await get<{ template: string; sequence_start: number }>('/api/v1/settings/numbering')
+    if (data) {
+      numberingTemplate.value = data.template
+      numberingSequenceStart.value = data.sequence_start
+      numberingLoaded.value = true
+    }
+  } catch {
+    // Use defaults
   }
 })
 
@@ -139,6 +160,30 @@ async function handleLogout() {
   await auth.logout()
   router.push('/login')
 }
+
+async function handleSaveNumbering() {
+  numberingSaving.value = true
+  numberingMessage.value = ''
+  try {
+    const result = await put<{ template: string; sequence_start: number }>(
+      '/api/v1/settings/numbering',
+      {
+        template: numberingTemplate.value,
+        sequence_start: numberingSequenceStart.value,
+      },
+    )
+    numberingTemplate.value = result.template
+    numberingSequenceStart.value = result.sequence_start
+    numberingMessage.value = t('settings.numbering.saveSuccess')
+    numberingMessageType.value = 'success'
+  } catch (e: unknown) {
+    const err = e as { message?: string }
+    numberingMessage.value = err.message || t('settings.numbering.saveFailed')
+    numberingMessageType.value = 'error'
+  } finally {
+    numberingSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -151,6 +196,11 @@ async function handleLogout() {
           </n-button>
         </div>
         <div class="header-right">
+          <n-button quaternary size="small" @click="router.push('/settings/preferences')">
+            <template #icon>
+              <n-icon><PersonOutline /></n-icon>
+            </template>
+          </n-button>
           <n-button quaternary size="small" @click="router.push('/settings/smtp')">
             <template #icon>
               <n-icon><SettingsOutline /></n-icon>
@@ -303,6 +353,30 @@ async function handleLogout() {
                   {{ t('settings.company.save') }}
                 </n-button>
               </n-form>
+
+              <n-divider>{{ t('settings.numbering.section') }}</n-divider>
+
+              <n-alert type="info" style="margin-bottom: 16px" closable>
+                {{ t('settings.numbering.m5hint') }}
+              </n-alert>
+
+              <n-form label-placement="left" label-width="140" :disabled="!companyStore.hasCompany" @submit.prevent="handleSaveNumbering">
+                <n-form-item :label="t('settings.numbering.template')">
+                  <n-input v-model:value="numberingTemplate" placeholder="{{SERIES:INV}}-{{SEQUENCE:6}}" />
+                </n-form-item>
+
+                <n-form-item :label="t('settings.numbering.sequenceStart')">
+                  <n-input-number v-model:value="numberingSequenceStart" :min="1" style="width: 100%" />
+                </n-form-item>
+
+                <n-alert v-if="numberingMessage" :type="numberingMessageType" style="margin-bottom: 16px">
+                  {{ numberingMessage }}
+                </n-alert>
+
+                <n-button type="primary" :loading="numberingSaving" :disabled="!companyStore.hasCompany" attr-type="submit">
+                  {{ t('settings.numbering.save') }}
+                </n-button>
+              </n-form>
             </n-spin>
           </n-card>
         </div>
@@ -312,9 +386,9 @@ async function handleLogout() {
 </template>
 
 <script lang="ts">
-import { SettingsOutline } from '@vicons/ionicons5'
+import { SettingsOutline, PersonOutline } from '@vicons/ionicons5'
 export default {
-  components: { SettingsOutline },
+  components: { SettingsOutline, PersonOutline },
 }
 </script>
 

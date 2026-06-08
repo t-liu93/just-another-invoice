@@ -112,6 +112,25 @@
       "testEmail": "发送测试邮件",
       "testSuccess": "测试邮件已发送。",
       "testFailed": "发送测试邮件失败。"
+    },
+    "numbering": {
+      "section": "单据编号",
+      "template": "编号模板",
+      "sequenceStart": "起始号",
+      "save": "保存编号配置",
+      "saveSuccess": "编号配置已保存。",
+      "saveFailed": "保存编号配置失败。",
+      "m5hint": "编号配置将在 M5 起生效，目前仅保存配置。"
+    },
+    "preferences": {
+      "title": "个人偏好",
+      "theme": "主题",
+      "themeSystem": "跟随系统",
+      "themeLight": "浅色",
+      "themeDark": "深色",
+      "saveSuccess": "偏好已保存。",
+      "saveFailed": "保存偏好失败。",
+      "companyProfile": "公司"
     }
   },
   "theme": {
