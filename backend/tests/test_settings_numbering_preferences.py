@@ -29,6 +29,10 @@ from jai.schemas.setting import (
     UserPreferences,
 )
 
+# Every test in this module exercises DB-backed endpoints via ``db_client`` /
+# real sessions, so the whole module is integration-only (needs PostgreSQL).
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Helpers – full authentication flow
 # ---------------------------------------------------------------------------

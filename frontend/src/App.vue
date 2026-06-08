@@ -2,6 +2,7 @@
 import { themeOverrides } from './styles/theme'
 import { useTheme } from './composables/useTheme'
 import { registerThemeLoader } from './stores/auth'
+import SettingsPanel from './components/settings/SettingsPanel.vue'
 
 const { theme, loadFromServer } = useTheme()
 
@@ -15,6 +16,7 @@ registerThemeLoader(loadFromServer)
     <n-message-provider>
       <n-dialog-provider>
         <router-view />
+        <SettingsPanel />
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>

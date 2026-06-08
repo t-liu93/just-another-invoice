@@ -136,6 +136,7 @@
       "security": "安全",
       "useTls": "STARTTLS",
       "useSsl": "SSL/TLS",
+      "securityNone": "无加密",
       "save": "保存",
       "saveSuccess": "SMTP 设置已保存。",
       "saveFailed": "保存 SMTP 设置失败。",
@@ -160,7 +161,20 @@
       "themeDark": "深色",
       "saveSuccess": "偏好已保存。",
       "saveFailed": "保存偏好失败。",
-      "companyProfile": "公司"
+      "companyProfile": "公司",
+      "language": "语言",
+      "languageHint": "切换本次会话的界面语言。",
+      "moreSoon": "更多偏好设置即将上线。"
+    },
+    "panel": {
+      "title": "设置",
+      "open": "设置",
+      "company": "公司档案",
+      "categoryPreference": "偏好",
+      "categorySmtp": "邮件 (SMTP)",
+      "categoryTheme": "主题",
+      "categoryAi": "AI",
+      "comingSoon": "敬请期待"
     }
   },
   "theme": {

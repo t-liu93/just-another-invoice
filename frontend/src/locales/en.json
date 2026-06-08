@@ -136,6 +136,7 @@
       "security": "Security",
       "useTls": "STARTTLS",
       "useSsl": "SSL/TLS",
+      "securityNone": "None",
       "save": "Save",
       "saveSuccess": "SMTP settings saved.",
       "saveFailed": "Failed to save SMTP settings.",
@@ -160,7 +161,20 @@
       "themeDark": "Dark",
       "saveSuccess": "Preference saved.",
       "saveFailed": "Failed to save preference.",
-      "companyProfile": "Company"
+      "companyProfile": "Company",
+      "language": "Language",
+      "languageHint": "Changes the interface language for this session.",
+      "moreSoon": "More preferences coming soon."
+    },
+    "panel": {
+      "title": "Settings",
+      "open": "Settings",
+      "company": "Company profile",
+      "categoryPreference": "Preferences",
+      "categorySmtp": "Email (SMTP)",
+      "categoryTheme": "Theme",
+      "categoryAi": "AI",
+      "comingSoon": "Coming soon"
     }
   },
   "theme": {

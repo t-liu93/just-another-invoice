@@ -1,27 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '../../stores/auth'
 import { useCompanyStore } from '../../stores/company'
 import { useI18n } from 'vue-i18n'
-import { useTheme } from '../../composables/useTheme'
-import { SunnyOutline, MoonOutline, GlobeOutline, LogOutOutline } from '@vicons/ionicons5'
-import { NIcon } from 'naive-ui'
+import AppHeader from '../../components/AppHeader.vue'
 import { get, put } from '../../api/http'
 
-const router = useRouter()
-const auth = useAuthStore()
 const companyStore = useCompanyStore()
-const { t, locale } = useI18n()
-const { toggle, preference } = useTheme()
-
-const isDark = computed(() => {
-  const p = preference.value
-  if (p === 'system') {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-  }
-  return p === 'dark'
-})
+const { t } = useI18n()
 
 // Form fields
 const name = ref('')
@@ -156,11 +141,6 @@ async function handleLogoDelete() {
   }
 }
 
-async function handleLogout() {
-  await auth.logout()
-  router.push('/login')
-}
-
 async function handleSaveNumbering() {
   numberingSaving.value = true
   numberingMessage.value = ''
@@ -189,44 +169,7 @@ async function handleSaveNumbering() {
 <template>
   <div class="settings-page">
     <n-layout>
-      <n-layout-header bordered class="app-header">
-        <div class="header-left">
-          <n-button quaternary size="small" @click="router.push('/dashboard')">
-            ← {{ t('app.title') }}
-          </n-button>
-        </div>
-        <div class="header-right">
-          <n-button quaternary size="small" @click="router.push('/settings/preferences')">
-            <template #icon>
-              <n-icon><PersonOutline /></n-icon>
-            </template>
-          </n-button>
-          <n-button quaternary size="small" @click="router.push('/settings/smtp')">
-            <template #icon>
-              <n-icon><SettingsOutline /></n-icon>
-            </template>
-          </n-button>
-          <n-button quaternary size="small" @click="toggle">
-            <template #icon>
-              <n-icon><SunnyOutline v-if="isDark" /><MoonOutline v-else /></n-icon>
-            </template>
-          </n-button>
-          <n-button quaternary size="small" @click="locale = locale === 'en' ? 'zh' : 'en'">
-            <template #icon>
-              <n-icon><GlobeOutline /></n-icon>
-            </template>
-            {{ locale === 'en' ? '中文' : 'EN' }}
-          </n-button>
-          <n-tag v-if="auth.user" size="small" type="info">
-            {{ auth.user.email }}
-          </n-tag>
-          <n-button quaternary size="small" type="error" @click="handleLogout">
-            <template #icon>
-              <n-icon><LogOutOutline /></n-icon>
-            </template>
-          </n-button>
-        </div>
-      </n-layout-header>
+      <AppHeader />
 
       <n-layout-content class="app-content">
         <div class="company-profile">
@@ -385,31 +328,7 @@ async function handleSaveNumbering() {
   </div>
 </template>
 
-<script lang="ts">
-import { SettingsOutline, PersonOutline } from '@vicons/ionicons5'
-export default {
-  components: { SettingsOutline, PersonOutline },
-}
-</script>
-
 <style scoped>
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 24px;
-}
-
-.header-left h2 {
-  margin: 0;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .app-content {
   min-height: calc(100vh - 57px);
 }
