@@ -66,7 +66,14 @@ async function handleMfaVerify() {
   loading.value = true
   try {
     await auth.mfaVerify(mfaCode.value)
-    router.push('/dashboard')
+    // Refresh bootstrap to get the latest onboarding_completed status
+    await auth.fetchBootstrap()
+    // Redirect based on onboarding state
+    if (auth.bootstrap?.onboarding_completed) {
+      router.push('/dashboard')
+    } else {
+      router.push('/onboarding')
+    }
   } catch (e: unknown) {
     const err = e as { message?: string }
     errorMsg.value = err.message || t('auth.mfaVerifyFailed')

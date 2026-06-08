@@ -146,11 +146,11 @@ class TestCompanyAPI:
         """After first PUT /company, onboarding.completed becomes true."""
         await _full_auth(db_client)
 
-        # Before: onboarding not completed (bootstrap says so).
+        # Before company save: MFA verify does NOT set onboarding_completed.
         resp = await db_client.get("/api/v1/auth/bootstrap")
-        assert resp.json()["onboarding_completed"] is True  # MFA verify already sets it
+        assert resp.json()["onboarding_completed"] is False
 
-        # After company creation, check bootstrap again.
+        # After company creation, onboarding_completed becomes true.
         await db_client.put(
             "/api/v1/company",
             json={"name": "Test", "base_currency": "EUR"},

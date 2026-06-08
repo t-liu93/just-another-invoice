@@ -5,7 +5,8 @@ Covers:
 - Registration gate (first user → owner + 201, second → 403)
 - Login (two-step: password → pre-auth cookie → {next: mfa_setup|mfa_verify})
 - MFA setup (generate pending TOTP secret)
-- MFA verify (first binding → persist + onboarding, subsequent login → verify)
+- MFA verify (first binding → persist TOTP secret, subsequent login → verify)
+- Onboarding: MFA verify does NOT complete onboarding; company first save does
 - Logout (clears both cookies, public + idempotent)
 - /users/me (authenticated → user data, unauthenticated → 401)
 - TOTP code verification (valid / invalid / time-window tolerance)
@@ -246,17 +247,20 @@ class TestBootstrap:
         assert data["onboarding_completed"] is False
 
     @pytest.mark.asyncio
-    async def test_bootstrap_after_full_auth(
+    async def test_bootstrap_after_mfa_onboarding_not_completed(
         self, db_client: AsyncClient
     ) -> None:
-        """After full auth flow (register + MFA), both flags are set."""
+        """After full auth flow (register + MFA), registration is closed but
+        onboarding is NOT completed — onboarding is only completed when the
+        company profile is first saved (M2 step 4).
+        """
         await _full_auth(db_client)
 
         resp = await db_client.get("/api/v1/auth/bootstrap")
         assert resp.status_code == 200
         data = resp.json()
         assert data["registration_open"] is False
-        assert data["onboarding_completed"] is True
+        assert data["onboarding_completed"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -480,10 +484,14 @@ class TestMfaVerify:
     """Tests for ``POST /api/v1/auth/mfa/verify``."""
 
     @pytest.mark.asyncio
-    async def test_first_binding_persists_secret_and_sets_onboarding(
+    async def test_first_binding_persists_secret(
         self, db_client: AsyncClient
     ) -> None:
-        """First MFA binding persists totp_secret, mfa_enabled, onboarding."""
+        """First MFA binding persists totp_secret and mfa_enabled.
+
+        Onboarding is NOT completed by MFA verify — it is completed when the
+        company profile is first saved (M2 step 4).
+        """
         await _register(db_client)
         await _login(db_client)
         secret = await _mfa_setup(db_client)
@@ -506,9 +514,9 @@ class TestMfaVerify:
         me_data = me_resp.json()
         assert me_data["mfa_enabled"] is True
 
-        # Onboarding should be completed.
+        # Onboarding should NOT be completed yet (only company save sets it).
         bootstrap = await db_client.get("/api/v1/auth/bootstrap")
-        assert bootstrap.json()["onboarding_completed"] is True
+        assert bootstrap.json()["onboarding_completed"] is False
 
     @pytest.mark.asyncio
     async def test_subsequent_login_with_valid_code(
@@ -1028,3 +1036,146 @@ class TestAuthSecret:
         resolved = await resolve_auth_secret(db_session_maker)
         assert resolved == override
         assert resolved != db_secret
+
+
+# ---------------------------------------------------------------------------
+# Onboarding flow (M2 step 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestOnboardingFlow:
+    """Tests for the onboarding flow: MFA verify does NOT complete onboarding;
+    company first save does.
+
+    This verifies the M2 step 4 change: the ``onboarding.completed`` flag's
+    "set-true" point moved from MFA first binding to company first save.
+    """
+
+    @pytest.mark.asyncio
+    async def test_mfa_verify_does_not_set_onboarding_completed(
+        self, db_client: AsyncClient
+    ) -> None:
+        """After MFA first binding, onboarding_completed is still False."""
+        await _full_auth(db_client)
+
+        resp = await db_client.get("/api/v1/auth/bootstrap")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["onboarding_completed"] is False
+
+    @pytest.mark.asyncio
+    async def test_company_first_save_sets_onboarding_completed(
+        self, db_client: AsyncClient
+    ) -> None:
+        """After first company save, onboarding_completed becomes True."""
+        await _full_auth(db_client)
+
+        # Before company save: onboarding not completed.
+        resp = await db_client.get("/api/v1/auth/bootstrap")
+        assert resp.json()["onboarding_completed"] is False
+
+        # First company save.
+        resp = await db_client.put(
+            "/api/v1/company",
+            json={"name": "Acme BV", "base_currency": "EUR"},
+        )
+        assert resp.status_code == 200
+
+        # After company save: onboarding completed.
+        resp = await db_client.get("/api/v1/auth/bootstrap")
+        assert resp.json()["onboarding_completed"] is True
+
+    @pytest.mark.asyncio
+    async def test_onboarding_completed_idempotent_on_company_update(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Updating company after first save keeps onboarding_completed True."""
+        await _full_auth(db_client)
+
+        # First save.
+        await db_client.put(
+            "/api/v1/company",
+            json={"name": "First", "base_currency": "EUR"},
+        )
+
+        # Update.
+        await db_client.put(
+            "/api/v1/company",
+            json={"name": "Updated", "base_currency": "USD"},
+        )
+
+        resp = await db_client.get("/api/v1/auth/bootstrap")
+        assert resp.json()["onboarding_completed"] is True
+
+    @pytest.mark.asyncio
+    async def test_company_first_save_links_owner(
+        self, db_client: AsyncClient
+    ) -> None:
+        """First company save links the owner's company_id."""
+        await _full_auth(db_client)
+
+        # Before: no company_id.
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.json()["company_id"] is None
+
+        # First save.
+        resp = await db_client.put(
+            "/api/v1/company",
+            json={"name": "Acme BV", "base_currency": "EUR"},
+        )
+        company_id = resp.json()["id"]
+
+        # After: company_id set.
+        resp = await db_client.get("/api/v1/users/me")
+        assert resp.json()["company_id"] == company_id
+
+    @pytest.mark.asyncio
+    async def test_full_onboarding_journey(
+        self, db_client: AsyncClient
+    ) -> None:
+        """End-to-end: register → MFA → company save → onboarding completed.
+
+        This mirrors the actual user journey through the onboarding wizard:
+        1. Register (bootstrap: registration_open=True, onboarding_completed=False)
+        2. Login → MFA setup → MFA verify
+        3. Company profile save (onboarding_completed becomes True)
+        4. Bootstrap reflects the completed state
+        """
+        # Step 1: Fresh boot.
+        resp = await db_client.get("/api/v1/auth/bootstrap")
+        assert resp.json() == {
+            "registration_open": True,
+            "onboarding_completed": False,
+        }
+
+        # Step 2: Register.
+        await _register(db_client)
+        resp = await db_client.get("/api/v1/auth/bootstrap")
+        assert resp.json()["registration_open"] is False
+        assert resp.json()["onboarding_completed"] is False
+
+        # Step 3: Login + MFA.
+        await _login(db_client)
+        secret = await _mfa_setup(db_client)
+        code = pyotp.TOTP(secret).now()
+        status_code = await _mfa_verify(db_client, code)
+        assert status_code == 204
+
+        # MFA done, but onboarding NOT completed.
+        resp = await db_client.get("/api/v1/auth/bootstrap")
+        assert resp.json()["onboarding_completed"] is False
+
+        # Step 4: Save company.
+        resp = await db_client.put(
+            "/api/v1/company",
+            json={"name": "Onboarding Co", "base_currency": "EUR"},
+        )
+        assert resp.status_code == 200
+
+        # Now onboarding is completed.
+        resp = await db_client.get("/api/v1/auth/bootstrap")
+        assert resp.json() == {
+            "registration_open": False,
+            "onboarding_completed": True,
+        }

@@ -31,6 +31,12 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true },
   },
   {
+    path: '/onboarding',
+    name: 'onboarding',
+    component: () => import('../views/Onboarding.vue'),
+    meta: { requiresAuth: true, isOnboarding: true },
+  },
+  {
     path: '/dashboard',
     name: 'dashboard',
     component: () => import('../views/Dashboard.vue'),
@@ -73,6 +79,8 @@ router.beforeEach(async (to) => {
   await auth.initialise()
 
   const isPublic = to.meta.public === true
+  const isOnboarding = to.meta.isOnboarding === true
+  const isOnboardingResume = isOnboarding && to.query.resume === 'done'
 
   // If registration is open and user is not logged in, redirect to register.
   if (auth.bootstrap?.registration_open && !auth.user && to.name !== 'register') {
@@ -87,6 +95,24 @@ router.beforeEach(async (to) => {
   // If not authenticated and page requires auth, redirect to login.
   if (!auth.user && !isPublic) {
     return { name: 'login' }
+  }
+
+  // If authenticated but onboarding is not completed, force the onboarding flow.
+  // Allow the onboarding page itself and SMTP settings (reachable from onboarding)
+  // but block all other authenticated pages until onboarding is done.
+  if (
+    auth.user &&
+    auth.bootstrap &&
+    !auth.bootstrap.onboarding_completed &&
+    !isOnboarding &&
+    to.name !== 'smtp-settings'
+  ) {
+    return { name: 'onboarding' }
+  }
+
+  // If authenticated and onboarding is completed, don't show the onboarding page.
+  if (auth.user && auth.bootstrap?.onboarding_completed && isOnboarding && !isOnboardingResume) {
+    return { name: 'dashboard' }
   }
 
   // If authenticated, don't show login/register pages.

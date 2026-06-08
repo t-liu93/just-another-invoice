@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '../../composables/useTheme'
@@ -8,11 +8,11 @@ import { get, put, post } from '../../api/http'
 import type { components } from '../../api/schema'
 import { SunnyOutline, MoonOutline, GlobeOutline, LogOutOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import { computed } from 'vue'
 
 type SmtpSettingsRead = components['schemas']['SmtpSettingsRead']
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const { t, locale } = useI18n()
 const { toggle, preference } = useTheme()
@@ -23,6 +23,11 @@ const isDark = computed(() => {
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   }
   return p === 'dark'
+})
+const isFromOnboarding = computed(() => route.query.from === 'onboarding')
+const backLabel = computed(() => {
+  if (isFromOnboarding.value) return t('onboarding.returnToOnboarding')
+  return t('dashboard.welcome').split(' ').slice(0, 2).join(' ')
 })
 
 const host = ref('')
@@ -119,6 +124,14 @@ async function handleLogout() {
   await auth.logout()
   router.push('/login')
 }
+
+function handleBack() {
+  if (isFromOnboarding.value) {
+    router.push({ name: 'onboarding', query: { resume: 'done' } })
+    return
+  }
+  router.push('/dashboard')
+}
 </script>
 
 <template>
@@ -126,8 +139,8 @@ async function handleLogout() {
     <n-layout>
       <n-layout-header bordered class="app-header">
         <div class="header-left">
-          <n-button quaternary size="small" @click="router.push('/dashboard')">
-            ← {{ t('dashboard.welcome').split(' ').slice(0, 2).join(' ') }}
+          <n-button quaternary size="small" @click="handleBack">
+            ← {{ backLabel }}
           </n-button>
         </div>
         <div class="header-right">
@@ -214,6 +227,9 @@ async function handleLogout() {
                   </n-button>
                   <n-button :loading="testing" @click="handleTestEmail">
                     {{ t('settings.smtp.testEmail') }}
+                  </n-button>
+                  <n-button v-if="isFromOnboarding" @click="handleBack">
+                    {{ t('onboarding.returnToOnboarding') }}
                   </n-button>
                 </n-space>
               </n-form>
