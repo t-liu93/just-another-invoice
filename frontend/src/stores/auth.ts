@@ -14,13 +14,19 @@ import { computed, ref } from 'vue'
 import { get, post } from '../api/http'
 import type { components } from '../api/schema'
 
-// Lazy import to avoid circular dependency (useTheme → http → nothing circular,
-// but the store should not depend on UI composables at import time).
-let _themeLoader: (() => Promise<void>) | null = null
+// Registered callbacks for server-backed user preferences (theme + locale).
+// Kept as plain hooks so the store does not import UI composables at import
+// time (avoids a circular dependency).
+//  - ``_prefsLoader``: load the current account's preferences (one GET).
+//  - ``_prefsReset``: suspend persistence on logout / auth-context change so a
+//    stale snapshot can't be written to the next account before it loads.
+let _prefsLoader: (() => Promise<void>) | null = null
+let _prefsReset: (() => void) | null = null
 
-/** Register the theme loader callback (called from App.vue or similar). */
-export function registerThemeLoader(loader: () => Promise<void>) {
-  _themeLoader = loader
+/** Register the preferences load + reset hooks (called from App.vue). */
+export function registerPreferencesLoader(loader: () => Promise<void>, reset?: () => void) {
+  _prefsLoader = loader
+  _prefsReset = reset ?? null
 }
 
 type UserRead = components['schemas']['UserRead']
@@ -43,14 +49,16 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchUser() {
     try {
       user.value = await get<UserRead>('/api/v1/users/me')
-      // Load theme preference from server when user is already authenticated
-      // (e.g. on page reload or after MFA verify).
-      if (user.value && _themeLoader) {
-        // Fire-and-forget: don't block user loading on theme sync.
-        void _themeLoader()
+      // Load preferences (theme + locale) from the server when the user is
+      // already authenticated (e.g. on page reload or after MFA verify).
+      if (user.value && _prefsLoader) {
+        // Fire-and-forget: don't block user loading on the preferences sync.
+        void _prefsLoader()
       }
     } catch {
       user.value = null
+      // Not authenticated: suspend preference persistence until a (re)load.
+      _prefsReset?.()
     }
   }
 
@@ -143,6 +151,10 @@ export const useAuthStore = defineStore('auth', () => {
       // Ignore – cookie may already be cleared.
     }
     user.value = null
+    // Suspend preference persistence so the next account that signs in within
+    // this SPA session can't be written with the previous account's snapshot
+    // before its own preferences load.
+    _prefsReset?.()
   }
 
   /** Whether the user is currently authenticated. */

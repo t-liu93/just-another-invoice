@@ -1,23 +1,18 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { createI18n } from 'vue-i18n'
 
 import 'vfonts/Lato.css'
 import 'vfonts/FiraCode.css'
 import './style.css'
 
-import en from './locales/en.json'
-import zh from './locales/zh.json'
-
 import App from './App.vue'
 import router from './router'
+import { i18n } from './i18n'
+import { initLocaleFromCache } from './composables/userPreferences'
 
-const i18n = createI18n({
-  legacy: false,
-  locale: 'en',
-  fallbackLocale: 'en',
-  messages: { en, zh },
-})
+// Restore the cached UI language immediately, before the app mounts (the
+// server-backed value, if any, overrides it after login).
+initLocaleFromCache()
 
 const app = createApp(App)
 app.use(createPinia())

@@ -207,7 +207,9 @@ class TestUserPreferencesAPI:
 
         resp = await db_client.get("/api/v1/settings/me")
         assert resp.status_code == 200
-        assert resp.json()["theme"] == "system"
+        body = resp.json()
+        assert body["theme"] == "system"
+        assert body["locale"] == "en"
 
     async def test_put_and_get_round_trip(self, db_client: AsyncClient) -> None:
         """PUT then GET returns the stored preference."""
@@ -248,6 +250,31 @@ class TestUserPreferencesAPI:
         await _full_auth(db_client)
 
         resp = await db_client.put("/api/v1/settings/me", json={"theme": "blue"})
+        assert resp.status_code == 422
+
+    async def test_locale_round_trip(self, db_client: AsyncClient) -> None:
+        """Theme + locale persist together (PUT replaces the whole object)."""
+        await _full_auth(db_client)
+
+        resp = await db_client.put(
+            "/api/v1/settings/me", json={"theme": "dark", "locale": "zh"}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["theme"] == "dark"
+        assert body["locale"] == "zh"
+
+        resp = await db_client.get("/api/v1/settings/me")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["theme"] == "dark"
+        assert body["locale"] == "zh"
+
+    async def test_invalid_locale_rejected(self, db_client: AsyncClient) -> None:
+        """Invalid locale value is rejected by Pydantic."""
+        await _full_auth(db_client)
+
+        resp = await db_client.put("/api/v1/settings/me", json={"locale": "fr"})
         assert resp.status_code == 422
 
     async def test_unauthenticated(self, db_client: AsyncClient) -> None:

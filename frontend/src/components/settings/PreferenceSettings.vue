@@ -2,25 +2,44 @@
 /**
  * Preference settings (no page chrome) – non-identity user/company preferences.
  *
- * M2.5 ships only the interface language here (session-scoped, same behaviour
- * as the previous header globe toggle).  Future defaults (date format, due
- * days, …) land in their own consuming milestones — a placeholder note marks
- * the slot.
+ * Ships the interface language, persisted to the account (USER-level setting)
+ * via useLocale().setLocale, with localStorage as a fast cache — mirroring the
+ * theme preference.  Future defaults (date format, due days, …) land in their
+ * own consuming milestones; a placeholder note marks the slot.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useLocale } from '../../composables/useLocale'
+import type { LocalePreference } from '../../composables/userPreferences'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
+const { currentLocale, setLocale } = useLocale()
 
 const languageOptions = [
   { label: 'English', value: 'en' },
   { label: '中文', value: 'zh' },
 ]
 
-const currentLocale = computed({
-  get: () => locale.value,
-  set: (val: string) => {
-    locale.value = val
+const saving = ref(false)
+const message = ref('')
+const messageType = ref<'success' | 'error'>('success')
+
+const selectedLocale = computed({
+  get: () => currentLocale.value,
+  set: (val: LocalePreference) => {
+    saving.value = true
+    message.value = ''
+    setLocale(val)
+      .then(() => {
+        message.value = t('settings.preferences.saveSuccess')
+        messageType.value = 'success'
+        saving.value = false
+      })
+      .catch(() => {
+        message.value = t('settings.preferences.saveFailed')
+        messageType.value = 'error'
+        saving.value = false
+      })
   },
 })
 </script>
@@ -28,11 +47,21 @@ const currentLocale = computed({
 <template>
   <n-form label-placement="left" label-width="100">
     <n-form-item :label="t('settings.preferences.language')">
-      <n-select v-model:value="currentLocale" :options="languageOptions" style="max-width: 200px" />
+      <n-select
+        v-model:value="selectedLocale"
+        :options="languageOptions"
+        :disabled="saving"
+        style="max-width: 200px"
+      />
     </n-form-item>
     <n-text depth="3" style="font-size: 12px">
       {{ t('settings.preferences.languageHint') }}
     </n-text>
+
+    <n-alert v-if="message" :type="messageType" closable style="margin-top: 12px" @close="message = ''">
+      {{ message }}
+    </n-alert>
+
     <n-divider />
     <n-text depth="3" style="font-size: 12px">
       {{ t('settings.preferences.moreSoon') }}

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { themeOverrides } from './styles/theme'
 import { useTheme } from './composables/useTheme'
-import { registerThemeLoader } from './stores/auth'
+import { loadUserPreferences, resetUserPreferencesLoaded } from './composables/userPreferences'
+import { registerPreferencesLoader } from './stores/auth'
 import SettingsPanel from './components/settings/SettingsPanel.vue'
 
-const { theme, loadFromServer } = useTheme()
+const { theme } = useTheme()
 
-// Register the theme loader so the auth store can trigger it after login.
-registerThemeLoader(loadFromServer)
+// Register the preferences load + reset hooks (theme + locale) so the auth
+// store can pull a single GET /settings/me after login and suspend persistence
+// on logout / auth-context change.
+registerPreferencesLoader(loadUserPreferences, resetUserPreferencesLoaded)
 </script>
 
 <template>

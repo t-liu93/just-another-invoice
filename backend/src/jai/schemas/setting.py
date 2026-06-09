@@ -142,12 +142,18 @@ class UserPreferences(BaseModel):
     """Per-user preferences stored at USER level.
 
     Stored at ``USER`` level with key ``SETTING_KEY_USER_PREFERENCES``
-    (``"user.preferences"``).  The first real USER-level preference is the
-    theme selection (dark mode).  More preferences will be added in later
-    milestones.
+    (``"user.preferences"``).  Holds the theme selection and the UI language;
+    more preferences will be added in later milestones.
+
+    The PUT endpoint replaces the whole object, so the frontend always persists
+    the full set (theme + locale together) — see ``composables/userPreferences``.
     """
 
     theme: Literal["system", "light", "dark"] = Field(
         default="system",
         description="UI theme preference: 'system' follows OS, 'light' or 'dark' overrides.",
+    )
+    locale: Literal["en", "zh"] = Field(
+        default="en",
+        description="UI language preference (interface locale).",
     )

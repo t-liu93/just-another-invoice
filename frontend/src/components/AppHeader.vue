@@ -10,13 +10,19 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 import { useSettingsPanel } from '../composables/useSettingsPanel'
+import { useLocale } from '../composables/useLocale'
 import { SettingsOutline, BusinessOutline, GlobeOutline, LogOutOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 
 const router = useRouter()
 const auth = useAuthStore()
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const { open } = useSettingsPanel()
+const { currentLocale, setLocale } = useLocale()
+
+function toggleLocale() {
+  void setLocale(currentLocale.value === 'en' ? 'zh' : 'en')
+}
 
 async function handleLogout() {
   await auth.logout()
@@ -40,11 +46,11 @@ async function handleLogout() {
           <n-icon><BusinessOutline /></n-icon>
         </template>
       </n-button>
-      <n-button quaternary size="small" @click="locale = locale === 'en' ? 'zh' : 'en'">
+      <n-button quaternary size="small" @click="toggleLocale">
         <template #icon>
           <n-icon><GlobeOutline /></n-icon>
         </template>
-        {{ locale === 'en' ? '中文' : 'EN' }}
+        {{ currentLocale === 'en' ? '中文' : 'EN' }}
       </n-button>
       <n-tag v-if="auth.user" size="small" type="info">
         {{ auth.user.email }}

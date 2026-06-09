@@ -725,9 +725,11 @@ export interface components {
          * @description Per-user preferences stored at USER level.
          *
          *     Stored at ``USER`` level with key ``SETTING_KEY_USER_PREFERENCES``
-         *     (``"user.preferences"``).  The first real USER-level preference is the
-         *     theme selection (dark mode).  More preferences will be added in later
-         *     milestones.
+         *     (``"user.preferences"``).  Holds the theme selection and the UI language;
+         *     more preferences will be added in later milestones.
+         *
+         *     The PUT endpoint replaces the whole object, so the frontend always persists
+         *     the full set (theme + locale together) — see ``composables/userPreferences``.
          */
         UserPreferences: {
             /**
@@ -737,6 +739,13 @@ export interface components {
              * @enum {string}
              */
             theme?: "system" | "light" | "dark";
+            /**
+             * Locale
+             * @description UI language preference (interface locale).
+             * @default en
+             * @enum {string}
+             */
+            locale?: "en" | "zh";
         };
         /**
          * UserRead
