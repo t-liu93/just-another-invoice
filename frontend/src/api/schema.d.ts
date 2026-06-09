@@ -524,6 +524,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payment-methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Payment Methods Endpoint */
+        get: operations["list_payment_methods_endpoint_api_v1_payment_methods_get"];
+        put?: never;
+        /** Create Payment Method Endpoint */
+        post: operations["create_payment_method_endpoint_api_v1_payment_methods_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payment-methods/{pm_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Payment Method Endpoint */
+        get: operations["get_payment_method_endpoint_api_v1_payment_methods__pm_id__get"];
+        /** Update Payment Method Endpoint */
+        put: operations["update_payment_method_endpoint_api_v1_payment_methods__pm_id__put"];
+        post?: never;
+        /** Delete Payment Method Endpoint */
+        delete: operations["delete_payment_method_endpoint_api_v1_payment_methods__pm_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expense-categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Expense Categories Endpoint */
+        get: operations["list_expense_categories_endpoint_api_v1_expense_categories_get"];
+        put?: never;
+        /** Create Expense Category Endpoint */
+        post: operations["create_expense_category_endpoint_api_v1_expense_categories_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expense-categories/{ec_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Expense Category Endpoint */
+        get: operations["get_expense_category_endpoint_api_v1_expense_categories__ec_id__get"];
+        /** Update Expense Category Endpoint */
+        put: operations["update_expense_category_endpoint_api_v1_expense_categories__ec_id__put"];
+        post?: never;
+        /** Delete Expense Category Endpoint */
+        delete: operations["delete_expense_category_endpoint_api_v1_expense_categories__ec_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Units Endpoint */
+        get: operations["list_units_endpoint_api_v1_units_get"];
+        put?: never;
+        /** Create Unit Endpoint */
+        post: operations["create_unit_endpoint_api_v1_units_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/units/{unit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Unit Endpoint */
+        get: operations["get_unit_endpoint_api_v1_units__unit_id__get"];
+        /** Update Unit Endpoint */
+        put: operations["update_unit_endpoint_api_v1_units__unit_id__put"];
+        post?: never;
+        /** Delete Unit Endpoint */
+        delete: operations["delete_unit_endpoint_api_v1_units__unit_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -786,6 +897,60 @@ export interface components {
             addresses?: components["schemas"]["AddressWrite"][];
         };
         /**
+         * ExpenseCategoryListResponse
+         * @description List envelope for GET /api/v1/expense-categories.
+         */
+        ExpenseCategoryListResponse: {
+            /** Items */
+            items: components["schemas"]["ExpenseCategoryRead"][];
+        };
+        /**
+         * ExpenseCategoryRead
+         * @description Response body for expense category endpoints.
+         */
+        ExpenseCategoryRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Default Deductible */
+            default_deductible: boolean | null;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ExpenseCategoryWrite
+         * @description Request body for POST/PUT /api/v1/expense-categories.
+         */
+        ExpenseCategoryWrite: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Default Deductible */
+            default_deductible?: boolean | null;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
+        };
+        /**
          * ForgotPasswordRequest
          * @description Body for ``POST /auth/forgot-password``.
          */
@@ -880,6 +1045,52 @@ export interface components {
         MfaVerifyRequest: {
             /** Code */
             code: string;
+        };
+        /**
+         * PaymentMethodListResponse
+         * @description List envelope for GET /api/v1/payment-methods.
+         */
+        PaymentMethodListResponse: {
+            /** Items */
+            items: components["schemas"]["PaymentMethodRead"][];
+        };
+        /**
+         * PaymentMethodRead
+         * @description Response body for payment method endpoints.
+         */
+        PaymentMethodRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PaymentMethodWrite
+         * @description Request body for POST/PUT /api/v1/payment-methods.
+         */
+        PaymentMethodWrite: {
+            /** Name */
+            name: string;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
         };
         /**
          * RegisterRequest
@@ -993,6 +1204,56 @@ export interface components {
              * @default false
              */
             use_ssl?: boolean;
+        };
+        /**
+         * UnitListResponse
+         * @description List envelope for GET /api/v1/units.
+         */
+        UnitListResponse: {
+            /** Items */
+            items: components["schemas"]["UnitRead"][];
+        };
+        /**
+         * UnitRead
+         * @description Response body for unit endpoints.
+         */
+        UnitRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * UnitWrite
+         * @description Request body for POST/PUT /api/v1/units.
+         */
+        UnitWrite: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
         };
         /**
          * UserPreferences
@@ -2264,6 +2525,450 @@ export interface operations {
             header?: never;
             path: {
                 treatment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_payment_methods_endpoint_api_v1_payment_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodListResponse"];
+                };
+            };
+        };
+    };
+    create_payment_method_endpoint_api_v1_payment_methods_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentMethodWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_payment_method_endpoint_api_v1_payment_methods__pm_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pm_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_payment_method_endpoint_api_v1_payment_methods__pm_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pm_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentMethodWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_payment_method_endpoint_api_v1_payment_methods__pm_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pm_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_expense_categories_endpoint_api_v1_expense_categories_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCategoryListResponse"];
+                };
+            };
+        };
+    };
+    create_expense_category_endpoint_api_v1_expense_categories_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseCategoryWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_expense_category_endpoint_api_v1_expense_categories__ec_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_expense_category_endpoint_api_v1_expense_categories__ec_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseCategoryWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_expense_category_endpoint_api_v1_expense_categories__ec_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_units_endpoint_api_v1_units_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitListResponse"];
+                };
+            };
+        };
+    };
+    create_unit_endpoint_api_v1_units_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_unit_endpoint_api_v1_units__unit_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_unit_endpoint_api_v1_units__unit_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_unit_endpoint_api_v1_units__unit_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                unit_id: string;
             };
             cookie?: never;
         };

@@ -277,6 +277,66 @@
     "sortByName": "Name (A–Z)",
     "sortByCreatedAt": "Newest first"
   },
+  "dict": {
+    "active": "Active",
+    "actions": "Actions"
+  },
+  "paymentMethods": {
+    "title": "Payment Methods",
+    "name": "Name",
+    "namePlaceholder": "e.g. Bank transfer",
+    "nameRequired": "Name is required.",
+    "create": "Add Method",
+    "edit": "Edit Method",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this payment method?",
+    "saveSuccess": "Payment method saved.",
+    "saveFailed": "Failed to save payment method.",
+    "deleteSuccess": "Payment method deleted.",
+    "deleteFailed": "Failed to delete payment method.",
+    "loadFailed": "Failed to load payment methods."
+  },
+  "expenseCategories": {
+    "title": "Expense Categories",
+    "name": "Name",
+    "namePlaceholder": "e.g. Travel",
+    "nameRequired": "Name is required.",
+    "description": "Description",
+    "descriptionPlaceholder": "Optional",
+    "defaultDeductible": "Deductible",
+    "create": "Add Category",
+    "edit": "Edit Category",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this expense category?",
+    "saveSuccess": "Expense category saved.",
+    "saveFailed": "Failed to save expense category.",
+    "deleteSuccess": "Expense category deleted.",
+    "deleteFailed": "Failed to delete expense category.",
+    "loadFailed": "Failed to load expense categories."
+  },
+  "units": {
+    "title": "Units",
+    "code": "Code",
+    "codePlaceholder": "e.g. pcs",
+    "name": "Name",
+    "namePlaceholder": "e.g. Piece",
+    "codeAndNameRequired": "Code and name are required.",
+    "create": "Add Unit",
+    "edit": "Edit Unit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this unit?",
+    "saveSuccess": "Unit saved.",
+    "saveFailed": "Failed to save unit.",
+    "deleteSuccess": "Unit deleted.",
+    "deleteFailed": "Failed to delete unit.",
+    "loadFailed": "Failed to load units."
+  },
   "theme": {
     "toggle": "Toggle theme"
   }
