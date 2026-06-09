@@ -11,10 +11,27 @@ from __future__ import annotations
 
 import uuid
 
+import pycountry
 from pydantic import BaseModel, field_validator
 
 from jai.models._enums import AddressType
-from jai.schemas.company import _validate_country_code
+
+
+def _validate_country_code(v: str | None) -> str | None:
+    """Validate ISO 3166-1 alpha-2 country code.
+
+    Only accepts canonical 2-letter codes (not English names).
+    """
+    if v is None:
+        return v
+    code = v.strip().upper()
+    if len(code) != 2:
+        raise ValueError(
+            f"Invalid ISO 3166-1 alpha-2 country code: {v!r} (must be exactly 2 letters)"
+        )
+    if pycountry.countries.get(alpha_2=code) is None:
+        raise ValueError(f"Invalid ISO 3166-1 alpha-2 country code: {v!r}")
+    return code
 
 
 class AddressFields(BaseModel):
@@ -31,7 +48,7 @@ class AddressFields(BaseModel):
     @field_validator("country_code")
     @classmethod
     def validate_country_code(cls, v: str | None) -> str | None:
-        """Validate ISO 3166-1 alpha-2 country code, reusing company validator."""
+        """Validate ISO 3166-1 alpha-2 country code."""
         return _validate_country_code(v)
 
 

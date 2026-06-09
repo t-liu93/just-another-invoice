@@ -1,4 +1,4 @@
-"""Company business-profile service (singleton, M2 step 1).
+"""Company business-profile service (singleton, M2 step 1; address M3 step 3).
 
 Public API
 ----------
@@ -13,7 +13,10 @@ Design notes
 - v1 enforces a single row via an advisory lock on the creation path
   that serialises concurrent first-PUT requests, preventing duplicate
   ``company`` rows.
-- ``logo_id`` / ``binary_asset`` FK are managed in step 2.
+- Address fields use structured European/Dutch schema (M3 step 3):
+  street / house_number / house_number_addition / postal_code / city /
+  province / country_code.  ``address_line1``/``address_line2`` removed.
+- ``logo_id`` / ``binary_asset`` FK are managed in M2 step 2.
 """
 
 from __future__ import annotations
@@ -55,10 +58,12 @@ def company_to_read(company: Company) -> CompanyRead:
         email=company.email,
         phone=company.phone,
         website=company.website,
-        address_line1=company.address_line1,
-        address_line2=company.address_line2,
+        street=company.street,
+        house_number=company.house_number,
+        house_number_addition=company.house_number_addition,
         postal_code=company.postal_code,
         city=company.city,
+        province=company.province,
         country_code=company.country_code,
         base_currency=company.base_currency,
         has_logo=company.logo_id is not None,
@@ -66,6 +71,24 @@ def company_to_read(company: Company) -> CompanyRead:
         created_at=company.created_at,
         updated_at=company.updated_at,
     )
+
+
+def _apply_write(company: Company, data: CompanyWrite) -> None:
+    """Apply all ``CompanyWrite`` fields to a ``Company`` ORM instance."""
+    company.name = data.name
+    company.vat_id = data.vat_id
+    company.coc_number = data.coc_number
+    company.email = data.email
+    company.phone = data.phone
+    company.website = data.website
+    company.street = data.street
+    company.house_number = data.house_number
+    company.house_number_addition = data.house_number_addition
+    company.postal_code = data.postal_code
+    company.city = data.city
+    company.province = data.province
+    company.country_code = data.country_code
+    company.base_currency = data.base_currency
 
 
 async def upsert_company(
@@ -92,18 +115,7 @@ async def upsert_company(
 
     if existing is not None:
         # Fast path: update existing row.
-        existing.name = data.name
-        existing.vat_id = data.vat_id
-        existing.coc_number = data.coc_number
-        existing.email = data.email
-        existing.phone = data.phone
-        existing.website = data.website
-        existing.address_line1 = data.address_line1
-        existing.address_line2 = data.address_line2
-        existing.postal_code = data.postal_code
-        existing.city = data.city
-        existing.country_code = data.country_code
-        existing.base_currency = data.base_currency
+        _apply_write(existing, data)
         await session.flush()
         # Refresh to pick up server-default updated_at (onupdate=func.now()).
         await session.refresh(existing)
@@ -118,18 +130,7 @@ async def upsert_company(
     existing = await get_company(session)
     if existing is not None:
         # Another request won the race; treat as an update.
-        existing.name = data.name
-        existing.vat_id = data.vat_id
-        existing.coc_number = data.coc_number
-        existing.email = data.email
-        existing.phone = data.phone
-        existing.website = data.website
-        existing.address_line1 = data.address_line1
-        existing.address_line2 = data.address_line2
-        existing.postal_code = data.postal_code
-        existing.city = data.city
-        existing.country_code = data.country_code
-        existing.base_currency = data.base_currency
+        _apply_write(existing, data)
         await session.flush()
         await session.refresh(existing)
         return company_to_read(existing)
@@ -142,10 +143,12 @@ async def upsert_company(
         email=data.email,
         phone=data.phone,
         website=data.website,
-        address_line1=data.address_line1,
-        address_line2=data.address_line2,
+        street=data.street,
+        house_number=data.house_number,
+        house_number_addition=data.house_number_addition,
         postal_code=data.postal_code,
         city=data.city,
+        province=data.province,
         country_code=data.country_code,
         base_currency=data.base_currency,
     )

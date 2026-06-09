@@ -1,9 +1,12 @@
 """``Company`` ORM model – singleton business profile (v1 one row).
 
-Design (M2):
+Design (M2/M3):
   - Stores the company's business identity: name, VAT number, KvK number,
-    contact details, address (inline standard fields), base currency.
-  - ``logo_id`` is a nullable FK to ``binary_asset`` (added in step 2).
+    contact details, structured European/Dutch address (M3 step 3), base currency.
+  - ``logo_id`` is a nullable FK to ``binary_asset`` (added in M2 step 2).
+  - Address fields aligned with customer ``Address`` table (M3 step 3):
+    street / house_number / house_number_addition / postal_code / city /
+    province / country_code.  ``address_line1``/``address_line2`` removed.
   - v1 enforces a single row via service-layer logic.
   - ``base_currency`` is a 3-letter ISO 4217 code (validated at schema level).
   - ``country_code`` is a 2-letter ISO 3166-1 alpha-2 code.
@@ -42,11 +45,19 @@ class Company(Base):
     phone: Mapped[str | None] = mapped_column(Text, nullable=True)
     website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # -- Address (inline, single address) --------------------------------------
-    address_line1: Mapped[str | None] = mapped_column(Text, nullable=True)
-    address_line2: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # -- Address (structured, European/Dutch – aligned with customer.Address) --
+    street: Mapped[str | None] = mapped_column(Text, nullable=True)
+    house_number: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Text to accommodate ranges like '12-14'."
+    )
+    house_number_addition: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Toevoeging: A, bis, apartment number, etc."
+    )
     postal_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     city: Mapped[str | None] = mapped_column(Text, nullable=True)
+    province: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="State/province; typically empty for NL."
+    )
     country_code: Mapped[str | None] = mapped_column(
         String(2),
         nullable=True,

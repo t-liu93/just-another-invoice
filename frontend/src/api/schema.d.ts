@@ -537,8 +537,25 @@ export interface components {
         /**
          * CompanyRead
          * @description Response body for ``GET /api/v1/company`` and ``PUT``.
+         *
+         *     Address fields (street / house_number / house_number_addition / postal_code /
+         *     city / province / country_code) are inherited from ``AddressFields``.
          */
         CompanyRead: {
+            /** Street */
+            street?: string | null;
+            /** House Number */
+            house_number?: string | null;
+            /** House Number Addition */
+            house_number_addition?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country Code */
+            country_code?: string | null;
             /**
              * Id
              * Format: uuid
@@ -556,16 +573,6 @@ export interface components {
             phone?: string | null;
             /** Website */
             website?: string | null;
-            /** Address Line1 */
-            address_line1?: string | null;
-            /** Address Line2 */
-            address_line2?: string | null;
-            /** Postal Code */
-            postal_code?: string | null;
-            /** City */
-            city?: string | null;
-            /** Country Code */
-            country_code?: string | null;
             /** Base Currency */
             base_currency: string;
             /**
@@ -589,8 +596,25 @@ export interface components {
         /**
          * CompanyWrite
          * @description Request body for ``PUT /api/v1/company``.
+         *
+         *     Address fields (street / house_number / house_number_addition / postal_code /
+         *     city / province / country_code) are inherited from ``AddressFields``.
          */
         CompanyWrite: {
+            /** Street */
+            street?: string | null;
+            /** House Number */
+            house_number?: string | null;
+            /** House Number Addition */
+            house_number_addition?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country Code */
+            country_code?: string | null;
             /** Name */
             name: string;
             /** Vat Id */
@@ -603,16 +627,6 @@ export interface components {
             phone?: string | null;
             /** Website */
             website?: string | null;
-            /** Address Line1 */
-            address_line1?: string | null;
-            /** Address Line2 */
-            address_line2?: string | null;
-            /** Postal Code */
-            postal_code?: string | null;
-            /** City */
-            city?: string | null;
-            /** Country Code */
-            country_code?: string | null;
             /** Base Currency */
             base_currency: string;
         };

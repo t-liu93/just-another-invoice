@@ -84,6 +84,10 @@ class TestCompanyAPI:
                 "base_currency": "EUR",
                 "vat_id": "NL123456789B01",
                 "country_code": "NL",
+                "street": "Keizersgracht",
+                "house_number": "1",
+                "postal_code": "1015 AB",
+                "city": "Amsterdam",
             },
         )
         assert resp.status_code == 200
@@ -92,6 +96,10 @@ class TestCompanyAPI:
         assert data["base_currency"] == "EUR"
         assert data["vat_id"] == "NL123456789B01"
         assert data["country_code"] == "NL"
+        assert data["street"] == "Keizersgracht"
+        assert data["house_number"] == "1"
+        assert data["postal_code"] == "1015 AB"
+        assert data["city"] == "Amsterdam"
         assert data["has_logo"] is False
         assert data["logo_url"] is None
         assert "id" in data
@@ -215,7 +223,7 @@ class TestCompanyAPI:
     async def test_get_company_optional_fields_null(
         self, db_client: AsyncClient
     ) -> None:
-        """GET returns null for optional fields when not set."""
+        """GET returns null for optional structured-address fields when not set."""
         await _full_auth(db_client)
         await db_client.put(
             "/api/v1/company",
@@ -228,9 +236,62 @@ class TestCompanyAPI:
         assert data["email"] is None
         assert data["phone"] is None
         assert data["website"] is None
-        assert data["address_line1"] is None
-        assert data["address_line2"] is None
+        # Structured address fields.
+        assert data["street"] is None
+        assert data["house_number"] is None
+        assert data["house_number_addition"] is None
         assert data["postal_code"] is None
         assert data["city"] is None
+        assert data["province"] is None
         assert data["country_code"] is None
         assert data["base_currency"] == "JPY"
+        # Ensure old fields are gone.
+        assert "address_line1" not in data
+        assert "address_line2" not in data
+
+    async def test_put_company_structured_address_roundtrip(
+        self, db_client: AsyncClient
+    ) -> None:
+        """PUT with all structured address fields → GET returns them correctly."""
+        await _full_auth(db_client)
+
+        resp = await db_client.put(
+            "/api/v1/company",
+            json={
+                "name": "Full Address BV",
+                "base_currency": "EUR",
+                "street": "Herengracht",
+                "house_number": "182",
+                "house_number_addition": "bis",
+                "postal_code": "1016 BS",
+                "city": "Amsterdam",
+                "province": None,
+                "country_code": "NL",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["street"] == "Herengracht"
+        assert data["house_number"] == "182"
+        assert data["house_number_addition"] == "bis"
+        assert data["postal_code"] == "1016 BS"
+        assert data["city"] == "Amsterdam"
+        assert data["province"] is None
+        assert data["country_code"] == "NL"
+
+        # Verify persistence via GET.
+        resp = await db_client.get("/api/v1/company")
+        data = resp.json()
+        assert data["street"] == "Herengracht"
+        assert data["house_number"] == "182"
+
+    async def test_put_company_invalid_country_code_rejected(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Invalid country_code → 422."""
+        await _full_auth(db_client)
+        resp = await db_client.put(
+            "/api/v1/company",
+            json={"name": "X", "base_currency": "EUR", "country_code": "XX"},
+        )
+        assert resp.status_code == 422

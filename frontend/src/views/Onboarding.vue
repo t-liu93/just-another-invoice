@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useCompanyStore } from '../stores/company'
 import { useI18n } from 'vue-i18n'
+import AddressFieldsForm, { type AddressModel } from '../components/AddressFieldsForm.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -22,11 +23,7 @@ const cocNumber = ref('')
 const email = ref('')
 const phone = ref('')
 const website = ref('')
-const addressLine1 = ref('')
-const addressLine2 = ref('')
-const postalCode = ref('')
-const city = ref('')
-const countryCode = ref('')
+const address = ref<AddressModel>({})
 const baseCurrency = ref('EUR')
 
 const saving = ref(false)
@@ -46,11 +43,13 @@ async function handleSaveCompany() {
       email: email.value || null,
       phone: phone.value || null,
       website: website.value || null,
-      address_line1: addressLine1.value || null,
-      address_line2: addressLine2.value || null,
-      postal_code: postalCode.value || null,
-      city: city.value || null,
-      country_code: countryCode.value || null,
+      street: address.value.street ?? null,
+      house_number: address.value.house_number ?? null,
+      house_number_addition: address.value.house_number_addition ?? null,
+      postal_code: address.value.postal_code ?? null,
+      city: address.value.city ?? null,
+      province: address.value.province ?? null,
+      country_code: address.value.country_code ?? null,
       base_currency: baseCurrency.value,
     })
     // Refresh bootstrap so onboarding_completed updates
@@ -132,25 +131,7 @@ onMounted(() => {
 
           <n-divider>{{ t('onboarding.addressSection') }}</n-divider>
 
-          <n-form-item :label="t('onboarding.addressLine1')">
-            <n-input v-model:value="addressLine1" placeholder="Keizersgracht 1" />
-          </n-form-item>
-
-          <n-form-item :label="t('onboarding.addressLine2')">
-            <n-input v-model:value="addressLine2" />
-          </n-form-item>
-
-          <n-form-item :label="t('onboarding.postalCode')">
-            <n-input v-model:value="postalCode" />
-          </n-form-item>
-
-          <n-form-item :label="t('onboarding.city')">
-            <n-input v-model:value="city" />
-          </n-form-item>
-
-          <n-form-item :label="t('onboarding.countryCode')">
-            <n-input v-model:value="countryCode" placeholder="NL" :maxlength="2" />
-          </n-form-item>
+          <AddressFieldsForm v-model="address" />
 
           <n-divider>{{ t('onboarding.financialSection') }}</n-divider>
 

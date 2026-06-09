@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useCompanyStore } from '../../stores/company'
 import { useI18n } from 'vue-i18n'
 import AppHeader from '../../components/AppHeader.vue'
+import AddressFieldsForm, { type AddressModel } from '../../components/AddressFieldsForm.vue'
 import { get, put } from '../../api/http'
 
 const companyStore = useCompanyStore()
@@ -15,11 +16,7 @@ const cocNumber = ref('')
 const email = ref('')
 const phone = ref('')
 const website = ref('')
-const addressLine1 = ref('')
-const addressLine2 = ref('')
-const postalCode = ref('')
-const city = ref('')
-const countryCode = ref('')
+const address = ref<AddressModel>({})
 const baseCurrency = ref('EUR')
 
 const loading = ref(false)
@@ -55,11 +52,15 @@ onMounted(async () => {
       email.value = c.email ?? ''
       phone.value = c.phone ?? ''
       website.value = c.website ?? ''
-      addressLine1.value = c.address_line1 ?? ''
-      addressLine2.value = c.address_line2 ?? ''
-      postalCode.value = c.postal_code ?? ''
-      city.value = c.city ?? ''
-      countryCode.value = c.country_code ?? ''
+      address.value = {
+        street: c.street ?? null,
+        house_number: c.house_number ?? null,
+        house_number_addition: c.house_number_addition ?? null,
+        postal_code: c.postal_code ?? null,
+        city: c.city ?? null,
+        province: c.province ?? null,
+        country_code: c.country_code ?? null,
+      }
       baseCurrency.value = c.base_currency ?? 'EUR'
     }
   } catch {
@@ -93,11 +94,13 @@ async function handleSave() {
       email: email.value || null,
       phone: phone.value || null,
       website: website.value || null,
-      address_line1: addressLine1.value || null,
-      address_line2: addressLine2.value || null,
-      postal_code: postalCode.value || null,
-      city: city.value || null,
-      country_code: countryCode.value || null,
+      street: address.value.street ?? null,
+      house_number: address.value.house_number ?? null,
+      house_number_addition: address.value.house_number_addition ?? null,
+      postal_code: address.value.postal_code ?? null,
+      city: address.value.city ?? null,
+      province: address.value.province ?? null,
+      country_code: address.value.country_code ?? null,
       base_currency: baseCurrency.value,
     })
     message.value = t('settings.company.saveSuccess')
@@ -262,25 +265,7 @@ async function handleSaveNumbering() {
 
                 <n-divider>{{ t('settings.company.addressSection') }}</n-divider>
 
-                <n-form-item :label="t('settings.company.addressLine1')">
-                  <n-input v-model:value="addressLine1" :placeholder="t('settings.company.addressLine1Placeholder')" />
-                </n-form-item>
-
-                <n-form-item :label="t('settings.company.addressLine2')">
-                  <n-input v-model:value="addressLine2" />
-                </n-form-item>
-
-                <n-form-item :label="t('settings.company.postalCode')">
-                  <n-input v-model:value="postalCode" />
-                </n-form-item>
-
-                <n-form-item :label="t('settings.company.city')">
-                  <n-input v-model:value="city" />
-                </n-form-item>
-
-                <n-form-item :label="t('settings.company.countryCode')">
-                  <n-input v-model:value="countryCode" placeholder="NL" :maxlength="2" />
-                </n-form-item>
+                <AddressFieldsForm v-model="address" />
 
                 <n-divider>{{ t('settings.company.financialSection') }}</n-divider>
 

@@ -35,10 +35,12 @@ def _make_company_orm(**overrides: object) -> SimpleNamespace:
         "email": None,
         "phone": None,
         "website": None,
-        "address_line1": None,
-        "address_line2": None,
+        "street": None,
+        "house_number": None,
+        "house_number_addition": None,
         "postal_code": None,
         "city": None,
+        "province": None,
         "country_code": None,
         "base_currency": "EUR",
         "logo_id": None,
@@ -73,7 +75,7 @@ class TestCompanyWriteValidation:
         assert cw.base_currency == "EUR"
 
     def test_valid_full(self) -> None:
-        """Full payload with all optional fields."""
+        """Full payload with all optional fields (structured address)."""
         cw = CompanyWrite(
             name="Acme",
             vat_id="NL123456789B01",
@@ -81,14 +83,18 @@ class TestCompanyWriteValidation:
             email="info@acme.nl",
             phone="+31612345678",
             website="https://acme.nl",
-            address_line1="Keizersgracht 1",
-            address_line2="Apt 2",
+            street="Keizersgracht",
+            house_number="1",
+            house_number_addition="A",
             postal_code="1015 AB",
             city="Amsterdam",
+            province=None,
             country_code="NL",
             base_currency="EUR",
         )
         assert cw.country_code == "NL"
+        assert cw.street == "Keizersgracht"
+        assert cw.house_number == "1"
 
     def test_invalid_currency_rejected(self) -> None:
         """Invalid ISO 4217 code raises ValidationError."""
@@ -301,6 +307,10 @@ class TestUpsertCompany:
             base_currency="USD",
             vat_id="NEW_VAT",
             country_code="DE",
+            street="Musterstraße",
+            house_number="5",
+            postal_code="10115",
+            city="Berlin",
         )
 
         with patch("jai.services.company.set_setting", new_callable=AsyncMock):
@@ -310,3 +320,6 @@ class TestUpsertCompany:
         assert existing.base_currency == "USD"
         assert existing.vat_id == "NEW_VAT"
         assert existing.country_code == "DE"
+        assert existing.street == "Musterstraße"
+        assert existing.house_number == "5"
+        assert existing.city == "Berlin"
