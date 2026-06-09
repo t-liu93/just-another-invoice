@@ -30,6 +30,7 @@ from jai.models.user import User
 from jai.schemas.company import CompanyRead, CompanyWrite
 from jai.schemas.setting import SETTING_KEY_ONBOARDING_COMPLETED, OnboardingState
 from jai.services.settings import set_setting
+from jai.services.vat import seed_for_company as _seed_vat
 
 #: Advisory-lock key serialising the first company creation.
 _COMPANY_LOCK_KEY = 4915_0002
@@ -166,5 +167,8 @@ async def upsert_company(
     # Link owner to the company.
     owner.company_id = company.id
     await session.flush()
+
+    # Seed default VAT dictionaries for the new company.
+    await _seed_vat(session, company.id)
 
     return company_to_read(company)

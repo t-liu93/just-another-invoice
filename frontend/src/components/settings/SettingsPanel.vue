@@ -15,12 +15,14 @@ import {
   OptionsOutline,
   MailOutline,
   ColorPaletteOutline,
+  BookOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
 import { useSettingsPanel, type SettingsCategory } from '../../composables/useSettingsPanel'
 import PreferenceSettings from './PreferenceSettings.vue'
 import SmtpSettingsForm from './SmtpSettingsForm.vue'
 import ThemeSettings from './ThemeSettings.vue'
+import DictionarySettings from './DictionarySettings.vue'
 
 const { t } = useI18n()
 const { isOpen, activeCategory, close } = useSettingsPanel()
@@ -44,6 +46,11 @@ const menuOptions = computed<MenuOption[]>(() => [
     label: t('settings.panel.categoryTheme'),
     key: 'theme',
     icon: renderIcon(ColorPaletteOutline),
+  },
+  {
+    label: t('settings.panel.categoryDictionary'),
+    key: 'dictionary',
+    icon: renderIcon(BookOutline),
   },
   {
     label: `${t('settings.panel.categoryAi')} · ${t('settings.panel.comingSoon')}`,
@@ -87,6 +94,7 @@ function onMenuUpdate(key: string) {
         <PreferenceSettings v-if="activeCategory === 'preference'" />
         <SmtpSettingsForm v-else-if="activeCategory === 'smtp'" />
         <ThemeSettings v-else-if="activeCategory === 'theme'" />
+        <DictionarySettings v-else-if="activeCategory === 'dictionary'" />
       </div>
     </div>
   </n-modal>

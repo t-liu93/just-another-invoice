@@ -167,7 +167,55 @@
       "categorySmtp": "邮件 (SMTP)",
       "categoryTheme": "主题",
       "categoryAi": "AI",
+      "categoryDictionary": "字典",
       "comingSoon": "敬请期待"
+    }
+  },
+  "vat": {
+    "rates": "税率",
+    "treatments": "VAT 处理类别",
+    "active": "启用",
+    "inactive": "停用",
+    "yes": "是",
+    "no": "否",
+    "rate": {
+      "label": "名称",
+      "labelPlaceholder": "如：NL 标准税率 (21%)",
+      "labelRequired": "名称不能为空。",
+      "percent": "税率 (%)",
+      "percentPlaceholder": "如：21",
+      "active": "启用",
+      "actions": "操作",
+      "create": "新增税率",
+      "edit": "编辑税率",
+      "save": "保存",
+      "cancel": "取消",
+      "delete": "删除",
+      "deleteConfirm": "确定删除此税率？",
+      "saveSuccess": "税率已保存。",
+      "saveFailed": "保存税率失败。",
+      "deleteSuccess": "税率已删除。",
+      "deleteFailed": "删除税率失败。",
+      "loadFailed": "加载税率失败。"
+    },
+    "treatment": {
+      "code": "代码",
+      "label": "名称",
+      "side": "方向",
+      "effect": "效果",
+      "requiresIcp": "ICP",
+      "deductible": "可抵扣",
+      "loadFailed": "加载 VAT 处理类别失败。"
+    },
+    "side": {
+      "sales": "销售",
+      "purchase": "采购"
+    },
+    "effect": {
+      "applyRate": "按税率计税",
+      "zeroReverse": "归零（反向征收）",
+      "zeroExport": "归零（出口）",
+      "exempt": "免税"
     }
   },
   "address": {

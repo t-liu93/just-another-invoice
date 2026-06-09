@@ -24,3 +24,19 @@ class AddressType(enum.StrEnum):
 
     BILLING = "BILLING"
     SHIPPING = "SHIPPING"
+
+
+class VatTreatmentSide(enum.StrEnum):
+    """Which side of a transaction a VAT treatment applies to."""
+
+    SALES = "SALES"
+    PURCHASE = "PURCHASE"
+
+
+class VatTreatmentEffect(enum.StrEnum):
+    """How a VAT treatment affects the tax amount on a line item."""
+
+    APPLY_RATE = "APPLY_RATE"
+    ZERO_REVERSE = "ZERO_REVERSE"
+    ZERO_EXPORT = "ZERO_EXPORT"
+    EXEMPT = "EXEMPT"

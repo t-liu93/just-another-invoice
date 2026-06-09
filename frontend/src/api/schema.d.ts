@@ -450,6 +450,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vat-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Vat Rates Endpoint */
+        get: operations["list_vat_rates_endpoint_api_v1_vat_rates_get"];
+        put?: never;
+        /** Create Vat Rate Endpoint */
+        post: operations["create_vat_rate_endpoint_api_v1_vat_rates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vat-rates/{rate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Vat Rate Endpoint */
+        get: operations["get_vat_rate_endpoint_api_v1_vat_rates__rate_id__get"];
+        /** Update Vat Rate Endpoint */
+        put: operations["update_vat_rate_endpoint_api_v1_vat_rates__rate_id__put"];
+        post?: never;
+        /** Delete Vat Rate Endpoint */
+        delete: operations["delete_vat_rate_endpoint_api_v1_vat_rates__rate_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vat-treatments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Vat Treatments Endpoint */
+        get: operations["list_vat_treatments_endpoint_api_v1_vat_treatments_get"];
+        put?: never;
+        /** Create Vat Treatment Endpoint */
+        post: operations["create_vat_treatment_endpoint_api_v1_vat_treatments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vat-treatments/{treatment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Vat Treatment Endpoint */
+        get: operations["get_vat_treatment_endpoint_api_v1_vat_treatments__treatment_id__get"];
+        /** Update Vat Treatment Endpoint */
+        put: operations["update_vat_treatment_endpoint_api_v1_vat_treatments__treatment_id__put"];
+        post?: never;
+        /** Delete Vat Treatment Endpoint */
+        delete: operations["delete_vat_treatment_endpoint_api_v1_vat_treatments__treatment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1002,6 +1076,138 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VatRateListResponse
+         * @description List envelope for GET /api/v1/vat-rates.
+         */
+        VatRateListResponse: {
+            /** Items */
+            items: components["schemas"]["VatRateRead"][];
+        };
+        /**
+         * VatRateRead
+         * @description Response body for VAT rate endpoints.
+         */
+        VatRateRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Percent */
+            percent: string;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * VatRateWrite
+         * @description Request body for POST/PUT /api/v1/vat-rates.
+         */
+        VatRateWrite: {
+            /** Label */
+            label: string;
+            /** Percent */
+            percent: number | string;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
+        };
+        /**
+         * VatTreatmentEffect
+         * @description How a VAT treatment affects the tax amount on a line item.
+         * @enum {string}
+         */
+        VatTreatmentEffect: "APPLY_RATE" | "ZERO_REVERSE" | "ZERO_EXPORT" | "EXEMPT";
+        /**
+         * VatTreatmentListResponse
+         * @description List envelope for GET /api/v1/vat-treatments.
+         */
+        VatTreatmentListResponse: {
+            /** Items */
+            items: components["schemas"]["VatTreatmentRead"][];
+        };
+        /**
+         * VatTreatmentRead
+         * @description Response body for VAT treatment endpoints.
+         */
+        VatTreatmentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            side: components["schemas"]["VatTreatmentSide"];
+            effect: components["schemas"]["VatTreatmentEffect"];
+            /** Report Box */
+            report_box: string | null;
+            /** Requires Icp */
+            requires_icp: boolean;
+            /** Deductible */
+            deductible: boolean | null;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * VatTreatmentSide
+         * @description Which side of a transaction a VAT treatment applies to.
+         * @enum {string}
+         */
+        VatTreatmentSide: "SALES" | "PURCHASE";
+        /**
+         * VatTreatmentWrite
+         * @description Request body for POST/PUT /api/v1/vat-treatments.
+         *
+         *     ``report_box`` is intentionally absent: M4 keeps it NULL throughout;
+         *     M10 will fill it collaboratively and add the field back here.
+         */
+        VatTreatmentWrite: {
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            side: components["schemas"]["VatTreatmentSide"];
+            effect: components["schemas"]["VatTreatmentEffect"];
+            /**
+             * Requires Icp
+             * @default false
+             */
+            requires_icp?: boolean;
+            /** Deductible */
+            deductible?: boolean | null;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
         };
     };
     responses: never;
@@ -1761,6 +1967,314 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UserPreferences"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_vat_rates_endpoint_api_v1_vat_rates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatRateListResponse"];
+                };
+            };
+        };
+    };
+    create_vat_rate_endpoint_api_v1_vat_rates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VatRateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatRateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vat_rate_endpoint_api_v1_vat_rates__rate_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatRateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_vat_rate_endpoint_api_v1_vat_rates__rate_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VatRateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatRateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_vat_rate_endpoint_api_v1_vat_rates__rate_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_vat_treatments_endpoint_api_v1_vat_treatments_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by side: SALES or PURCHASE */
+                side?: components["schemas"]["VatTreatmentSide"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatTreatmentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_vat_treatment_endpoint_api_v1_vat_treatments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VatTreatmentWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatTreatmentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vat_treatment_endpoint_api_v1_vat_treatments__treatment_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                treatment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatTreatmentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_vat_treatment_endpoint_api_v1_vat_treatments__treatment_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                treatment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VatTreatmentWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatTreatmentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_vat_treatment_endpoint_api_v1_vat_treatments__treatment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                treatment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

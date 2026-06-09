@@ -167,7 +167,55 @@
       "categorySmtp": "Email (SMTP)",
       "categoryTheme": "Theme",
       "categoryAi": "AI",
+      "categoryDictionary": "Dictionaries",
       "comingSoon": "Coming soon"
+    }
+  },
+  "vat": {
+    "rates": "VAT Rates",
+    "treatments": "VAT Treatments",
+    "active": "Active",
+    "inactive": "Inactive",
+    "yes": "Yes",
+    "no": "No",
+    "rate": {
+      "label": "Label",
+      "labelPlaceholder": "e.g. NL standard (21%)",
+      "labelRequired": "Label is required.",
+      "percent": "Rate (%)",
+      "percentPlaceholder": "e.g. 21",
+      "active": "Active",
+      "actions": "Actions",
+      "create": "Add Rate",
+      "edit": "Edit Rate",
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this VAT rate?",
+      "saveSuccess": "VAT rate saved.",
+      "saveFailed": "Failed to save VAT rate.",
+      "deleteSuccess": "VAT rate deleted.",
+      "deleteFailed": "Failed to delete VAT rate.",
+      "loadFailed": "Failed to load VAT rates."
+    },
+    "treatment": {
+      "code": "Code",
+      "label": "Label",
+      "side": "Side",
+      "effect": "Effect",
+      "requiresIcp": "ICP",
+      "deductible": "Deductible",
+      "loadFailed": "Failed to load VAT treatments."
+    },
+    "side": {
+      "sales": "Sales",
+      "purchase": "Purchase"
+    },
+    "effect": {
+      "applyRate": "Apply Rate",
+      "zeroReverse": "Zero (Reverse)",
+      "zeroExport": "Zero (Export)",
+      "exempt": "Exempt"
     }
   },
   "address": {
