@@ -181,6 +181,22 @@
       "comingSoon": "敬请期待"
     }
   },
+  "address": {
+    "street": "街道",
+    "streetPlaceholder": "Keizersgracht",
+    "houseNumber": "门牌号",
+    "houseNumberPlaceholder": "1",
+    "houseNumberAddition": "附件",
+    "houseNumberAdditionPlaceholder": "A",
+    "postalCode": "邮政编码",
+    "postalCodePlaceholder": "1234 AB",
+    "city": "城市",
+    "cityPlaceholder": "Amsterdam",
+    "province": "省/州",
+    "provincePlaceholder": "Noord-Holland",
+    "countryRegion": "国家/地区",
+    "countryRegionPlaceholder": "NL"
+  },
   "customers": {
     "title": "客户",
     "empty": "暂无客户，创建您的第一个客户开始使用。",
@@ -212,6 +228,9 @@
     "infoSection": "客户信息",
     "financialSection": "财务",
     "contactSection": "联系方式",
+    "addressSection": "地址",
+    "billingAddress": "账单地址",
+    "shippingAddress": "收货地址",
     "prevPage": "上一页",
     "nextPage": "下一页",
     "pageInfo": "第 {start}–{end} 条，共 {total} 条",

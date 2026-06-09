@@ -1,13 +1,17 @@
 <script setup lang="ts">
 /**
- * Customer edit / create page – scalar fields only (addresses in step 2).
+ * Customer edit / create page – scalar fields + billing/shipping addresses (M3 step 2).
  */
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMessage, NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert, NDivider } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
+import AddressFieldsForm, { type AddressModel } from '../../components/AddressFieldsForm.vue'
 import { useCustomersStore } from '../../stores/customers'
+import type { components } from '../../api/schema'
+
+type AddressWrite = components['schemas']['AddressWrite']
 
 const route = useRoute()
 const router = useRouter()
@@ -30,6 +34,26 @@ const website = ref<string | null>(null)
 const vatId = ref<string | null>(null)
 const currency = ref<string | null>(null)
 
+// Address models.
+const billingAddress = ref<AddressModel>({})
+const shippingAddress = ref<AddressModel>({})
+
+function isAddressEmpty(addr: AddressModel): boolean {
+  return !addr.street && !addr.house_number && !addr.house_number_addition
+    && !addr.postal_code && !addr.city && !addr.province && !addr.country_code
+}
+
+function buildAddressesPayload(): AddressWrite[] {
+  const out: AddressWrite[] = []
+  if (!isAddressEmpty(billingAddress.value)) {
+    out.push({ type: 'BILLING', ...billingAddress.value })
+  }
+  if (!isAddressEmpty(shippingAddress.value)) {
+    out.push({ type: 'SHIPPING', ...shippingAddress.value })
+  }
+  return out
+}
+
 onMounted(async () => {
   const id = route.params.id as string | undefined
   if (id && id !== 'new') {
@@ -45,6 +69,21 @@ onMounted(async () => {
       website.value = customer.website ?? null
       vatId.value = customer.vat_id ?? null
       currency.value = customer.currency ?? null
+
+      // Populate address fields from existing data.
+      for (const addr of customer.addresses ?? []) {
+        const model: AddressModel = {
+          street: addr.street ?? null,
+          house_number: addr.house_number ?? null,
+          house_number_addition: addr.house_number_addition ?? null,
+          postal_code: addr.postal_code ?? null,
+          city: addr.city ?? null,
+          province: addr.province ?? null,
+          country_code: addr.country_code ?? null,
+        }
+        if (addr.type === 'BILLING') billingAddress.value = model
+        else if (addr.type === 'SHIPPING') shippingAddress.value = model
+      }
     } catch {
       pageError.value = t('customers.loadFailed')
     } finally {
@@ -69,6 +108,7 @@ async function handleSave() {
       website: website.value?.trim() || null,
       vat_id: vatId.value?.trim() || null,
       currency: currency.value?.trim() || null,
+      addresses: buildAddressesPayload(),
     }
     if (isEdit.value) {
       await store.updateCustomer(route.params.id as string, payload)
@@ -146,6 +186,21 @@ function handleCancel() {
                 <n-form-item :label="t('customers.currency')">
                   <n-input v-model:value="currency" :placeholder="t('customers.currencyPlaceholder')" style="max-width: 200px" />
                 </n-form-item>
+
+                <!-- Addresses section -->
+                <n-divider>{{ t('customers.addressSection') }}</n-divider>
+
+                <!-- Billing address -->
+                <p class="address-type-label">{{ t('customers.billingAddress') }}</p>
+                <AddressFieldsForm
+                  v-model="billingAddress"
+                />
+
+                <!-- Shipping address -->
+                <p class="address-type-label">{{ t('customers.shippingAddress') }}</p>
+                <AddressFieldsForm
+                  v-model="shippingAddress"
+                />
               </n-form>
 
               <n-space justify="end" style="margin-top: 16px">
@@ -168,12 +223,18 @@ function handleCancel() {
 }
 
 .customer-edit-container {
-  max-width: 640px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 24px;
 }
 
 .customer-edit-container h2 {
   margin: 0 0 16px;
+}
+
+.address-type-label {
+  margin: 0 0 8px;
+  font-weight: 500;
+  color: var(--n-text-color-3, #888);
 }
 </style>

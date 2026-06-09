@@ -11,6 +11,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AddressFieldsForm: typeof import('./components/AddressFieldsForm.vue')['default']
     AppHeader: typeof import('./components/AppHeader.vue')['default']
     NAlert: typeof import('naive-ui')['NAlert']
     NButton: typeof import('naive-ui')['NButton']

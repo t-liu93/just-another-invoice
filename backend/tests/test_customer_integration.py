@@ -1,9 +1,13 @@
-"""Integration tests for customer CRUD + list (M3 step 1).
+"""Integration tests for customer CRUD + list + addresses (M3 step 1 + 2).
 
 Requires a running PostgreSQL instance (``pytest -m integration``).
 
 Covers:
 - Full CRUD roundtrip (create → read → update → delete)
+- Nested addresses: create with two address types, update, delete one type
+- Duplicate address type in request → 422
+- Cascade delete: deleting customer also deletes its addresses
+- country_code validation → 422
 - List with search (``q``) and pagination (``limit``/``offset``/``total``)
 - Company-scoped isolation (cross-company → 404)
 - Validation errors (invalid currency, invalid email) → 422
@@ -536,6 +540,307 @@ class TestCustomerAuth:
 
         resp = await db_client.get("/api/v1/customers")
         assert resp.status_code == 400
+
+
+@pytest.mark.integration
+class TestCustomerAddresses:
+    """Integration tests for nested address create/update/delete (M3 step 2)."""
+
+    async def test_create_with_both_addresses(self, db_client: AsyncClient) -> None:
+        """POST /customers with billing + shipping addresses."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Addr Test",
+                "addresses": [
+                    {
+                        "type": "BILLING",
+                        "street": "Keizersgracht",
+                        "house_number": "1",
+                        "city": "Amsterdam",
+                        "country_code": "NL",
+                    },
+                    {
+                        "type": "SHIPPING",
+                        "street": "Prinsengracht",
+                        "house_number": "2",
+                        "city": "Amsterdam",
+                        "country_code": "NL",
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert len(data["addresses"]) == 2
+        types = {a["type"] for a in data["addresses"]}
+        assert "BILLING" in types
+        assert "SHIPPING" in types
+
+        billing = next(a for a in data["addresses"] if a["type"] == "BILLING")
+        assert billing["street"] == "Keizersgracht"
+        assert billing["city"] == "Amsterdam"
+        assert billing["country_code"] == "NL"
+
+    async def test_create_billing_only(self, db_client: AsyncClient) -> None:
+        """POST /customers with only billing address."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Billing Only",
+                "addresses": [
+                    {"type": "BILLING", "city": "Rotterdam"},
+                ],
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert len(data["addresses"]) == 1
+        assert data["addresses"][0]["type"] == "BILLING"
+        assert data["addresses"][0]["city"] == "Rotterdam"
+
+    async def test_get_customer_includes_addresses(self, db_client: AsyncClient) -> None:
+        """GET /customers/{id} returns addresses in the response."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Get Addr",
+                "addresses": [{"type": "BILLING", "city": "Leiden"}],
+            },
+        )
+        cid = create_resp.json()["id"]
+
+        resp = await db_client.get(f"/api/v1/customers/{cid}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["addresses"]) == 1
+        assert data["addresses"][0]["city"] == "Leiden"
+
+    async def test_update_changes_address_fields(self, db_client: AsyncClient) -> None:
+        """PUT /customers/{id} updates address fields in-place."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Update Addr",
+                "addresses": [{"type": "BILLING", "city": "OldCity"}],
+            },
+        )
+        cid = create_resp.json()["id"]
+
+        resp = await db_client.put(
+            f"/api/v1/customers/{cid}",
+            json={
+                "name": "Update Addr",
+                "addresses": [{"type": "BILLING", "city": "NewCity", "street": "NewStreet"}],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["addresses"]) == 1
+        assert data["addresses"][0]["city"] == "NewCity"
+        assert data["addresses"][0]["street"] == "NewStreet"
+
+    async def test_update_removes_address_type(self, db_client: AsyncClient) -> None:
+        """PUT without a type in addresses[] removes that address type."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Remove Addr",
+                "addresses": [
+                    {"type": "BILLING", "city": "Amsterdam"},
+                    {"type": "SHIPPING", "city": "Rotterdam"},
+                ],
+            },
+        )
+        cid = create_resp.json()["id"]
+        assert len(create_resp.json()["addresses"]) == 2
+
+        # Update with only billing → shipping should be removed.
+        resp = await db_client.put(
+            f"/api/v1/customers/{cid}",
+            json={
+                "name": "Remove Addr",
+                "addresses": [{"type": "BILLING", "city": "Amsterdam"}],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["addresses"]) == 1
+        assert data["addresses"][0]["type"] == "BILLING"
+
+    async def test_update_add_address_type(self, db_client: AsyncClient) -> None:
+        """PUT with a new type in addresses[] adds that address."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "Add Addr", "addresses": [{"type": "BILLING", "city": "A"}]},
+        )
+        cid = create_resp.json()["id"]
+
+        resp = await db_client.put(
+            f"/api/v1/customers/{cid}",
+            json={
+                "name": "Add Addr",
+                "addresses": [
+                    {"type": "BILLING", "city": "A"},
+                    {"type": "SHIPPING", "city": "B"},
+                ],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["addresses"]) == 2
+
+    async def test_update_remove_all_addresses(self, db_client: AsyncClient) -> None:
+        """PUT with empty addresses[] removes all existing addresses."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "Clear Addr", "addresses": [{"type": "BILLING", "city": "X"}]},
+        )
+        cid = create_resp.json()["id"]
+
+        resp = await db_client.put(
+            f"/api/v1/customers/{cid}",
+            json={"name": "Clear Addr", "addresses": []},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["addresses"] == []
+
+    async def test_duplicate_address_type_rejected(self, db_client: AsyncClient) -> None:
+        """Two addresses of same type in one request → 422."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Dup Addr",
+                "addresses": [
+                    {"type": "BILLING", "city": "A"},
+                    {"type": "BILLING", "city": "B"},
+                ],
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_invalid_country_code_in_address_rejected(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Invalid country_code in address → 422."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Invalid CC",
+                "addresses": [{"type": "BILLING", "country_code": "INVALID"}],
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_delete_customer_cascades_to_addresses(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """Deleting a customer also deletes its addresses (DB ON DELETE CASCADE)."""
+        from sqlalchemy import select
+
+        from jai.models.address import Address
+
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Cascade Test",
+                "addresses": [
+                    {"type": "BILLING", "city": "Amsterdam"},
+                    {"type": "SHIPPING", "city": "Rotterdam"},
+                ],
+            },
+        )
+        cid = create_resp.json()["id"]
+
+        # Confirm 2 addresses exist in DB before delete.
+        async with db_session_maker() as session:
+            result = await session.execute(
+                select(Address).where(Address.customer_id == uuid.UUID(cid))
+            )
+            addresses_before = result.scalars().all()
+        assert len(addresses_before) == 2
+
+        # Delete the customer.
+        del_resp = await db_client.delete(f"/api/v1/customers/{cid}")
+        assert del_resp.status_code == 204
+
+        # Confirm addresses are gone too (CASCADE).
+        async with db_session_maker() as session:
+            result = await session.execute(
+                select(Address).where(Address.customer_id == uuid.UUID(cid))
+            )
+            addresses_after = result.scalars().all()
+        assert len(addresses_after) == 0
+
+    async def test_address_persists_across_refresh(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Addresses round-trip: create then GET returns same data."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Roundtrip",
+                "addresses": [
+                    {
+                        "type": "BILLING",
+                        "street": "Damrak",
+                        "house_number": "10",
+                        "house_number_addition": "B",
+                        "postal_code": "1012 LG",
+                        "city": "Amsterdam",
+                        "province": None,
+                        "country_code": "NL",
+                    }
+                ],
+            },
+        )
+        assert create_resp.status_code == 201
+        cid = create_resp.json()["id"]
+
+        get_resp = await db_client.get(f"/api/v1/customers/{cid}")
+        assert get_resp.status_code == 200
+        addr = get_resp.json()["addresses"][0]
+        assert addr["street"] == "Damrak"
+        assert addr["house_number"] == "10"
+        assert addr["house_number_addition"] == "B"
+        assert addr["postal_code"] == "1012 LG"
+        assert addr["city"] == "Amsterdam"
+        assert addr["country_code"] == "NL"
 
 
 # ---------------------------------------------------------------------------

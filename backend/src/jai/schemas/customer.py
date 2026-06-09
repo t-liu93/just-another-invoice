@@ -1,4 +1,4 @@
-"""Pydantic schemas for customer CRUD + list (M3 step 1).
+"""Pydantic schemas for customer CRUD + list (M3 step 1 + step 2).
 
 ``CustomerWrite`` – request body for ``POST/PUT /api/v1/customers``.
 ``CustomerRead``  – response body for ``GET /api/v1/customers`` and ``POST/PUT``.
@@ -8,6 +8,9 @@ Validation:
   - ``currency`` must be a valid ISO 4217 3-letter code (reuses company validator).
   - ``email`` must match a basic email pattern.
   - ``name`` must be non-empty after stripping whitespace.
+  - ``addresses[].type`` must be unique within a single request (→ 422).
+  - ``addresses[].country_code`` must be a valid ISO 3166-1 alpha-2 code
+    (validated inside AddressWrite via AddressFields).
 """
 
 from __future__ import annotations
@@ -17,8 +20,9 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
+from jai.schemas.address import AddressRead, AddressWrite
 from jai.schemas.company import _validate_currency
 
 #: Simple email regex – not RFC 5322 complete, but catches obvious mistakes.
@@ -37,6 +41,7 @@ class CustomerWrite(BaseModel):
     vat_id: str | None = None
     currency: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
+    addresses: list[AddressWrite] = Field(default_factory=list)
 
     @field_validator("currency")
     @classmethod
@@ -57,6 +62,14 @@ class CustomerWrite(BaseModel):
             raise ValueError(f"Invalid email format: {v!r}")
         return v
 
+    @model_validator(mode="after")
+    def validate_address_types_unique(self) -> CustomerWrite:
+        """Ensure no duplicate address types in a single request."""
+        types = [a.type for a in self.addresses]
+        if len(types) != len(set(types)):
+            raise ValueError("Duplicate address types are not allowed.")
+        return self
+
 
 class CustomerRead(BaseModel):
     """Response body for customer endpoints (no ``company_id`` exposed)."""
@@ -71,7 +84,7 @@ class CustomerRead(BaseModel):
     vat_id: str | None = None
     currency: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
-    addresses: list[object] = Field(default_factory=list)  # placeholder for step 2
+    addresses: list[AddressRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

@@ -181,6 +181,22 @@
       "comingSoon": "Coming soon"
     }
   },
+  "address": {
+    "street": "Street",
+    "streetPlaceholder": "Keizersgracht",
+    "houseNumber": "Number",
+    "houseNumberPlaceholder": "1",
+    "houseNumberAddition": "Addition",
+    "houseNumberAdditionPlaceholder": "A",
+    "postalCode": "Postal code",
+    "postalCodePlaceholder": "1234 AB",
+    "city": "City",
+    "cityPlaceholder": "Amsterdam",
+    "province": "Province",
+    "provincePlaceholder": "Noord-Holland",
+    "countryRegion": "Country/Region",
+    "countryRegionPlaceholder": "NL"
+  },
   "customers": {
     "title": "Customers",
     "empty": "No customers yet. Create your first customer to get started.",
@@ -212,6 +228,9 @@
     "infoSection": "Customer Information",
     "financialSection": "Financial",
     "contactSection": "Contact",
+    "addressSection": "Addresses",
+    "billingAddress": "Billing address",
+    "shippingAddress": "Shipping address",
     "prevPage": "Previous",
     "nextPage": "Next",
     "pageInfo": "Showing {start}–{end} of {total}",

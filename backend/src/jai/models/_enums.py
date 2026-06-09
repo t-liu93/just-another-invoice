@@ -17,3 +17,10 @@ class SettingLevel(enum.StrEnum):
     GLOBAL = "GLOBAL"
     COMPANY = "COMPANY"
     USER = "USER"
+
+
+class AddressType(enum.StrEnum):
+    """Address type for customer addresses (billing or shipping)."""
+
+    BILLING = "BILLING"
+    SHIPPING = "SHIPPING"

@@ -1,8 +1,10 @@
-"""Unit tests for ``jai.schemas.customer`` and ``jai.services.customer``.
+"""Unit tests for customer schemas, address schemas, and customer service.
 
 All tests use mocks — no running PostgreSQL required.  Verifies:
 - Schema validation (ISO 4217, email format, name constraints)
-- Service list/get/create/update/delete logic
+- Address schema: country_code ISO 3166 validation
+- Address type duplication: duplicate types in addresses[] rejected
+- Service list/get/create/update/delete logic (with address diff)
 - Company-scoped filtering
 """
 
@@ -15,8 +17,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from jai.models._enums import AddressType
+from jai.schemas.address import AddressRead, AddressWrite
 from jai.schemas.customer import CustomerListResponse, CustomerRead, CustomerWrite
 from jai.services.customer import (
+    _address_to_read,
     _to_read,
     create_customer,
     delete_customer,
@@ -44,6 +49,31 @@ def _make_customer_orm(**overrides: object) -> SimpleNamespace:
         "vat_id": None,
         "currency": None,
         "extra": {},
+        "addresses": [],
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def _make_address_orm(
+    customer_id: uuid.UUID | None = None,
+    addr_type: AddressType = AddressType.BILLING,
+    **overrides: object,
+) -> SimpleNamespace:
+    """Build a mock Address ORM instance with sensible defaults."""
+    defaults: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "customer_id": customer_id or uuid.uuid4(),
+        "type": addr_type,
+        "street": None,
+        "house_number": None,
+        "house_number_addition": None,
+        "postal_code": None,
+        "city": None,
+        "province": None,
+        "country_code": None,
         "created_at": datetime.now(UTC),
         "updated_at": datetime.now(UTC),
     }
@@ -63,7 +93,128 @@ def _make_owner(**overrides: object) -> SimpleNamespace:
 
 
 # ---------------------------------------------------------------------------
-# Schema validation
+# AddressWrite schema validation
+# ---------------------------------------------------------------------------
+
+
+class TestAddressWriteValidation:
+    """Tests for ``AddressWrite`` Pydantic schema."""
+
+    def test_valid_minimal(self) -> None:
+        """Minimal valid: just a type."""
+        aw = AddressWrite(type=AddressType.BILLING)
+        assert aw.type == AddressType.BILLING
+        assert aw.street is None
+        assert aw.country_code is None
+
+    def test_valid_full(self) -> None:
+        """Full address with all fields."""
+        aw = AddressWrite(
+            type=AddressType.SHIPPING,
+            street="Keizersgracht",
+            house_number="1",
+            house_number_addition="A",
+            postal_code="1234 AB",
+            city="Amsterdam",
+            province="Noord-Holland",
+            country_code="NL",
+        )
+        assert aw.type == AddressType.SHIPPING
+        assert aw.street == "Keizersgracht"
+        assert aw.country_code == "NL"
+
+    def test_valid_country_code_normalised(self) -> None:
+        """country_code is normalised to uppercase."""
+        aw = AddressWrite(type=AddressType.BILLING, country_code="nl")
+        assert aw.country_code == "NL"
+
+    def test_invalid_country_code_rejected(self) -> None:
+        """Non-ISO-3166 country_code raises ValidationError."""
+        with pytest.raises(Exception, match="Invalid ISO 3166"):
+            AddressWrite(type=AddressType.BILLING, country_code="XX")
+
+    def test_country_code_too_long_rejected(self) -> None:
+        """3-letter country_code is rejected."""
+        with pytest.raises(Exception, match="ISO 3166"):
+            AddressWrite(type=AddressType.BILLING, country_code="NLD")
+
+    def test_country_code_none_allowed(self) -> None:
+        """None country_code is accepted."""
+        aw = AddressWrite(type=AddressType.BILLING, country_code=None)
+        assert aw.country_code is None
+
+    def test_house_number_text(self) -> None:
+        """house_number accepts text including ranges like '12-14'."""
+        aw = AddressWrite(type=AddressType.BILLING, house_number="12-14")
+        assert aw.house_number == "12-14"
+
+
+# ---------------------------------------------------------------------------
+# CustomerWrite schema validation – address-related
+# ---------------------------------------------------------------------------
+
+
+class TestCustomerWriteAddressValidation:
+    """Tests for address fields in CustomerWrite."""
+
+    def test_addresses_empty_by_default(self) -> None:
+        """addresses defaults to empty list."""
+        cw = CustomerWrite(name="X")
+        assert cw.addresses == []
+
+    def test_addresses_with_billing(self) -> None:
+        """Single billing address accepted."""
+        cw = CustomerWrite(
+            name="X",
+            addresses=[AddressWrite(type=AddressType.BILLING, city="Amsterdam")],
+        )
+        assert len(cw.addresses) == 1
+        assert cw.addresses[0].type == AddressType.BILLING
+
+    def test_addresses_billing_and_shipping(self) -> None:
+        """Two addresses with different types accepted."""
+        cw = CustomerWrite(
+            name="X",
+            addresses=[
+                AddressWrite(type=AddressType.BILLING),
+                AddressWrite(type=AddressType.SHIPPING),
+            ],
+        )
+        assert len(cw.addresses) == 2
+
+    def test_duplicate_address_types_rejected(self) -> None:
+        """Two BILLING addresses in same request → 422."""
+        with pytest.raises(Exception, match="Duplicate address types"):
+            CustomerWrite(
+                name="X",
+                addresses=[
+                    AddressWrite(type=AddressType.BILLING),
+                    AddressWrite(type=AddressType.BILLING),
+                ],
+            )
+
+    def test_duplicate_shipping_types_rejected(self) -> None:
+        """Two SHIPPING addresses in same request → 422."""
+        with pytest.raises(Exception, match="Duplicate address types"):
+            CustomerWrite(
+                name="X",
+                addresses=[
+                    AddressWrite(type=AddressType.SHIPPING),
+                    AddressWrite(type=AddressType.SHIPPING),
+                ],
+            )
+
+    def test_invalid_country_code_in_address_rejected(self) -> None:
+        """Invalid country_code inside an address → ValidationError."""
+        with pytest.raises(Exception, match="ISO 3166"):
+            CustomerWrite(
+                name="X",
+                addresses=[AddressWrite(type=AddressType.BILLING, country_code="INVALID")],
+            )
+
+
+# ---------------------------------------------------------------------------
+# Schema validation (existing)
 # ---------------------------------------------------------------------------
 
 
@@ -161,6 +312,41 @@ class TestCustomerWriteValidation:
 
 
 # ---------------------------------------------------------------------------
+# Service logic – _address_to_read mapping
+# ---------------------------------------------------------------------------
+
+
+class TestAddressToRead:
+    """Tests for ``_address_to_read`` mapping."""
+
+    def test_basic_mapping(self) -> None:
+        """All address fields are mapped correctly."""
+        addr_id = uuid.uuid4()
+        orm = _make_address_orm(
+            addr_type=AddressType.BILLING,
+            street="Keizersgracht",
+            city="Amsterdam",
+            country_code="NL",
+        )
+        orm.id = addr_id
+        read = _address_to_read(orm)
+        assert isinstance(read, AddressRead)
+        assert read.id == addr_id
+        assert read.type == AddressType.BILLING
+        assert read.street == "Keizersgracht"
+        assert read.city == "Amsterdam"
+        assert read.country_code == "NL"
+
+    def test_null_fields_stay_null(self) -> None:
+        """Optional address fields stay None."""
+        orm = _make_address_orm()
+        read = _address_to_read(orm)
+        assert read.street is None
+        assert read.house_number is None
+        assert read.country_code is None
+
+
+# ---------------------------------------------------------------------------
 # Service logic – _to_read mapping
 # ---------------------------------------------------------------------------
 
@@ -193,6 +379,21 @@ class TestCustomerToRead:
         assert read.website is None
         assert read.vat_id is None
         assert read.currency is None
+
+    def test_with_explicit_addresses(self) -> None:
+        """Addresses passed explicitly are included in the read."""
+        orm = _make_customer_orm()
+        addr_orm = _make_address_orm(addr_type=AddressType.BILLING, street="Main St")
+        read = _to_read(orm, addresses=[addr_orm])
+        assert len(read.addresses) == 1
+        assert read.addresses[0].street == "Main St"
+        assert read.addresses[0].type == AddressType.BILLING
+
+    def test_empty_addresses_when_no_addresses(self) -> None:
+        """No addresses → empty list in read."""
+        orm = _make_customer_orm(addresses=[])
+        read = _to_read(orm)
+        assert read.addresses == []
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +498,7 @@ class TestCreateCustomer:
         async def _fake_flush(*args: object, **kwargs: object) -> None:
             for call_args in session.add.call_args_list:
                 obj = call_args[0][0]
-                if obj.id is None:
+                if not hasattr(obj, "id") or obj.id is None:
                     obj.id = uuid.uuid4()
                 if not hasattr(obj, "created_at") or obj.created_at is None:
                     obj.created_at = datetime.now(UTC)
@@ -306,6 +507,11 @@ class TestCreateCustomer:
 
         session.flush = AsyncMock(side_effect=_fake_flush)
         session.refresh = AsyncMock()
+
+        # _load_addresses returns empty list (no addresses in payload).
+        addr_result = MagicMock()
+        addr_result.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(return_value=addr_result)
 
         company_id = uuid.uuid4()
         data = CustomerWrite(name="New Client", currency="EUR")
@@ -325,7 +531,7 @@ class TestCreateCustomer:
         async def _fake_flush(*args: object, **kwargs: object) -> None:
             for call_args in session.add.call_args_list:
                 obj = call_args[0][0]
-                if obj.id is None:
+                if not hasattr(obj, "id") or obj.id is None:
                     obj.id = uuid.uuid4()
                 if not hasattr(obj, "created_at") or obj.created_at is None:
                     obj.created_at = datetime.now(UTC)
@@ -334,6 +540,10 @@ class TestCreateCustomer:
 
         session.flush = AsyncMock(side_effect=_fake_flush)
         session.refresh = AsyncMock()
+
+        addr_result = MagicMock()
+        addr_result.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(return_value=addr_result)
 
         data = CustomerWrite(
             name="Full Client",
@@ -374,6 +584,11 @@ class TestUpdateCustomer:
         session = AsyncMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
+        session.delete = AsyncMock()
+
+        addr_result = MagicMock()
+        addr_result.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(return_value=addr_result)
 
         data = CustomerWrite(name="New", currency="USD", vat_id="NEW")
         result = await update_customer(session, orm, data)
@@ -389,6 +604,11 @@ class TestUpdateCustomer:
         session = AsyncMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
+        session.delete = AsyncMock()
+
+        addr_result = MagicMock()
+        addr_result.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(return_value=addr_result)
 
         data = CustomerWrite(name="X", extra={"new": True})
         await update_customer(session, orm, data)

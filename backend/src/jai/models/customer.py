@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jai.db import Base
+
+if TYPE_CHECKING:
+    from jai.models.address import Address
 
 
 class Customer(Base):
@@ -70,6 +73,14 @@ class Customer(Base):
         nullable=False,
         server_default=text("'{}'"),
         comment="Arbitrary extension data (notes, social media, etc.).",
+    )
+
+    # -- Addresses (step 2) ----------------------------------------------------
+    addresses: Mapped[list[Address]] = relationship(
+        "Address",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="Address.type",
     )
 
     # -- Timestamps -------------------------------------------------------------

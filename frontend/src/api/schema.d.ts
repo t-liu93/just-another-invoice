@@ -454,6 +454,59 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AddressRead
+         * @description Address response embedded in CustomerRead.addresses[].
+         */
+        AddressRead: {
+            /** Street */
+            street?: string | null;
+            /** House Number */
+            house_number?: string | null;
+            /** House Number Addition */
+            house_number_addition?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country Code */
+            country_code?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            type: components["schemas"]["AddressType"];
+        };
+        /**
+         * AddressType
+         * @description Address type for customer addresses (billing or shipping).
+         * @enum {string}
+         */
+        AddressType: "BILLING" | "SHIPPING";
+        /**
+         * AddressWrite
+         * @description Address payload embedded in CustomerWrite.addresses[].
+         */
+        AddressWrite: {
+            /** Street */
+            street?: string | null;
+            /** House Number */
+            house_number?: string | null;
+            /** House Number Addition */
+            house_number_addition?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country Code */
+            country_code?: string | null;
+            type: components["schemas"]["AddressType"];
+        };
         /** Body_upload_logo_api_v1_company_logo_put */
         Body_upload_logo_api_v1_company_logo_put: {
             /** File */
@@ -604,7 +657,7 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Addresses */
-            addresses?: unknown[];
+            addresses?: components["schemas"]["AddressRead"][];
             /**
              * Created At
              * Format: date-time
@@ -641,6 +694,8 @@ export interface components {
             extra?: {
                 [key: string]: unknown;
             };
+            /** Addresses */
+            addresses?: components["schemas"]["AddressWrite"][];
         };
         /**
          * ForgotPasswordRequest
