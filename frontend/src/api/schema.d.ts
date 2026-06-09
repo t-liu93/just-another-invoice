@@ -295,6 +295,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Customers Endpoint
+         * @description Paginated customer list with optional search.
+         */
+        get: operations["list_customers_endpoint_api_v1_customers_get"];
+        put?: never;
+        /**
+         * Create Customer Endpoint
+         * @description Create a new customer.
+         */
+        post: operations["create_customer_endpoint_api_v1_customers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{customer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Customer Endpoint
+         * @description Return a single customer by id.
+         */
+        get: operations["get_customer_endpoint_api_v1_customers__customer_id__get"];
+        /**
+         * Update Customer Endpoint
+         * @description Update an existing customer.
+         */
+        put: operations["update_customer_endpoint_api_v1_customers__customer_id__put"];
+        post?: never;
+        /**
+         * Delete Customer Endpoint
+         * @description Delete a customer. Addresses are cascade-deleted by DB FK.
+         */
+        delete: operations["delete_customer_endpoint_api_v1_customers__customer_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/smtp": {
         parameters: {
             query?: never;
@@ -510,6 +562,85 @@ export interface components {
             country_code?: string | null;
             /** Base Currency */
             base_currency: string;
+        };
+        /**
+         * CustomerListResponse
+         * @description Paginated list envelope for ``GET /api/v1/customers``.
+         */
+        CustomerListResponse: {
+            /** Items */
+            items: components["schemas"]["CustomerRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * CustomerRead
+         * @description Response body for customer endpoints (no ``company_id`` exposed).
+         */
+        CustomerRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Contact Name */
+            contact_name?: string | null;
+            /** Company Name */
+            company_name?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Website */
+            website?: string | null;
+            /** Vat Id */
+            vat_id?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** Extra */
+            extra?: {
+                [key: string]: unknown;
+            };
+            /** Addresses */
+            addresses?: unknown[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * CustomerWrite
+         * @description Request body for ``POST/PUT /api/v1/customers``.
+         */
+        CustomerWrite: {
+            /** Name */
+            name: string;
+            /** Contact Name */
+            contact_name?: string | null;
+            /** Company Name */
+            company_name?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Website */
+            website?: string | null;
+            /** Vat Id */
+            vat_id?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** Extra */
+            extra?: {
+                [key: string]: unknown;
+            };
         };
         /**
          * ForgotPasswordRequest
@@ -1225,6 +1356,168 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_customers_endpoint_api_v1_customers_get: {
+        parameters: {
+            query?: {
+                /** @description Search name/email/company_name. */
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_customer_endpoint_api_v1_customers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_customer_endpoint_api_v1_customers__customer_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_customer_endpoint_api_v1_customers__customer_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_customer_endpoint_api_v1_customers__customer_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

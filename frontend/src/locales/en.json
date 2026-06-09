@@ -3,6 +3,10 @@
     "title": "Just Another Invoice",
     "subtitle": "Self-hosted invoicing & business management"
   },
+  "nav": {
+    "dashboard": "Dashboard",
+    "customers": "Customers"
+  },
   "health": {
     "backend": "backend: {status}",
     "unreachable": "backend: unreachable",
@@ -176,6 +180,44 @@
       "categoryAi": "AI",
       "comingSoon": "Coming soon"
     }
+  },
+  "customers": {
+    "title": "Customers",
+    "empty": "No customers yet. Create your first customer to get started.",
+    "create": "New Customer",
+    "edit": "Edit Customer",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Are you sure you want to delete this customer?",
+    "deleteSuccess": "Customer deleted.",
+    "deleteFailed": "Failed to delete customer.",
+    "saveSuccess": "Customer saved.",
+    "saveFailed": "Failed to save customer.",
+    "loadFailed": "Failed to load customer.",
+    "search": "Search customers…",
+    "name": "Name",
+    "namePlaceholder": "Customer display name",
+    "contactName": "Contact person",
+    "contactNamePlaceholder": "Contact person name",
+    "companyName": "Company name",
+    "companyNamePlaceholder": "Legal entity name",
+    "email": "Email",
+    "phone": "Phone",
+    "website": "Website",
+    "vatId": "VAT number",
+    "vatIdPlaceholder": "NL123456789B01",
+    "currency": "Default currency",
+    "currencyPlaceholder": "EUR",
+    "infoSection": "Customer Information",
+    "financialSection": "Financial",
+    "contactSection": "Contact",
+    "prevPage": "Previous",
+    "nextPage": "Next",
+    "pageInfo": "Showing {start}–{end} of {total}",
+    "noResults": "No customers match your search.",
+    "actions": "Actions",
+    "nameRequired": "Name is required."
   },
   "theme": {
     "toggle": "Toggle theme"

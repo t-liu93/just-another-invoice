@@ -3,6 +3,10 @@
     "title": "Just Another Invoice",
     "subtitle": "自托管发票与业务管理"
   },
+  "nav": {
+    "dashboard": "仪表盘",
+    "customers": "客户"
+  },
   "health": {
     "backend": "后端：{status}",
     "unreachable": "后端：无法连接",
@@ -176,6 +180,44 @@
       "categoryAi": "AI",
       "comingSoon": "敬请期待"
     }
+  },
+  "customers": {
+    "title": "客户",
+    "empty": "暂无客户，创建您的第一个客户开始使用。",
+    "create": "新建客户",
+    "edit": "编辑客户",
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "deleteConfirm": "确定要删除此客户吗？",
+    "deleteSuccess": "客户已删除。",
+    "deleteFailed": "删除客户失败。",
+    "saveSuccess": "客户已保存。",
+    "saveFailed": "保存客户失败。",
+    "loadFailed": "加载客户失败。",
+    "search": "搜索客户…",
+    "name": "名称",
+    "namePlaceholder": "客户显示名称",
+    "contactName": "联系人",
+    "contactNamePlaceholder": "联系人姓名",
+    "companyName": "公司名称",
+    "companyNamePlaceholder": "法定实体名称",
+    "email": "邮箱",
+    "phone": "电话",
+    "website": "网站",
+    "vatId": "增值税号",
+    "vatIdPlaceholder": "NL123456789B01",
+    "currency": "默认币种",
+    "currencyPlaceholder": "EUR",
+    "infoSection": "客户信息",
+    "financialSection": "财务",
+    "contactSection": "联系方式",
+    "prevPage": "上一页",
+    "nextPage": "下一页",
+    "pageInfo": "第 {start}–{end} 条，共 {total} 条",
+    "noResults": "没有匹配的客户。",
+    "actions": "操作",
+    "nameRequired": "名称不能为空。"
   },
   "theme": {
     "toggle": "切换主题"

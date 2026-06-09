@@ -55,6 +55,24 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/customers',
+    name: 'customer-list',
+    component: () => import('../views/customers/CustomerList.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/customers/new',
+    name: 'customer-new',
+    component: () => import('../views/customers/CustomerEdit.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/customers/:id/edit',
+    name: 'customer-edit',
+    component: () => import('../views/customers/CustomerEdit.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/dashboard',
   },
