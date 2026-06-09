@@ -1435,6 +1435,8 @@ export interface operations {
                 q?: string | null;
                 limit?: number;
                 offset?: number;
+                /** @description Sort field: 'name' (A→Z) or 'created_at' (newest first). */
+                sort_by?: "name" | "created_at";
             };
             header?: never;
             path?: never;

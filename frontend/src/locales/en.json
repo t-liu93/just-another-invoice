@@ -225,7 +225,9 @@
     "pageInfo": "Showing {start}–{end} of {total}",
     "noResults": "No customers match your search.",
     "actions": "Actions",
-    "nameRequired": "Name is required."
+    "nameRequired": "Name is required.",
+    "sortByName": "Name (A–Z)",
+    "sortByCreatedAt": "Newest first"
   },
   "theme": {
     "toggle": "Toggle theme"

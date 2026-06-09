@@ -451,6 +451,35 @@ class TestListCustomers:
         # Verify two execute calls (count + rows).
         assert session.execute.call_count == 2
 
+    async def test_sort_by_name(self) -> None:
+        """sort_by='name' is accepted and returns items."""
+        orm1 = _make_customer_orm(name="Alice")
+        orm2 = _make_customer_orm(name="Bob")
+
+        session = AsyncMock()
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 2
+        rows_result = MagicMock()
+        rows_result.scalars.return_value.all.return_value = [orm1, orm2]
+        session.execute = AsyncMock(side_effect=[count_result, rows_result])
+
+        result = await list_customers(session, uuid.uuid4(), sort_by="name")
+        assert result.total == 2
+        assert result.items[0].name == "Alice"
+        assert result.items[1].name == "Bob"
+
+    async def test_sort_by_created_at_default(self) -> None:
+        """Default sort (created_at) returns items without error."""
+        session = AsyncMock()
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
+        rows_result = MagicMock()
+        rows_result.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(side_effect=[count_result, rows_result])
+
+        result = await list_customers(session, uuid.uuid4(), sort_by="created_at")
+        assert result.total == 0
+
 
 # ---------------------------------------------------------------------------
 # Service logic – get_customer (mocked DB)

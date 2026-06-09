@@ -225,7 +225,9 @@
     "pageInfo": "第 {start}–{end} 条，共 {total} 条",
     "noResults": "没有匹配的客户。",
     "actions": "操作",
-    "nameRequired": "名称不能为空。"
+    "nameRequired": "名称不能为空。",
+    "sortByName": "名称（A→Z）",
+    "sortByCreatedAt": "最新优先"
   },
   "theme": {
     "toggle": "切换主题"

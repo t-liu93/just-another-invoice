@@ -5,7 +5,7 @@
 import { onMounted, onBeforeUnmount, computed, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useMessage, useDialog, NButton, NSpace, NInput, NDataTable, NAlert, NSpin, NPagination } from 'naive-ui'
+import { useMessage, useDialog, NButton, NSpace, NInput, NDataTable, NAlert, NSpin, NPagination, NSelect } from 'naive-ui'
 import { AddOutline, SearchOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
@@ -76,6 +76,17 @@ function handleDelete(_name: string, id: string) {
 
 const currentPage = computed(() => Math.floor(store.offset / store.limit) + 1)
 const pageCount = computed(() => Math.max(1, Math.ceil(store.total / store.limit)))
+
+const sortOptions = computed(() => [
+  { label: t('customers.sortByCreatedAt'), value: 'created_at' },
+  { label: t('customers.sortByName'), value: 'name' },
+])
+
+function handleSortChange(val: 'name' | 'created_at') {
+  store.sortBy = val
+  store.offset = 0
+  store.fetchCustomers()
+}
 
 const columns = computed(() => [
   {
@@ -162,6 +173,12 @@ const columns = computed(() => [
                   <n-icon><SearchOutline /></n-icon>
                 </template>
               </n-input>
+              <n-select
+                :value="store.sortBy"
+                :options="sortOptions"
+                style="width: 160px"
+                @update:value="handleSortChange"
+              />
               <n-button type="primary" @click="handleCreate">
                 <template #icon>
                   <n-icon><AddOutline /></n-icon>

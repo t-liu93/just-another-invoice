@@ -22,6 +22,7 @@ Design notes
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,10 +140,12 @@ async def list_customers(
     q: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    sort_by: Literal["name", "created_at"] = "created_at",
 ) -> CustomerListResponse:
     """Return a paginated, optionally filtered list of customers.
 
     ``q`` performs ILIKE search on ``name``, ``email``, and ``company_name``.
+    ``sort_by`` accepts ``"name"`` (asc) or ``"created_at"`` (desc, default).
     """
     base = select(Customer).where(Customer.company_id == company_id)
     count_base = select(func.count()).select_from(Customer).where(
@@ -163,9 +166,12 @@ async def list_customers(
     total_result = await session.execute(count_base)
     total = total_result.scalar_one()
 
+    # Ordering: name A→Z or newest-first (default).
+    order = Customer.name.asc() if sort_by == "name" else Customer.created_at.desc()
+
     # Paginated rows.
     rows_result = await session.execute(
-        base.order_by(Customer.created_at.desc()).limit(limit).offset(offset)
+        base.order_by(order).limit(limit).offset(offset)
     )
     customers = rows_result.scalars().all()
 

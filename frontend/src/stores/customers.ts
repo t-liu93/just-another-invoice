@@ -21,12 +21,13 @@ export const useCustomersStore = defineStore('customers', () => {
   const saving = ref(false)
   const error = ref<string | null>(null)
 
-  // Search / pagination state.
+  // Search / pagination / sort state.
   const query = ref('')
   const limit = ref(50)
   const offset = ref(0)
+  const sortBy = ref<'name' | 'created_at'>('created_at')
 
-  /** Fetch the customer list with current search/pagination params. */
+  /** Fetch the customer list with current search/pagination/sort params. */
   async function fetchCustomers() {
     loading.value = true
     error.value = null
@@ -35,6 +36,7 @@ export const useCustomersStore = defineStore('customers', () => {
       if (query.value) params.set('q', query.value)
       params.set('limit', String(limit.value))
       params.set('offset', String(offset.value))
+      params.set('sort_by', sortBy.value)
       const qs = params.toString()
       const url = `/api/v1/customers${qs ? '?' + qs : ''}`
       const data = await get<CustomerListResponse>(url)
@@ -97,6 +99,7 @@ export const useCustomersStore = defineStore('customers', () => {
     query,
     limit,
     offset,
+    sortBy,
     fetchCustomers,
     fetchCustomer,
     createCustomer,

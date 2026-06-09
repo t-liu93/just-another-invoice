@@ -11,6 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,13 +60,19 @@ async def list_customers_endpoint(
     q: str | None = Query(None, description="Search name/email/company_name."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort_by: Literal["name", "created_at"] = Query(
+        "created_at",
+        description="Sort field: 'name' (A→Z) or 'created_at' (newest first).",
+    ),
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> CustomerListResponse:
     """Paginated customer list with optional search."""
     _owner_only(user)
     company_id = _require_company_id(user)
-    return await list_customers(session, company_id, q=q, limit=limit, offset=offset)
+    return await list_customers(
+        session, company_id, q=q, limit=limit, offset=offset, sort_by=sort_by
+    )
 
 
 @router.post("", response_model=CustomerRead, status_code=status.HTTP_201_CREATED)
