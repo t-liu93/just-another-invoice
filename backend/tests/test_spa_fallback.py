@@ -99,6 +99,39 @@ class TestSPAFallbackWithStatic:
                 assert resp.status_code == 200
                 assert "<h1>Root SPA</h1>" in resp.text
 
+    async def test_index_html_is_no_cache(self, tmp_path: Path) -> None:
+        """The SPA entry point must be revalidated, never served stale.
+
+        A cached index.html pointing at deleted chunk hashes is exactly the bug
+        that makes a redeployed SPA keep running old code in the browser.
+        """
+        (tmp_path / "index.html").write_text("<h1>SPA</h1>")
+        with _override_settings(static_dir=str(tmp_path)):
+            test_app = create_app()
+            async with AsyncClient(
+                transport=ASGITransport(app=test_app), base_url="http://test"
+            ) as ac:
+                root = await ac.get("/")
+                assert root.headers["cache-control"] == "no-cache"
+                spa = await ac.get("/some/spa/route")
+                assert spa.headers["cache-control"] == "no-cache"
+
+    async def test_assets_are_immutable(self, tmp_path: Path) -> None:
+        """Content-hashed files under ``/assets`` are cached long-term."""
+        assets = tmp_path / "assets"
+        assets.mkdir()
+        (assets / "index-ABC123.js").write_text("console.log(1)")
+        (tmp_path / "index.html").write_text("<h1>SPA</h1>")
+        with _override_settings(static_dir=str(tmp_path)):
+            test_app = create_app()
+            async with AsyncClient(
+                transport=ASGITransport(app=test_app), base_url="http://test"
+            ) as ac:
+                resp = await ac.get("/assets/index-ABC123.js")
+                assert resp.status_code == 200
+                assert "immutable" in resp.headers["cache-control"]
+                assert "max-age=31536000" in resp.headers["cache-control"]
+
 
 class TestSPAFallbackWithoutStatic:
     """When ``static_dir`` is None (dev mode), no SPA fallback exists."""

@@ -672,6 +672,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/products/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Products Endpoint */
+        post: operations["import_products_endpoint_api_v1_products_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/products": {
         parameters: {
             query?: never;
@@ -1215,6 +1232,65 @@ export interface components {
              * @default true
              */
             active?: boolean;
+        };
+        /**
+         * ProductImportRequest
+         * @description Request body for POST /api/v1/products/import.
+         */
+        ProductImportRequest: {
+            /** Rows */
+            rows: components["schemas"]["ProductImportRow"][];
+        };
+        /**
+         * ProductImportResult
+         * @description Response from POST /api/v1/products/import.
+         */
+        ProductImportResult: {
+            /** Created */
+            created: number;
+            /**
+             * Updated
+             * @default 0
+             */
+            updated?: number;
+            /** Errors */
+            errors: components["schemas"]["ProductImportRowError"][];
+        };
+        /**
+         * ProductImportRow
+         * @description One row in a bulk import request (POST /api/v1/products/import).
+         *
+         *     Numeric fields accept str so bad values are caught per-row in the service
+         *     layer instead of 422-ing the whole request at parse time.
+         */
+        ProductImportRow: {
+            /**
+             * Name
+             * @default
+             */
+            name?: string;
+            /** Sku */
+            sku?: string | null;
+            /** Category Name */
+            category_name?: string | null;
+            /** Unit Code */
+            unit_code?: string | null;
+            /** Purchase Cost Excl Vat */
+            purchase_cost_excl_vat?: string | number | null;
+            /** Margin Rate */
+            margin_rate?: string | number | null;
+            /** Vat Percent */
+            vat_percent?: string | number | null;
+        };
+        /**
+         * ProductImportRowError
+         * @description A single per-row validation/lookup failure returned by the import endpoint.
+         */
+        ProductImportRowError: {
+            /** Row */
+            row: number;
+            /** Message */
+            message: string;
         };
         /**
          * ProductListResponse
@@ -3341,6 +3417,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_products_endpoint_api_v1_products_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductImportResult"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -146,3 +146,45 @@ class ProductListResponse(BaseModel):
 
     items: list[ProductRead]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Product import (step 4)
+# ---------------------------------------------------------------------------
+
+
+class ProductImportRow(BaseModel):
+    """One row in a bulk import request (POST /api/v1/products/import).
+
+    Numeric fields accept str so bad values are caught per-row in the service
+    layer instead of 422-ing the whole request at parse time.
+    """
+
+    name: str = ""
+    sku: str | None = None
+    category_name: str | None = None
+    unit_code: str | None = None
+    purchase_cost_excl_vat: str | Decimal | None = None
+    margin_rate: str | Decimal | None = None
+    vat_percent: str | Decimal | None = None
+
+
+class ProductImportRowError(BaseModel):
+    """A single per-row validation/lookup failure returned by the import endpoint."""
+
+    row: int
+    message: str
+
+
+class ProductImportResult(BaseModel):
+    """Response from POST /api/v1/products/import."""
+
+    created: int
+    updated: int = 0
+    errors: list[ProductImportRowError]
+
+
+class ProductImportRequest(BaseModel):
+    """Request body for POST /api/v1/products/import."""
+
+    rows: list[ProductImportRow]

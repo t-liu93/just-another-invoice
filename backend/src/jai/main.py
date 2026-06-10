@@ -10,6 +10,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
 
 import jai.config as _cfg
 from jai.api.auth import router as auth_router
@@ -26,6 +28,26 @@ from jai.db import get_engine, get_session_maker
 from jai.startup import check_db_migration
 
 logger = logging.getLogger("jai")
+
+# index.html is the SPA entry point: it is NOT content-hashed, so it must never
+# be served from the browser cache without revalidation — otherwise a cached
+# index.html keeps pointing at stale (deleted) chunk hashes after a redeploy,
+# and the user runs old code indefinitely. ``no-cache`` forces an ETag
+# revalidation on every load (cheap 304 when unchanged).
+_HTML_CACHE_CONTROL = "no-cache"
+# Everything under /assets is content-hash-named by Vite, so it is safe to cache
+# forever and never revalidate.
+_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+
+class _ImmutableStaticFiles(StaticFiles):
+    """StaticFiles that marks content-hashed assets immutable for one year."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = _ASSET_CACHE_CONTROL
+        return response
 
 
 @asynccontextmanager
@@ -89,7 +111,11 @@ def create_app() -> FastAPI:
             # Mount assets sub-directory for cache-busted static files.
             assets = dist / "assets"
             if assets.is_dir():
-                app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
+                app.mount(
+                    "/assets",
+                    _ImmutableStaticFiles(directory=str(assets)),
+                    name="assets",
+                )
 
             # Catch-all SPA fallback – must be registered *after* all API
             # routes so that ``/api/*`` paths are never shadowed.
@@ -101,8 +127,16 @@ def create_app() -> FastAPI:
                 candidate = (dist / full_path).resolve()
                 # Guard against path-traversal.
                 if candidate.is_relative_to(dist) and candidate.is_file():
-                    return FileResponse(candidate)
-                return FileResponse(dist / "index.html")
+                    # HTML entry points must revalidate; other top-level static
+                    # files (favicon, etc.) are fine to revalidate too.
+                    return FileResponse(
+                        candidate,
+                        headers={"Cache-Control": _HTML_CACHE_CONTROL},
+                    )
+                return FileResponse(
+                    dist / "index.html",
+                    headers={"Cache-Control": _HTML_CACHE_CONTROL},
+                )
 
     return app
 

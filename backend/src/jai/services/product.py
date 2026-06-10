@@ -43,6 +43,9 @@ from jai.schemas.product import (
     ProductCategoryListResponse,
     ProductCategoryRead,
     ProductCategoryWrite,
+    ProductImportResult,
+    ProductImportRow,
+    ProductImportRowError,
     ProductListResponse,
     ProductRead,
     ProductWrite,
@@ -51,6 +54,36 @@ from jai.schemas.product import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# DB column upper bounds used for per-row import validation.
+_IMPORT_COST_MAX = Decimal("99999999999.999")   # NUMERIC(14,3)
+_IMPORT_MARGIN_MAX = Decimal("99.9999")          # NUMERIC(6,4)
+
+
+def _parse_import_decimal(
+    raw: str | Decimal | None,
+    field: str,
+    *,
+    min_val: Decimal | None = None,
+    max_val: Decimal | None = None,
+) -> tuple[Decimal | None, str | None]:
+    """Parse a raw import value to Decimal with optional range checks.
+
+    Returns (parsed_value, error_message); on success error_message is None.
+    """
+    if raw is None:
+        return None, None
+    try:
+        parsed = Decimal(str(raw))
+    except Exception:
+        return None, f"{field}: not a valid number ({raw!r})"
+    if not parsed.is_finite():
+        return None, f"{field}: not a valid number ({raw!r})"
+    if min_val is not None and parsed < min_val:
+        return None, f"{field}: must be >= {min_val}"
+    if max_val is not None and parsed > max_val:
+        return None, f"{field}: must be <= {max_val}"
+    return parsed, None
 
 
 def _cat_to_read(obj: ProductCategory) -> ProductCategoryRead:
@@ -354,7 +387,10 @@ async def create_product(
         active=data.active,
     )
     session.add(obj)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        raise ValueError(f"A product with SKU '{data.sku}' already exists.") from exc
     await session.refresh(obj)
     category = await _load_category(session, obj.category_id, company_id)
     return _product_to_read(obj, category)
@@ -378,7 +414,10 @@ async def update_product(
     obj.supplier = data.supplier
     obj.extra = data.extra or {}
     obj.active = data.active
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        raise ValueError(f"A product with SKU '{data.sku}' already exists.") from exc
     await session.refresh(obj)
     category = await _load_category(session, obj.category_id, obj.company_id)
     return _product_to_read(obj, category)
@@ -387,3 +426,157 @@ async def update_product(
 async def delete_product(session: AsyncSession, obj: Product) -> None:
     await session.delete(obj)
     await session.flush()
+
+
+# ---------------------------------------------------------------------------
+# Product import (step 4)
+# ---------------------------------------------------------------------------
+
+
+async def import_products(
+    session: AsyncSession,
+    rows: list[ProductImportRow],
+    company_id: uuid.UUID,
+) -> ProductImportResult:
+    """Bulk-create products from structured import rows (Excel paste → TSV → JSON).
+
+    Lookup maps for category/unit/vat_rate are loaded once per call.
+    Per-row failures go to ``errors``; valid rows are batch-flushed.
+    """
+    # Pre-load lookup maps (one query each, scoped to company_id).
+    cats_result = await session.execute(
+        select(ProductCategory).where(ProductCategory.company_id == company_id)
+    )
+    cat_by_name: dict[str, uuid.UUID] = {
+        c.name.lower(): c.id for c in cats_result.scalars().all()
+    }
+
+    units_result = await session.execute(
+        select(Unit).where(Unit.company_id == company_id)
+    )
+    unit_by_code: dict[str, uuid.UUID] = {
+        u.code.lower(): u.id for u in units_result.scalars().all()
+    }
+
+    vat_result = await session.execute(
+        select(VatRate).where(VatRate.company_id == company_id)
+    )
+    vat_by_percent: dict[Decimal, uuid.UUID] = {
+        Decimal(str(v.percent)): v.id for v in vat_result.scalars().all()
+    }
+
+    # Pre-fetch existing products by supplier SKU for upsert matching.
+    non_empty_skus = [r.sku.strip() for r in rows if r.sku and r.sku.strip()]
+    existing_by_sku: dict[str, Product] = {}
+    if non_empty_skus:
+        existing_result = await session.execute(
+            select(Product).where(
+                Product.company_id == company_id,
+                Product.sku.in_(non_empty_skus),
+            )
+        )
+        existing_by_sku = {
+            (p.sku or "").strip(): p
+            for p in existing_result.scalars().all()
+            if p.sku
+        }
+
+    created = 0
+    updated = 0
+    errors: list[ProductImportRowError] = []
+
+    for idx, row in enumerate(rows):
+        row_errors: list[str] = []
+
+        name = row.name.strip() if row.name else ""
+        if not name:
+            row_errors.append("name is required")
+
+        # Resolve category_name.
+        category_id: uuid.UUID | None = None
+        has_category = row.category_name is not None and row.category_name.strip()
+        if has_category:
+            key = row.category_name.strip().lower()  # type: ignore[union-attr]
+            if key in cat_by_name:
+                category_id = cat_by_name[key]
+            else:
+                row_errors.append(f"Unknown category: '{row.category_name}'")
+
+        # Resolve unit_code.
+        unit_id: uuid.UUID | None = None
+        has_unit = row.unit_code is not None and row.unit_code.strip()
+        if has_unit:
+            key = row.unit_code.strip().lower()  # type: ignore[union-attr]
+            if key in unit_by_code:
+                unit_id = unit_by_code[key]
+            else:
+                row_errors.append(f"Unknown unit code: '{row.unit_code}'")
+
+        # Parse and validate numeric fields (per-row errors, not whole-request 422).
+        cost_val, cost_err = _parse_import_decimal(
+            row.purchase_cost_excl_vat, "purchase_cost_excl_vat",
+            min_val=Decimal("0"), max_val=_IMPORT_COST_MAX,
+        )
+        if cost_err:
+            row_errors.append(cost_err)
+
+        margin_val, margin_err = _parse_import_decimal(
+            row.margin_rate, "margin_rate",
+            min_val=Decimal("0"), max_val=_IMPORT_MARGIN_MAX,
+        )
+        if margin_err:
+            row_errors.append(margin_err)
+
+        # Resolve vat_percent.
+        default_vat_rate_id: uuid.UUID | None = None
+        if row.vat_percent is not None:
+            pct_val, pct_err = _parse_import_decimal(row.vat_percent, "vat_percent")
+            if pct_err:
+                row_errors.append(pct_err)
+            elif pct_val not in vat_by_percent:
+                row_errors.append(f"Unknown VAT percent: {row.vat_percent}")
+            else:
+                default_vat_rate_id = vat_by_percent[pct_val]
+
+        if row_errors:
+            errors.append(ProductImportRowError(row=idx, message="; ".join(row_errors)))
+            continue
+
+        sku = row.sku.strip() if row.sku and row.sku.strip() else None
+
+        if sku and sku in existing_by_sku:
+            # Upsert: update fields that are explicitly provided in this row.
+            obj = existing_by_sku[sku]
+            obj.name = name
+            if has_category:
+                obj.category_id = category_id
+            if has_unit:
+                obj.unit_id = unit_id
+            if cost_val is not None:
+                obj.purchase_cost_excl_vat = cost_val
+            if margin_val is not None:
+                obj.margin_rate = margin_val
+            if row.vat_percent is not None:
+                obj.default_vat_rate_id = default_vat_rate_id
+            updated += 1
+        else:
+            obj = Product(
+                company_id=company_id,
+                name=name,
+                sku=sku,
+                category_id=category_id,
+                unit_id=unit_id,
+                purchase_cost_excl_vat=cost_val,
+                margin_rate=margin_val,
+                default_vat_rate_id=default_vat_rate_id,
+                extra={},
+            )
+            session.add(obj)
+            if sku:
+                existing_by_sku[sku] = obj  # track within-batch dedup
+            created += 1
+
+    if created > 0 or updated > 0:
+        await session.flush()
+
+    return ProductImportResult(created=created, updated=updated, errors=errors)

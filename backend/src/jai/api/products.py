@@ -23,6 +23,8 @@ from jai.schemas.product import (
     ProductCategoryListResponse,
     ProductCategoryRead,
     ProductCategoryWrite,
+    ProductImportRequest,
+    ProductImportResult,
     ProductListResponse,
     ProductRead,
     ProductWrite,
@@ -36,6 +38,7 @@ from jai.services.product import (
     delete_product_category,
     get_product,
     get_product_category,
+    import_products,
     list_product_categories,
     list_products,
     update_product,
@@ -163,6 +166,19 @@ async def delete_product_category_endpoint(
 # ---------------------------------------------------------------------------
 # Products
 # ---------------------------------------------------------------------------
+
+
+@router.post("/products/import", response_model=ProductImportResult)
+async def import_products_endpoint(
+    body: ProductImportRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ProductImportResult:
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    result = await import_products(session, body.rows, company_id)
+    await session.commit()
+    return result
 
 
 @router.get("/products", response_model=ProductListResponse)

@@ -745,6 +745,505 @@ class TestProductFKValidation:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Product import (M4 step 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestProductImport:
+    """POST /api/v1/products/import – bulk create from structured rows."""
+
+    async def test_import_all_valid(self, db_client: AsyncClient) -> None:
+        """Happy path: all rows valid → all created, no errors."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={
+                "rows": [
+                    {"name": "Panel 330W", "purchase_cost_excl_vat": "120.000"},
+                    {"name": "Inverter 5kW", "sku": "INV5K"},
+                    {"name": "Cable 10m"},
+                ]
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 3
+        assert data["errors"] == []
+
+        # All three should appear in the products list.
+        list_resp = await db_client.get("/api/v1/products")
+        names = [r["name"] for r in list_resp.json()["items"]]
+        assert "Panel 330W" in names
+        assert "Inverter 5kW" in names
+        assert "Cable 10m" in names
+
+    async def test_import_resolves_category_by_name(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        cat = await _create_category(db_client, "Solar", default_margin_rate=0.3)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "Panel", "category_name": "Solar"}]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 1
+        assert data["errors"] == []
+
+        list_resp = await db_client.get("/api/v1/products")
+        items = list_resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["category_id"] == cat["id"]
+
+    async def test_import_resolves_unit_by_code(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        # Need a unit; use the seeded units (they are seeded on company setup).
+        unit_resp = await db_client.get("/api/v1/units")
+        assert unit_resp.status_code == 200
+        units = unit_resp.json()["items"]
+        piece_unit = next((u for u in units if u["code"] == "pcs"), None)
+        assert piece_unit is not None
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "Bolt", "unit_code": "pcs"}]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 1
+        assert data["errors"] == []
+
+        item = await db_client.get("/api/v1/products")
+        prod = item.json()["items"][0]
+        assert prod["unit_id"] == piece_unit["id"]
+
+    async def test_import_resolves_vat_percent(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        # VAT rates are seeded; get the 21% one.
+        vat_resp = await db_client.get("/api/v1/vat-rates")
+        assert vat_resp.status_code == 200
+        rates = vat_resp.json()["items"]
+        vat21 = next((r for r in rates if float(r["percent"]) == 21.0), None)
+        assert vat21 is not None
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "Panel", "vat_percent": "21"}]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 1
+        assert data["errors"] == []
+
+        prod = (await db_client.get("/api/v1/products")).json()["items"][0]
+        assert prod["default_vat_rate_id"] == vat21["id"]
+
+    async def test_import_unknown_category_goes_to_errors(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "Widget", "category_name": "NonExistentCat"}]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 0
+        assert len(data["errors"]) == 1
+        assert data["errors"][0]["row"] == 0
+        assert "NonExistentCat" in data["errors"][0]["message"]
+
+    async def test_import_unknown_unit_code_goes_to_errors(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "Bolt", "unit_code": "XYZ_UNKNOWN"}]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 0
+        assert len(data["errors"]) == 1
+        assert "XYZ_UNKNOWN" in data["errors"][0]["message"]
+
+    async def test_import_unknown_vat_percent_goes_to_errors(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "Panel", "vat_percent": "99"}]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 0
+        assert len(data["errors"]) == 1
+        assert "99" in data["errors"][0]["message"]
+
+    async def test_import_empty_name_goes_to_errors(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": ""}]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 0
+        assert len(data["errors"]) == 1
+        assert data["errors"][0]["row"] == 0
+        assert "name is required" in data["errors"][0]["message"]
+
+    async def test_import_partial_success(self, db_client: AsyncClient) -> None:
+        """Mix of valid and invalid rows: good rows created, bad rows in errors."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={
+                "rows": [
+                    {"name": "Good Row 1"},
+                    {"name": "Bad Row", "category_name": "NOPE"},
+                    {"name": "Good Row 2", "sku": "GR2"},
+                    {"name": "", "unit_code": "ALSO_BAD"},
+                ]
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 2
+        assert len(data["errors"]) == 2
+
+        error_rows = {e["row"] for e in data["errors"]}
+        assert error_rows == {1, 3}
+
+        list_resp = await db_client.get("/api/v1/products")
+        names = [r["name"] for r in list_resp.json()["items"]]
+        assert "Good Row 1" in names
+        assert "Good Row 2" in names
+        assert "Bad Row" not in names
+
+    async def test_import_empty_rows_returns_zero(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": []},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 0
+        assert data["errors"] == []
+
+    async def test_import_isolation_goes_to_own_company(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """Imported products belong to the authenticated user's company."""
+        from jai.models.product import Product as ProductModel
+
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "IsolatedProduct"}]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["created"] == 1
+
+        # Confirm company_id is set on the created product via direct DB check.
+        # (The API intentionally never returns company_id in responses.)
+        async with db_session_maker() as session:
+            from sqlalchemy import select as sa_select
+            result = await session.execute(
+                sa_select(ProductModel).where(ProductModel.name == "IsolatedProduct")
+            )
+            prod = result.scalar_one()
+            assert prod.company_id is not None
+
+    async def test_import_case_insensitive_category_match(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        cat = await _create_category(db_client, "MixedCase", default_margin_rate=None)
+
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "P1", "category_name": "mixedcase"}]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 1
+        assert data["errors"] == []
+
+        prod = (await db_client.get("/api/v1/products")).json()["items"][0]
+        assert prod["category_id"] == cat["id"]
+
+    async def test_import_unauthenticated_401(self, db_client: AsyncClient) -> None:
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "X"}]},
+        )
+        assert resp.status_code == 401
+
+    async def test_import_no_company_400(self, db_client: AsyncClient) -> None:
+        await _full_auth(db_client)
+        resp = await db_client.post(
+            "/api/v1/products/import",
+            json={"rows": [{"name": "X"}]},
+        )
+        assert resp.status_code == 400
+
+    async def test_import_upsert_by_sku(self, db_client: AsyncClient) -> None:
+        """Re-importing the same SKU updates the existing product, not a duplicate."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        payload = {
+            "rows": [{"name": "Panel A", "sku": "PA001", "purchase_cost_excl_vat": "100.000"}]
+        }
+        r1 = await db_client.post("/api/v1/products/import", json=payload)
+        assert r1.status_code == 200
+        assert r1.json()["created"] == 1
+        assert r1.json()["updated"] == 0
+
+        # Re-import with a changed price — should update, not create.
+        payload2 = {
+            "rows": [{"name": "Panel A v2", "sku": "PA001", "purchase_cost_excl_vat": "120.000"}]
+        }
+        r2 = await db_client.post("/api/v1/products/import", json=payload2)
+        assert r2.status_code == 200
+        assert r2.json()["created"] == 0
+        assert r2.json()["updated"] == 1
+
+        # Verify no duplicate: only 1 product with this SKU.
+        list_r = await db_client.get("/api/v1/products?q=PA001")
+        items = list_r.json()["items"]
+        pa_items = [p for p in items if p["sku"] == "PA001"]
+        assert len(pa_items) == 1
+        assert pa_items[0]["name"] == "Panel A v2"
+
+    async def test_import_upsert_partial(self, db_client: AsyncClient) -> None:
+        """Mix of new and existing SKUs → correct created/updated counts."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        # Create one product with a known SKU.
+        r1 = await db_client.post(
+            "/api/v1/products/import", json={"rows": [{"name": "Existing", "sku": "EX01"}]}
+        )
+        assert r1.json()["created"] == 1
+
+        # Import: one existing SKU + one new SKU + one without SKU (always creates).
+        payload = {
+            "rows": [
+                {"name": "Existing Updated", "sku": "EX01"},
+                {"name": "Brand New", "sku": "NEW01"},
+                {"name": "No SKU Product"},
+            ]
+        }
+        r2 = await db_client.post("/api/v1/products/import", json=payload)
+        assert r2.status_code == 200
+        d = r2.json()
+        assert d["created"] == 2   # NEW01 + no-SKU product
+        assert d["updated"] == 1   # EX01 updated
+        assert d["errors"] == []
+
+    async def test_import_no_sku_always_creates(self, db_client: AsyncClient) -> None:
+        """Rows without SKU are always created (no dedup key available)."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        payload = {"rows": [{"name": "No SKU A"}, {"name": "No SKU B"}]}
+        r1 = await db_client.post("/api/v1/products/import", json=payload)
+        assert r1.json()["created"] == 2
+
+        # Re-import same names — still creates because no SKU to match on.
+        r2 = await db_client.post("/api/v1/products/import", json=payload)
+        assert r2.json()["created"] == 2
+        assert r2.json()["updated"] == 0
+
+    async def test_import_same_batch_duplicate_sku(self, db_client: AsyncClient) -> None:
+        """Two rows with the same new SKU in one batch → 1 created, 1 updated (last wins)."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        payload = {
+            "rows": [
+                {"name": "First", "sku": "DEDUP01", "purchase_cost_excl_vat": "10.000"},
+                {"name": "Second", "sku": "DEDUP01", "purchase_cost_excl_vat": "20.000"},
+            ]
+        }
+        r = await db_client.post("/api/v1/products/import", json=payload)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["errors"] == []
+        assert d["created"] + d["updated"] == 2
+
+        # Only one product with this SKU should exist.
+        list_r = await db_client.get("/api/v1/products?q=DEDUP01")
+        items = [p for p in list_r.json()["items"] if p["sku"] == "DEDUP01"]
+        assert len(items) == 1
+        assert items[0]["name"] == "Second"
+
+    async def test_import_invalid_cost_per_row_error(self, db_client: AsyncClient) -> None:
+        """A non-numeric cost on one row goes to errors; the valid row is still created."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        payload = {
+            "rows": [
+                {"name": "Valid Product", "sku": "VALID01"},
+                {"name": "Bad Cost", "sku": "BAD01", "purchase_cost_excl_vat": "abc"},
+            ]
+        }
+        r = await db_client.post("/api/v1/products/import", json=payload)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["created"] == 1
+        assert len(d["errors"]) == 1
+        assert d["errors"][0]["row"] == 1
+        assert "purchase_cost_excl_vat" in d["errors"][0]["message"]
+
+    async def test_import_negative_cost_per_row_error(self, db_client: AsyncClient) -> None:
+        """A negative cost goes to errors without failing the whole request."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        payload = {"rows": [{"name": "Negative", "purchase_cost_excl_vat": "-5.000"}]}
+        r = await db_client.post("/api/v1/products/import", json=payload)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["created"] == 0
+        assert len(d["errors"]) == 1
+        assert "purchase_cost_excl_vat" in d["errors"][0]["message"]
+
+    async def test_import_margin_overflow_per_row_error(self, db_client: AsyncClient) -> None:
+        """A margin_rate above 99.9999 goes to errors without failing the whole request."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        payload = {
+            "rows": [
+                {"name": "OK", "sku": "OK99"},
+                {"name": "Overflow Margin", "margin_rate": "100.0000"},
+            ]
+        }
+        r = await db_client.post("/api/v1/products/import", json=payload)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["created"] == 1
+        assert len(d["errors"]) == 1
+        assert "margin_rate" in d["errors"][0]["message"]
+
+    async def test_import_nan_cost_per_row_error(self, db_client: AsyncClient) -> None:
+        """NaN cost goes to per-row errors instead of 500."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        payload = {
+            "rows": [
+                {"name": "Valid", "sku": "V-NAN"},
+                {"name": "NaN Cost", "purchase_cost_excl_vat": "NaN"},
+            ]
+        }
+        r = await db_client.post("/api/v1/products/import", json=payload)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["created"] == 1
+        assert len(d["errors"]) == 1
+        assert "purchase_cost_excl_vat" in d["errors"][0]["message"]
+
+    async def test_import_nan_margin_per_row_error(self, db_client: AsyncClient) -> None:
+        """NaN margin_rate goes to per-row errors instead of 500."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        payload = {"rows": [{"name": "NaN Margin", "margin_rate": "NaN"}]}
+        r = await db_client.post("/api/v1/products/import", json=payload)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["created"] == 0
+        assert len(d["errors"]) == 1
+        assert "margin_rate" in d["errors"][0]["message"]
+
+
+# ---------------------------------------------------------------------------
+# SKU uniqueness – CRUD endpoints (P1 rework)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestProductSkuUniqueness:
+    """Duplicate SKU via CRUD endpoints must return 409, not 500."""
+
+    async def test_create_duplicate_sku_409(self, db_client: AsyncClient) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        r1 = await db_client.post("/api/v1/products", json={"name": "First", "sku": "DUP-SKU"})
+        assert r1.status_code == 201
+
+        r2 = await db_client.post("/api/v1/products", json={"name": "Second", "sku": "DUP-SKU"})
+        assert r2.status_code in (409, 422)
+
+    async def test_update_to_duplicate_sku_returns_error(self, db_client: AsyncClient) -> None:
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        r1 = await db_client.post("/api/v1/products", json={"name": "A", "sku": "SKU-A"})
+        assert r1.status_code == 201
+        r2 = await db_client.post("/api/v1/products", json={"name": "B", "sku": "SKU-B"})
+        assert r2.status_code == 201
+        product_b_id = r2.json()["id"]
+
+        # Try to update B's SKU to A's SKU
+        r3 = await db_client.put(
+            f"/api/v1/products/{product_b_id}",
+            json={"name": "B", "sku": "SKU-A"},
+        )
+        assert r3.status_code in (409, 422)
+
+
+# ---------------------------------------------------------------------------
+# Decimal upper-bound validation (P2 fix)
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.integration
 class TestProductDecimalBounds:
     """Overflow inputs must return 422, not 500."""

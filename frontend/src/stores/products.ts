@@ -14,6 +14,8 @@ type ProductCategoryListResponse = components['schemas']['ProductCategoryListRes
 type ProductRead = components['schemas']['ProductRead']
 type ProductWrite = components['schemas']['ProductWrite']
 type ProductListResponse = components['schemas']['ProductListResponse']
+type ProductImportRequest = components['schemas']['ProductImportRequest']
+type ProductImportResult = components['schemas']['ProductImportResult']
 
 export const useProductsStore = defineStore('products', () => {
   // --- Categories ---
@@ -105,6 +107,10 @@ export const useProductsStore = defineStore('products', () => {
     await fetchProducts()
   }
 
+  async function importProducts(payload: ProductImportRequest): Promise<ProductImportResult> {
+    return await post<ProductImportResult>('/api/v1/products/import', payload)
+  }
+
   return {
     // categories
     categories,
@@ -129,5 +135,6 @@ export const useProductsStore = defineStore('products', () => {
     createProduct,
     updateProduct,
     deleteProduct,
+    importProducts,
   }
 })
