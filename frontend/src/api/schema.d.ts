@@ -764,12 +764,88 @@ export interface paths {
         put?: never;
         /**
          * Calculate Invoice Endpoint
-         * @description Preview invoice pricing without persisting.
-         *
-         *     Reads customer / company / VAT rate / treatment from DB; delegates
-         *     calculation to ``services.pricing`` (red-line 1).
+         * @description Preview invoice pricing without persisting (red-line 1).
          */
         post: operations["calculate_invoice_endpoint_api_v1_invoices_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Invoices Endpoint */
+        get: operations["list_invoices_endpoint_api_v1_invoices_get"];
+        put?: never;
+        /**
+         * Create Invoice Endpoint
+         * @description Create invoice: allocates number, calculates amounts, persists.
+         */
+        post: operations["create_invoice_endpoint_api_v1_invoices_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Invoice Endpoint */
+        get: operations["get_invoice_endpoint_api_v1_invoices__invoice_id__get"];
+        /** Update Invoice Endpoint */
+        put: operations["update_invoice_endpoint_api_v1_invoices__invoice_id__put"];
+        post?: never;
+        /** Delete Invoice Endpoint */
+        delete: operations["delete_invoice_endpoint_api_v1_invoices__invoice_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transition Status Endpoint */
+        post: operations["transition_status_endpoint_api_v1_invoices__invoice_id__status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoice-product-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Invoice Product Options Endpoint
+         * @description Customer-safe product search for invoice line auto-fill.
+         *
+         *     Returns only id/name/unit/default_vat_rate_id – never cost/margin/supplier.
+         */
+        get: operations["list_invoice_product_options_endpoint_api_v1_invoice_product_options_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1047,10 +1123,6 @@ export interface components {
         /**
          * DiscountInput
          * @description Discount specification applied to a line or document.
-         *
-         *     ``NONE`` means no discount (``value`` treated as 0 regardless).
-         *     ``PERCENTAGE``: ``value`` is 0–100 (inclusive).
-         *     ``FIXED``: ``value`` is a fixed monetary amount.
          */
         DiscountInput: {
             /** @default NONE */
@@ -1151,8 +1223,6 @@ export interface components {
         /**
          * InvoiceCalculationRead
          * @description Response body for ``POST /api/v1/invoices/calculate``.
-         *
-         *     All monetary fields are computed by the backend pricing engine.
          */
         InvoiceCalculationRead: {
             tax_mode: components["schemas"]["InvoiceTaxMode"];
@@ -1184,9 +1254,6 @@ export interface components {
         /**
          * InvoiceCalculationRequest
          * @description Request body for ``POST /api/v1/invoices/calculate``.
-         *
-         *     Shares core fields with ``InvoiceWrite`` (step 3).  Only computes a
-         *     preview – nothing is persisted.
          */
         InvoiceCalculationRequest: {
             /**
@@ -1274,10 +1341,7 @@ export interface components {
         };
         /**
          * InvoiceLineInput
-         * @description Single line item in an invoice calculation request.
-         *
-         *     ``product_id`` is optional and only recorded for reference; the caller
-         *     must always supply the customer-facing ``name`` and ``unit_price``.
+         * @description Single line item in an invoice calculation or write request.
          */
         InvoiceLineInput: {
             /** Product Id */
@@ -1311,6 +1375,89 @@ export interface components {
             vat_rate_id?: string | null;
         };
         /**
+         * InvoiceLineRead
+         * @description Invoice line as returned in InvoiceRead.
+         *
+         *     Never exposes product.purchase_cost / margin / supplier / extra (red-line 7).
+         */
+        InvoiceLineRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Product Id */
+            product_id?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /** Unit Price */
+            unit_price: string;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Vat Rate Label */
+            vat_rate_label?: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent?: string | null;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Subtotal Incl Vat */
+            subtotal_incl_vat: string;
+            /** Line Discount Amount */
+            line_discount_amount: string;
+            /** Document Discount Share */
+            document_discount_share: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /**
+             * Line Taxes
+             * @default []
+             */
+            line_taxes?: components["schemas"]["InvoiceLineReadTax"][];
+        };
+        /**
+         * InvoiceLineReadTax
+         * @description Per-line tax read (for InvoiceLineRead).
+         */
+        InvoiceLineReadTax: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
+        };
+        /**
          * InvoiceLineTaxRead
          * @description Per-line tax breakdown (LINE mode).
          */
@@ -1330,6 +1477,67 @@ export interface components {
             taxable_amount: string;
             /** Tax Amount */
             tax_amount: string;
+        };
+        /**
+         * InvoiceListItem
+         * @description Summary row in InvoiceListResponse.
+         */
+        InvoiceListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Invoice Number */
+            invoice_number: string;
+            /** Reference Number */
+            reference_number?: string | null;
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Due Date */
+            due_date?: string | null;
+            status: components["schemas"]["InvoiceStatus"];
+            paid_status: components["schemas"]["InvoicePaidStatus"];
+            /** Currency */
+            currency: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Due Amount */
+            due_amount: string;
+            vat_treatment_snapshot: components["schemas"]["VatTreatmentSnapshot"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * InvoiceListResponse
+         * @description Paginated invoice list.
+         */
+        InvoiceListResponse: {
+            /** Items */
+            items: components["schemas"]["InvoiceListItem"][];
+            /** Total */
+            total: number;
         };
         /**
          * InvoiceNumberSequenceRead
@@ -1389,6 +1597,133 @@ export interface components {
             preview?: string | null;
         };
         /**
+         * InvoicePaidStatus
+         * @description Payment status of an invoice.
+         * @enum {string}
+         */
+        InvoicePaidStatus: "UNPAID" | "PARTIALLY_PAID" | "PAID";
+        /**
+         * InvoiceRead
+         * @description Full invoice representation returned by CRUD endpoints.
+         */
+        InvoiceRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Invoice Number */
+            invoice_number: string;
+            /** Sequence Number */
+            sequence_number: number;
+            /** Customer Sequence Number */
+            customer_sequence_number?: number | null;
+            /** Unique Hash */
+            unique_hash?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Due Date */
+            due_date?: string | null;
+            status: components["schemas"]["InvoiceStatus"];
+            paid_status: components["schemas"]["InvoicePaidStatus"];
+            /** Currency */
+            currency: string;
+            /** Exchange Rate */
+            exchange_rate: string;
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /** Amounts Include Vat */
+            amounts_include_vat: boolean;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /** Document Vat Rate Id */
+            document_vat_rate_id?: string | null;
+            vat_treatment_snapshot: components["schemas"]["VatTreatmentSnapshot"];
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Document Discount Amount */
+            document_discount_amount: string;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Line Discount Total */
+            line_discount_total: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Due Amount */
+            due_amount: string;
+            /** Base Subtotal Excl Vat */
+            base_subtotal_excl_vat: string;
+            /** Base Line Discount Total */
+            base_line_discount_total: string;
+            /** Base Taxable Amount */
+            base_taxable_amount: string;
+            /** Base Vat Total */
+            base_vat_total: string;
+            /** Base Total Incl Vat */
+            base_total_incl_vat: string;
+            /** Base Due Amount */
+            base_due_amount: string;
+            /** Notes */
+            notes?: string | null;
+            /** Creator Id */
+            creator_id?: string | null;
+            /**
+             * Lines
+             * @default []
+             */
+            lines?: components["schemas"]["InvoiceLineRead"][];
+            /**
+             * Taxes
+             * @default []
+             */
+            taxes?: components["schemas"]["InvoiceTaxRowRead"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * InvoiceStatus
+         * @description Lifecycle status of an invoice.
+         * @enum {string}
+         */
+        InvoiceStatus: "DRAFT" | "SENT" | "COMPLETED" | "CANCELLED";
+        /**
+         * InvoiceStatusWrite
+         * @description Request body for ``POST /api/v1/invoices/{id}/status``.
+         */
+        InvoiceStatusWrite: {
+            status: components["schemas"]["InvoiceStatus"];
+        };
+        /**
          * InvoiceTaxMode
          * @description Whether VAT is calculated per-line or per-document.
          * @enum {string}
@@ -1414,6 +1749,81 @@ export interface components {
             taxable_amount: string;
             /** Tax Amount */
             tax_amount: string;
+        };
+        /**
+         * InvoiceTaxRowRead
+         * @description Document-level tax row as returned in InvoiceRead.
+         */
+        InvoiceTaxRowRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
+        };
+        /**
+         * InvoiceWrite
+         * @description Request body for ``POST /PUT /api/v1/invoices``.
+         */
+        InvoiceWrite: {
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Reference Number */
+            reference_number?: string | null;
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Due Date */
+            due_date?: string | null;
+            /**
+             * Currency
+             * @description Must equal company base_currency in M5.
+             */
+            currency?: string | null;
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /**
+             * Amounts Include Vat
+             * @default false
+             */
+            amounts_include_vat?: boolean;
+            /** Vat Treatment Id */
+            vat_treatment_id?: string | null;
+            /** Document Vat Rate Id */
+            document_vat_rate_id?: string | null;
+            /**
+             * @default {
+             *       "type": "NONE",
+             *       "value": "0"
+             *     }
+             */
+            discount?: components["schemas"]["DiscountInput"];
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Lines
+             * @description At least 1 line required.
+             */
+            lines: components["schemas"]["InvoiceLineInput"][];
         };
         /**
          * LoginRequest
@@ -1615,6 +2025,36 @@ export interface components {
             row: number;
             /** Message */
             message: string;
+        };
+        /**
+         * ProductInvoiceOptionListResponse
+         * @description List of customer-safe product options.
+         */
+        ProductInvoiceOptionListResponse: {
+            /** Items */
+            items: components["schemas"]["ProductInvoiceOptionRead"][];
+        };
+        /**
+         * ProductInvoiceOptionRead
+         * @description Customer-safe product option for invoice line auto-fill.
+         *
+         *     Never includes: purchase_cost_excl_vat, margin_rate, effective_margin_rate,
+         *     supplier, extra (red-line 7 extension).
+         */
+        ProductInvoiceOptionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /** Default Vat Rate Id */
+            default_vat_rate_id?: string | null;
         };
         /**
          * ProductListResponse
@@ -2058,7 +2498,7 @@ export interface components {
         VatTreatmentSide: "SALES" | "PURCHASE";
         /**
          * VatTreatmentSnapshot
-         * @description Snapshot of the VAT treatment applied to this calculation.
+         * @description Snapshot of the VAT treatment applied to this calculation/invoice.
          */
         VatTreatmentSnapshot: {
             /**
@@ -4041,6 +4481,240 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceCalculationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_invoices_endpoint_api_v1_invoices_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                customer_id?: string | null;
+                status?: string | null;
+                paid_status?: string | null;
+                date_from?: string | null;
+                date_to?: string | null;
+                limit?: number;
+                offset?: number;
+                sort_by?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_invoice_endpoint_api_v1_invoices_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_invoice_endpoint_api_v1_invoices__invoice_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_invoice_endpoint_api_v1_invoices__invoice_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_invoice_endpoint_api_v1_invoices__invoice_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transition_status_endpoint_api_v1_invoices__invoice_id__status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceStatusWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_invoice_product_options_endpoint_api_v1_invoice_product_options_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductInvoiceOptionListResponse"];
                 };
             };
             /** @description Validation Error */

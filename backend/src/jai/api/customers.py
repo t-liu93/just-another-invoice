@@ -14,6 +14,7 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
@@ -136,5 +137,12 @@ async def delete_customer_endpoint(
     customer = await get_customer(session, customer_id, company_id)
     if customer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found.")
-    await delete_customer(session, customer)
-    await session.commit()
+    try:
+        await delete_customer(session, customer)
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete customer: it is referenced by one or more invoices.",
+        ) from exc

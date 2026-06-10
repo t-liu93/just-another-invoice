@@ -4,6 +4,7 @@ from jai.models.binary_asset import BinaryAsset  # noqa: F401
 from jai.models.company import Company  # noqa: F401
 from jai.models.customer import Customer  # noqa: F401
 from jai.models.dictionary import ExpenseCategory, PaymentMethod, Unit  # noqa: F401
+from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax  # noqa: F401
 from jai.models.number_sequence import NumberSequence  # noqa: F401
 from jai.models.product import Product, ProductCategory  # noqa: F401
 from jai.models.setting import Setting  # noqa: F401

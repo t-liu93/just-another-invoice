@@ -19,6 +19,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
@@ -143,8 +144,15 @@ async def delete_vat_rate_endpoint(
     rate = await get_vat_rate(session, rate_id, company_id)
     if rate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="VAT rate not found.")
-    await delete_vat_rate(session, rate)
-    await session.commit()
+    try:
+        await delete_vat_rate(session, rate)
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete VAT rate: it is referenced by one or more invoices.",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -236,5 +244,12 @@ async def delete_vat_treatment_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="VAT treatment not found."
         )
-    await delete_vat_treatment(session, treatment)
-    await session.commit()
+    try:
+        await delete_vat_treatment(session, treatment)
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete VAT treatment: it is referenced by one or more invoices.",
+        ) from exc

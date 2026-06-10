@@ -1,33 +1,28 @@
-"""Pydantic schemas for invoice calculation (M5 step 1).
+"""Pydantic schemas for invoice (M5 steps 1 & 3).
 
-``DiscountInput``      – discount specification (type + value)
-``InvoiceLineInput``   – single line item input
-``InvoiceCalculationRequest`` – request body for POST /invoices/calculate
-``InvoiceLineCalculationRead`` – per-line calculation result
-``InvoiceLineTaxRead`` – per-line tax breakdown
-``InvoiceTaxRead``     – per-document tax breakdown
-``VatTreatmentSnapshot`` – treatment snapshot included in response
-``InvoiceCalculationRead``  – full calculation response
+Step 1 schemas (pricing preview):
+  DiscountInput, InvoiceLineInput, InvoiceCalculationRequest,
+  InvoiceLineCalculationRead, InvoiceLineTaxRead, InvoiceTaxRead,
+  VatTreatmentSnapshot, InvoiceCalculationRead
 
-All monetary fields are ``Decimal``; the pricing engine quantises to
-3 decimal places (``ROUND_HALF_UP``).  Schema layer never computes
-amounts (red-line 1).
+Step 3 schemas (CRUD):
+  InvoiceWrite, InvoiceRead, InvoiceLineRead, InvoiceLineReadTax,
+  InvoiceListResponse, InvoiceStatusWrite,
+  ProductInvoiceOptionRead, ProductInvoiceOptionListResponse
+
+All monetary fields are ``Decimal``; the pricing engine quantises to 3 dp
+(ROUND_HALF_UP).  Schema layer never computes amounts (red-line 1).
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
 
-from jai.models._enums import DiscountType, InvoiceTaxMode
-
-# ---------------------------------------------------------------------------
-# Shared enums re-exported for convenience in generated schema.d.ts
-# ---------------------------------------------------------------------------
-
+from jai.models._enums import DiscountType, InvoicePaidStatus, InvoiceStatus, InvoiceTaxMode
 
 # ---------------------------------------------------------------------------
 # Discount
@@ -35,12 +30,7 @@ from jai.models._enums import DiscountType, InvoiceTaxMode
 
 
 class DiscountInput(BaseModel):
-    """Discount specification applied to a line or document.
-
-    ``NONE`` means no discount (``value`` treated as 0 regardless).
-    ``PERCENTAGE``: ``value`` is 0–100 (inclusive).
-    ``FIXED``: ``value`` is a fixed monetary amount.
-    """
+    """Discount specification applied to a line or document."""
 
     type: DiscountType = DiscountType.NONE
     value: Decimal = Field(
@@ -56,11 +46,7 @@ class DiscountInput(BaseModel):
 
 
 class InvoiceLineInput(BaseModel):
-    """Single line item in an invoice calculation request.
-
-    ``product_id`` is optional and only recorded for reference; the caller
-    must always supply the customer-facing ``name`` and ``unit_price``.
-    """
+    """Single line item in an invoice calculation or write request."""
 
     product_id: uuid.UUID | None = None
     name: str = Field(min_length=1)
@@ -92,16 +78,12 @@ class InvoiceLineInput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Calculation request
+# Calculation request (step 1)
 # ---------------------------------------------------------------------------
 
 
 class InvoiceCalculationRequest(BaseModel):
-    """Request body for ``POST /api/v1/invoices/calculate``.
-
-    Shares core fields with ``InvoiceWrite`` (step 3).  Only computes a
-    preview – nothing is persisted.
-    """
+    """Request body for ``POST /api/v1/invoices/calculate``."""
 
     customer_id: uuid.UUID
     invoice_date: date
@@ -126,7 +108,7 @@ class InvoiceCalculationRequest(BaseModel):
 
 
 class VatTreatmentSnapshot(BaseModel):
-    """Snapshot of the VAT treatment applied to this calculation."""
+    """Snapshot of the VAT treatment applied to this calculation/invoice."""
 
     id: uuid.UUID
     code: str
@@ -163,7 +145,7 @@ class InvoiceTaxRead(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Line calculation result
+# Line calculation result (step 1)
 # ---------------------------------------------------------------------------
 
 
@@ -192,15 +174,12 @@ class InvoiceLineCalculationRead(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Full calculation response
+# Full calculation response (step 1)
 # ---------------------------------------------------------------------------
 
 
 class InvoiceCalculationRead(BaseModel):
-    """Response body for ``POST /api/v1/invoices/calculate``.
-
-    All monetary fields are computed by the backend pricing engine.
-    """
+    """Response body for ``POST /api/v1/invoices/calculate``."""
 
     tax_mode: InvoiceTaxMode
     amounts_include_vat: bool
@@ -216,3 +195,219 @@ class InvoiceCalculationRead(BaseModel):
     lines: list[InvoiceLineCalculationRead]
     line_taxes: list[InvoiceLineTaxRead]
     document_taxes: list[InvoiceTaxRead]
+
+
+# ---------------------------------------------------------------------------
+# Invoice write (step 3)
+# ---------------------------------------------------------------------------
+
+
+class InvoiceWrite(BaseModel):
+    """Request body for ``POST /PUT /api/v1/invoices``."""
+
+    customer_id: uuid.UUID
+    reference_number: str | None = None
+    invoice_date: date
+    due_date: date | None = None
+    currency: str | None = Field(
+        default=None,
+        max_length=3,
+        min_length=3,
+        description="Must equal company base_currency in M5.",
+    )
+    tax_mode: InvoiceTaxMode
+    amounts_include_vat: bool = False
+    vat_treatment_id: uuid.UUID | None = None
+    document_vat_rate_id: uuid.UUID | None = None
+    discount: DiscountInput = DiscountInput()
+    notes: str | None = None
+    lines: list[InvoiceLineInput] = Field(min_length=1, description="At least 1 line required.")
+
+
+# ---------------------------------------------------------------------------
+# Invoice line read (step 3)
+# ---------------------------------------------------------------------------
+
+
+class InvoiceLineReadTax(BaseModel):
+    """Per-line tax read (for InvoiceLineRead)."""
+
+    id: uuid.UUID
+    vat_rate_id: uuid.UUID
+    vat_rate_label: str
+    vat_rate_percent: Decimal
+    effective_vat_percent: Decimal
+    taxable_amount: Decimal
+    tax_amount: Decimal
+
+
+class InvoiceLineRead(BaseModel):
+    """Invoice line as returned in InvoiceRead.
+
+    Never exposes product.purchase_cost / margin / supplier / extra (red-line 7).
+    """
+
+    id: uuid.UUID
+    sort_order: int
+    product_id: uuid.UUID | None = None
+    name: str
+    description: str | None = None
+    quantity: Decimal
+    unit_id: uuid.UUID | None = None
+    unit_name: str | None = None
+    unit_price: Decimal
+    discount_type: DiscountType
+    discount_value: Decimal
+    vat_rate_id: uuid.UUID | None = None
+    vat_rate_label: str | None = None
+    vat_rate_percent: Decimal | None = None
+    subtotal_excl_vat: Decimal
+    subtotal_incl_vat: Decimal
+    line_discount_amount: Decimal
+    document_discount_share: Decimal
+    taxable_amount: Decimal
+    vat_total: Decimal
+    total_incl_vat: Decimal
+    line_taxes: list[InvoiceLineReadTax] = []
+
+
+class InvoiceTaxRowRead(BaseModel):
+    """Document-level tax row as returned in InvoiceRead."""
+
+    id: uuid.UUID
+    vat_rate_id: uuid.UUID
+    vat_rate_label: str
+    vat_rate_percent: Decimal
+    effective_vat_percent: Decimal
+    taxable_amount: Decimal
+    tax_amount: Decimal
+
+
+# ---------------------------------------------------------------------------
+# Invoice read (step 3)
+# ---------------------------------------------------------------------------
+
+
+class InvoiceRead(BaseModel):
+    """Full invoice representation returned by CRUD endpoints."""
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    customer_id: uuid.UUID
+
+    invoice_number: str
+    sequence_number: int
+    customer_sequence_number: int | None = None
+    unique_hash: str | None = None
+    reference_number: str | None = None
+
+    invoice_date: date
+    due_date: date | None = None
+
+    status: InvoiceStatus
+    paid_status: InvoicePaidStatus
+
+    currency: str
+    exchange_rate: Decimal
+
+    tax_mode: InvoiceTaxMode
+    amounts_include_vat: bool
+    vat_treatment_id: uuid.UUID
+    document_vat_rate_id: uuid.UUID | None = None
+
+    vat_treatment_snapshot: VatTreatmentSnapshot
+
+    discount_type: DiscountType
+    discount_value: Decimal
+    document_discount_amount: Decimal
+
+    subtotal_excl_vat: Decimal
+    line_discount_total: Decimal
+    taxable_amount: Decimal
+    vat_total: Decimal
+    total_incl_vat: Decimal
+    due_amount: Decimal
+
+    base_subtotal_excl_vat: Decimal
+    base_line_discount_total: Decimal
+    base_taxable_amount: Decimal
+    base_vat_total: Decimal
+    base_total_incl_vat: Decimal
+    base_due_amount: Decimal
+
+    notes: str | None = None
+    creator_id: uuid.UUID | None = None
+
+    lines: list[InvoiceLineRead] = []
+    taxes: list[InvoiceTaxRowRead] = []
+
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Invoice list (step 3)
+# ---------------------------------------------------------------------------
+
+
+class InvoiceListItem(BaseModel):
+    """Summary row in InvoiceListResponse."""
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    customer_id: uuid.UUID
+    invoice_number: str
+    reference_number: str | None = None
+    invoice_date: date
+    due_date: date | None = None
+    status: InvoiceStatus
+    paid_status: InvoicePaidStatus
+    currency: str
+    total_incl_vat: Decimal
+    due_amount: Decimal
+    vat_treatment_snapshot: VatTreatmentSnapshot
+    created_at: datetime
+    updated_at: datetime
+
+
+class InvoiceListResponse(BaseModel):
+    """Paginated invoice list."""
+
+    items: list[InvoiceListItem]
+    total: int
+
+
+# ---------------------------------------------------------------------------
+# Status transition (step 3)
+# ---------------------------------------------------------------------------
+
+
+class InvoiceStatusWrite(BaseModel):
+    """Request body for ``POST /api/v1/invoices/{id}/status``."""
+
+    status: InvoiceStatus
+
+
+# ---------------------------------------------------------------------------
+# Invoice product options (step 3) – customer-safe projection
+# ---------------------------------------------------------------------------
+
+
+class ProductInvoiceOptionRead(BaseModel):
+    """Customer-safe product option for invoice line auto-fill.
+
+    Never includes: purchase_cost_excl_vat, margin_rate, effective_margin_rate,
+    supplier, extra (red-line 7 extension).
+    """
+
+    id: uuid.UUID
+    name: str
+    unit_id: uuid.UUID | None = None
+    unit_name: str | None = None
+    default_vat_rate_id: uuid.UUID | None = None
+
+
+class ProductInvoiceOptionListResponse(BaseModel):
+    """List of customer-safe product options."""
+
+    items: list[ProductInvoiceOptionRead]

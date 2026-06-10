@@ -613,14 +613,16 @@ async def _derive_treatment_from_customer(
     if company is None:
         return None
 
-    # Determine customer billing country
+    # Determine customer billing country (normalise to uppercase)
     billing_country: str | None = None
     for addr in customer.addresses:
-        if addr.type.value == "BILLING":
-            billing_country = addr.country_code
+        if addr.type == "BILLING":
+            billing_country = addr.country_code.upper() if addr.country_code else None
             break
 
-    company_country = company.country_code
+    # Normalise company country; fall back to NL when not set (Dutch-app default)
+    raw_company_country = company.country_code
+    company_country: str = (raw_company_country.upper() if raw_company_country else "NL")
 
     # Determine treatment code
     if not billing_country or billing_country == company_country:
