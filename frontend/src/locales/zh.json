@@ -280,7 +280,9 @@
   },
   "dict": {
     "active": "启用",
-    "actions": "操作"
+    "actions": "操作",
+    "backToAll": "所有字典",
+    "count": "{n} 条"
   },
   "paymentMethods": {
     "title": "收款方式",

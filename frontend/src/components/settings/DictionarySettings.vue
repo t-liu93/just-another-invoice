@@ -1,18 +1,20 @@
 <script setup lang="ts">
 /**
- * Dictionary settings panel content (M4 step 1 + step 2).
+ * Dictionary settings – two-level navigation:
+ *   Level 1 (overview): 2-column card grid showing all dictionary categories
+ *                       with live item counts.
+ *   Level 2 (detail):   management table for the selected category, with a
+ *                       "← All Dictionaries" back link at the top.
  *
- * Tab 1 – VAT Rates: user-editable list (add / edit / delete).
- * Tab 2 – VAT Treatments: read-only system list.
- * Tab 3 – Payment Methods: user-editable list.
- * Tab 4 – Expense Categories: user-editable list.
- * Tab 5 – Units: user-editable list.
+ * Adding a new dictionary category only requires adding one entry to
+ * `dictCards` and one management template block.
  */
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NAlert,
   NButton,
   NDataTable,
+  NDivider,
   NForm,
   NFormItem,
   NIcon,
@@ -22,14 +24,18 @@ import {
   NSpace,
   NSpin,
   NSwitch,
-  NTabPane,
-  NTabs,
   NTag,
   type DataTableColumns,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useMessage, useDialog } from 'naive-ui'
-import { AddOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
+import {
+  AddOutline,
+  ChevronBackOutline,
+  ChevronForwardOutline,
+  CreateOutline,
+  TrashOutline,
+} from '@vicons/ionicons5'
 import { useVatStore } from '../../stores/vat'
 import {
   useExpenseCategoryStore,
@@ -39,6 +45,7 @@ import {
 import { ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
 
+type DictKey = 'vatRates' | 'vatTreatments' | 'paymentMethods' | 'expenseCategories' | 'units'
 type VatRateRead = components['schemas']['VatRateRead']
 type VatTreatmentRead = components['schemas']['VatTreatmentRead']
 type VatTreatmentEffect = components['schemas']['VatTreatmentEffect']
@@ -54,6 +61,45 @@ const vatStore = useVatStore()
 const pmStore = usePaymentMethodStore()
 const ecStore = useExpenseCategoryStore()
 const unitStore = useUnitStore()
+
+// ============================================================================
+// Two-level navigation
+// ============================================================================
+
+const activeDict = ref<DictKey | null>(null)
+
+const dictCards = computed(() => [
+  {
+    key: 'vatRates' as DictKey,
+    title: t('vat.rates'),
+    count: vatStore.rates.length,
+    loading: vatStore.loadingRates,
+  },
+  {
+    key: 'vatTreatments' as DictKey,
+    title: t('vat.treatments'),
+    count: vatStore.treatments.length,
+    loading: vatStore.loadingTreatments,
+  },
+  {
+    key: 'paymentMethods' as DictKey,
+    title: t('paymentMethods.title'),
+    count: pmStore.items.length,
+    loading: pmStore.loading,
+  },
+  {
+    key: 'expenseCategories' as DictKey,
+    title: t('expenseCategories.title'),
+    count: ecStore.items.length,
+    loading: ecStore.loading,
+  },
+  {
+    key: 'units' as DictKey,
+    title: t('units.title'),
+    count: unitStore.items.length,
+    loading: unitStore.loading,
+  },
+])
 
 // ============================================================================
 // VAT Rate modal
@@ -481,71 +527,124 @@ onMounted(async () => {
 
 <template>
   <div class="dict-settings">
-    <n-tabs type="line" animated>
-      <!-- VAT Rates -->
-      <n-tab-pane name="rates" :tab="t('vat.rates')">
-        <div class="tab-header">
+
+    <!-- ====================================================================
+         Level 1: category overview (card grid)
+         ==================================================================== -->
+    <div v-if="!activeDict" class="dict-overview">
+      <div
+        v-for="card in dictCards"
+        :key="card.key"
+        class="dict-card"
+        role="button"
+        tabindex="0"
+        @click="activeDict = card.key"
+        @keydown.enter="activeDict = card.key"
+        @keydown.space.prevent="activeDict = card.key"
+      >
+        <span class="dict-card-title">{{ card.title }}</span>
+        <div class="dict-card-bottom">
+          <span class="dict-card-count">
+            <n-spin v-if="card.loading" :size="12" />
+            <template v-else>{{ t('dict.count', { n: card.count }) }}</template>
+          </span>
+          <n-icon :size="14" class="dict-card-arrow"><ChevronForwardOutline /></n-icon>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         Level 2: management view for selected category
+         ==================================================================== -->
+    <div v-else class="dict-detail">
+
+      <!-- Back link -->
+      <n-button text size="small" class="dict-back-btn" @click="activeDict = null">
+        <template #icon><n-icon><ChevronBackOutline /></n-icon></template>
+        {{ t('dict.backToAll') }}
+      </n-button>
+
+      <!-- ── VAT Rates ──────────────────────────────────────────────────── -->
+      <template v-if="activeDict === 'vatRates'">
+        <div class="dict-detail-header">
+          <h4 class="dict-detail-title">{{ t('vat.rates') }}</h4>
           <n-button size="small" type="primary" @click="openCreateRate">
             <template #icon><n-icon><AddOutline /></n-icon></template>
             {{ t('vat.rate.create') }}
           </n-button>
         </div>
+        <n-divider style="margin: 8px 0 12px" />
         <n-spin :show="vatStore.loadingRates">
           <n-alert v-if="vatStore.error" type="error" :title="t('vat.rate.loadFailed')" style="margin-bottom:12px" />
           <n-data-table :columns="rateColumns" :data="vatStore.rates" size="small" :bordered="false" :single-line="false" />
         </n-spin>
-      </n-tab-pane>
+      </template>
 
-      <!-- VAT Treatments (read-only) -->
-      <n-tab-pane name="treatments" :tab="t('vat.treatments')">
+      <!-- ── VAT Treatments (read-only) ────────────────────────────────── -->
+      <template v-else-if="activeDict === 'vatTreatments'">
+        <div class="dict-detail-header">
+          <h4 class="dict-detail-title">{{ t('vat.treatments') }}</h4>
+        </div>
+        <n-divider style="margin: 8px 0 12px" />
         <n-spin :show="vatStore.loadingTreatments">
           <n-alert v-if="vatStore.error" type="error" :title="t('vat.treatment.loadFailed')" style="margin-bottom:12px" />
           <n-data-table :columns="treatmentColumns" :data="vatStore.treatments" size="small" :bordered="false" :single-line="false" />
         </n-spin>
-      </n-tab-pane>
+      </template>
 
-      <!-- Payment Methods -->
-      <n-tab-pane name="paymentMethods" :tab="t('paymentMethods.title')">
-        <div class="tab-header">
+      <!-- ── Payment Methods ───────────────────────────────────────────── -->
+      <template v-else-if="activeDict === 'paymentMethods'">
+        <div class="dict-detail-header">
+          <h4 class="dict-detail-title">{{ t('paymentMethods.title') }}</h4>
           <n-button size="small" type="primary" @click="openCreatePm">
             <template #icon><n-icon><AddOutline /></n-icon></template>
             {{ t('paymentMethods.create') }}
           </n-button>
         </div>
+        <n-divider style="margin: 8px 0 12px" />
         <n-spin :show="pmStore.loading">
           <n-alert v-if="pmStore.error" type="error" :title="t('paymentMethods.loadFailed')" style="margin-bottom:12px" />
           <n-data-table :columns="pmColumns" :data="pmStore.items" size="small" :bordered="false" :single-line="false" />
         </n-spin>
-      </n-tab-pane>
+      </template>
 
-      <!-- Expense Categories -->
-      <n-tab-pane name="expenseCategories" :tab="t('expenseCategories.title')">
-        <div class="tab-header">
+      <!-- ── Expense Categories ────────────────────────────────────────── -->
+      <template v-else-if="activeDict === 'expenseCategories'">
+        <div class="dict-detail-header">
+          <h4 class="dict-detail-title">{{ t('expenseCategories.title') }}</h4>
           <n-button size="small" type="primary" @click="openCreateEc">
             <template #icon><n-icon><AddOutline /></n-icon></template>
             {{ t('expenseCategories.create') }}
           </n-button>
         </div>
+        <n-divider style="margin: 8px 0 12px" />
         <n-spin :show="ecStore.loading">
           <n-alert v-if="ecStore.error" type="error" :title="t('expenseCategories.loadFailed')" style="margin-bottom:12px" />
           <n-data-table :columns="ecColumns" :data="ecStore.items" size="small" :bordered="false" :single-line="false" />
         </n-spin>
-      </n-tab-pane>
+      </template>
 
-      <!-- Units -->
-      <n-tab-pane name="units" :tab="t('units.title')">
-        <div class="tab-header">
+      <!-- ── Units ─────────────────────────────────────────────────────── -->
+      <template v-else-if="activeDict === 'units'">
+        <div class="dict-detail-header">
+          <h4 class="dict-detail-title">{{ t('units.title') }}</h4>
           <n-button size="small" type="primary" @click="openCreateUnit">
             <template #icon><n-icon><AddOutline /></n-icon></template>
             {{ t('units.create') }}
           </n-button>
         </div>
+        <n-divider style="margin: 8px 0 12px" />
         <n-spin :show="unitStore.loading">
           <n-alert v-if="unitStore.error" type="error" :title="t('units.loadFailed')" style="margin-bottom:12px" />
           <n-data-table :columns="unitColumns" :data="unitStore.items" size="small" :bordered="false" :single-line="false" />
         </n-spin>
-      </n-tab-pane>
-    </n-tabs>
+      </template>
+
+    </div>
+
+    <!-- ==================================================================
+         Modals – rendered outside v-if blocks so they can open freely.
+         ================================================================== -->
 
     <!-- VAT Rate modal -->
     <n-modal v-model:show="showRateModal" preset="card" :title="editingRateId ? t('vat.rate.edit') : t('vat.rate.create')" :style="{ width: '400px' }">
@@ -563,7 +662,8 @@ onMounted(async () => {
       <template #footer>
         <n-space justify="end">
           <n-button @click="showRateModal = false">{{ t('vat.rate.cancel') }}</n-button>
-          <n-button type="primary" :loading="savingRate" @click="saveRate">{{ t('vat.rate.save') }}</n-button>
+          <n-button v-if="savingRate" type="primary" loading disabled>{{ t('vat.rate.save') }}</n-button>
+          <n-button v-else type="primary" @click="saveRate">{{ t('vat.rate.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -581,7 +681,8 @@ onMounted(async () => {
       <template #footer>
         <n-space justify="end">
           <n-button @click="showPmModal = false">{{ t('paymentMethods.cancel') }}</n-button>
-          <n-button type="primary" :loading="savingPm" @click="savePm">{{ t('paymentMethods.save') }}</n-button>
+          <n-button v-if="savingPm" type="primary" loading disabled>{{ t('paymentMethods.save') }}</n-button>
+          <n-button v-else type="primary" @click="savePm">{{ t('paymentMethods.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -621,7 +722,8 @@ onMounted(async () => {
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEcModal = false">{{ t('expenseCategories.cancel') }}</n-button>
-          <n-button type="primary" :loading="savingEc" @click="saveEc">{{ t('expenseCategories.save') }}</n-button>
+          <n-button v-if="savingEc" type="primary" loading disabled>{{ t('expenseCategories.save') }}</n-button>
+          <n-button v-else type="primary" @click="saveEc">{{ t('expenseCategories.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -642,19 +744,90 @@ onMounted(async () => {
       <template #footer>
         <n-space justify="end">
           <n-button @click="showUnitModal = false">{{ t('units.cancel') }}</n-button>
-          <n-button type="primary" :loading="savingUnit" @click="saveUnit">{{ t('units.save') }}</n-button>
+          <n-button v-if="savingUnit" type="primary" loading disabled>{{ t('units.save') }}</n-button>
+          <n-button v-else type="primary" @click="saveUnit">{{ t('units.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
+
   </div>
 </template>
 
 <style scoped>
-.dict-settings {
+/* ---- Overview: card grid ------------------------------------------------ */
+
+.dict-overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   padding: 4px 0;
 }
 
-.tab-header {
-  margin-bottom: 12px;
+.dict-card {
+  flex: 0 1 calc(50% - 5px);
+  min-width: 160px;
+  padding: 14px 16px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.15s, background-color 0.15s;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.dict-card:hover,
+.dict-card:focus-visible {
+  border-color: var(--n-primary-color);
+  background-color: var(--n-primary-color-suppl, rgba(99, 125, 255, 0.06));
+}
+
+.dict-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.dict-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dict-card-count {
+  font-size: 12px;
+  color: var(--n-text-color-3);
+}
+
+.dict-card-arrow {
+  color: var(--n-text-color-3);
+  flex-shrink: 0;
+}
+
+/* ---- Detail view -------------------------------------------------------- */
+
+.dict-detail {
+  display: flex;
+  flex-direction: column;
+}
+
+.dict-back-btn {
+  margin-bottom: 4px;
+  align-self: flex-start;
+}
+
+.dict-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.dict-detail-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
 }
 </style>

@@ -280,7 +280,9 @@
   },
   "dict": {
     "active": "Active",
-    "actions": "Actions"
+    "actions": "Actions",
+    "backToAll": "All Dictionaries",
+    "count": "{n} items"
   },
   "paymentMethods": {
     "title": "Payment Methods",
