@@ -40,3 +40,35 @@ class VatTreatmentEffect(enum.StrEnum):
     ZERO_REVERSE = "ZERO_REVERSE"
     ZERO_EXPORT = "ZERO_EXPORT"
     EXEMPT = "EXEMPT"
+
+
+class InvoiceStatus(enum.StrEnum):
+    """Lifecycle status of an invoice."""
+
+    DRAFT = "DRAFT"
+    SENT = "SENT"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class InvoicePaidStatus(enum.StrEnum):
+    """Payment status of an invoice."""
+
+    UNPAID = "UNPAID"
+    PARTIALLY_PAID = "PARTIALLY_PAID"
+    PAID = "PAID"
+
+
+class InvoiceTaxMode(enum.StrEnum):
+    """Whether VAT is calculated per-line or per-document."""
+
+    LINE = "LINE"
+    DOCUMENT = "DOCUMENT"
+
+
+class DiscountType(enum.StrEnum):
+    """Type of discount applied to a line or document."""
+
+    NONE = "NONE"
+    PERCENTAGE = "PERCENTAGE"
+    FIXED = "FIXED"

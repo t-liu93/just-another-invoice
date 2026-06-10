@@ -726,6 +726,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calculate Invoice Endpoint
+         * @description Preview invoice pricing without persisting.
+         *
+         *     Reads customer / company / VAT rate / treatment from DB; delegates
+         *     calculation to ``services.pricing`` (red-line 1).
+         */
+        post: operations["calculate_invoice_endpoint_api_v1_invoices_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -988,6 +1011,30 @@ export interface components {
             addresses?: components["schemas"]["AddressWrite"][];
         };
         /**
+         * DiscountInput
+         * @description Discount specification applied to a line or document.
+         *
+         *     ``NONE`` means no discount (``value`` treated as 0 regardless).
+         *     ``PERCENTAGE``: ``value`` is 0–100 (inclusive).
+         *     ``FIXED``: ``value`` is a fixed monetary amount.
+         */
+        DiscountInput: {
+            /** @default NONE */
+            type?: components["schemas"]["DiscountType"];
+            /**
+             * Value
+             * @description Discount value. Ignored when type=NONE.
+             * @default 0
+             */
+            value?: number | string;
+        };
+        /**
+         * DiscountType
+         * @description Type of discount applied to a line or document.
+         * @enum {string}
+         */
+        DiscountType: "NONE" | "PERCENTAGE" | "FIXED";
+        /**
          * ExpenseCategoryListResponse
          * @description List envelope for GET /api/v1/expense-categories.
          */
@@ -1068,6 +1115,189 @@ export interface components {
             version: string;
         };
         /**
+         * InvoiceCalculationRead
+         * @description Response body for ``POST /api/v1/invoices/calculate``.
+         *
+         *     All monetary fields are computed by the backend pricing engine.
+         */
+        InvoiceCalculationRead: {
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /** Amounts Include Vat */
+            amounts_include_vat: boolean;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            vat_treatment_snapshot?: components["schemas"]["VatTreatmentSnapshot"] | null;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Line Discount Total */
+            line_discount_total: string;
+            /** Document Discount Amount */
+            document_discount_amount: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Lines */
+            lines: components["schemas"]["InvoiceLineCalculationRead"][];
+            /** Line Taxes */
+            line_taxes: components["schemas"]["InvoiceLineTaxRead"][];
+            /** Document Taxes */
+            document_taxes: components["schemas"]["InvoiceTaxRead"][];
+        };
+        /**
+         * InvoiceCalculationRequest
+         * @description Request body for ``POST /api/v1/invoices/calculate``.
+         *
+         *     Shares core fields with ``InvoiceWrite`` (step 3).  Only computes a
+         *     preview – nothing is persisted.
+         */
+        InvoiceCalculationRequest: {
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Due Date */
+            due_date?: string | null;
+            /**
+             * Currency
+             * @description ISO 4217. Must equal company base_currency in M5.
+             */
+            currency?: string | null;
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /**
+             * Amounts Include Vat
+             * @default false
+             */
+            amounts_include_vat?: boolean;
+            /** Vat Treatment Id */
+            vat_treatment_id?: string | null;
+            /** Document Vat Rate Id */
+            document_vat_rate_id?: string | null;
+            /**
+             * @default {
+             *       "type": "NONE",
+             *       "value": "0"
+             *     }
+             */
+            discount?: components["schemas"]["DiscountInput"];
+            /**
+             * Lines
+             * @description At least 1 line required.
+             */
+            lines: components["schemas"]["InvoiceLineInput"][];
+        };
+        /**
+         * InvoiceLineCalculationRead
+         * @description Per-line calculation result returned by the pricing engine.
+         */
+        InvoiceLineCalculationRead: {
+            /** Product Id */
+            product_id?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /** Unit Price */
+            unit_price: string;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Vat Rate Label */
+            vat_rate_label?: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent?: string | null;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Subtotal Incl Vat */
+            subtotal_incl_vat: string;
+            /** Line Discount Amount */
+            line_discount_amount: string;
+            /** Document Discount Share */
+            document_discount_share: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+        };
+        /**
+         * InvoiceLineInput
+         * @description Single line item in an invoice calculation request.
+         *
+         *     ``product_id`` is optional and only recorded for reference; the caller
+         *     must always supply the customer-facing ``name`` and ``unit_price``.
+         */
+        InvoiceLineInput: {
+            /** Product Id */
+            product_id?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Quantity
+             * @description Must be > 0.
+             */
+            quantity: number | string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /**
+             * Unit Price
+             * @description Per-unit price (excl or incl VAT depending on flag).
+             */
+            unit_price: number | string;
+            /**
+             * @default {
+             *       "type": "NONE",
+             *       "value": "0"
+             *     }
+             */
+            discount?: components["schemas"]["DiscountInput"];
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+        };
+        /**
+         * InvoiceLineTaxRead
+         * @description Per-line tax breakdown (LINE mode).
+         */
+        InvoiceLineTaxRead: {
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
+        };
+        /**
          * InvoiceNumberingConfig
          * @description Invoice numbering template and sequence configuration.
          *
@@ -1090,6 +1320,33 @@ export interface components {
              * @default 1
              */
             sequence_start?: number;
+        };
+        /**
+         * InvoiceTaxMode
+         * @description Whether VAT is calculated per-line or per-document.
+         * @enum {string}
+         */
+        InvoiceTaxMode: "LINE" | "DOCUMENT";
+        /**
+         * InvoiceTaxRead
+         * @description Per-document tax breakdown (DOCUMENT mode).
+         */
+        InvoiceTaxRead: {
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
         };
         /**
          * LoginRequest
@@ -1732,6 +1989,25 @@ export interface components {
          * @enum {string}
          */
         VatTreatmentSide: "SALES" | "PURCHASE";
+        /**
+         * VatTreatmentSnapshot
+         * @description Snapshot of the VAT treatment applied to this calculation.
+         */
+        VatTreatmentSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            /** Effect */
+            effect: string;
+            /** Requires Icp */
+            requires_icp: boolean;
+        };
         /**
          * VatTreatmentWrite
          * @description Request body for POST/PUT /api/v1/vat-treatments.
@@ -3613,6 +3889,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_invoice_endpoint_api_v1_invoices_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceCalculationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceCalculationRead"];
+                };
             };
             /** @description Validation Error */
             422: {
