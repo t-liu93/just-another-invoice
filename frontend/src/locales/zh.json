@@ -142,10 +142,17 @@
       "section": "单据编号",
       "template": "编号模板",
       "sequenceStart": "起始号",
+      "sequenceStartHint": "仅在尚未开出任何发票时有效；序列已初始化后请使用「跳号」功能向前推进。",
       "save": "保存编号配置",
       "saveSuccess": "编号配置已保存。",
       "saveFailed": "保存编号配置失败。",
-      "m5hint": "编号配置将在 M5 起生效，目前仅保存配置。"
+      "preview": "下一张编号",
+      "previewHint": "（当前序号：{seq}）",
+      "skipSection": "跳号（仅向前）",
+      "skipTo": "跳至序号",
+      "skipSave": "应用跳号",
+      "skipSuccess": "序号已更新。",
+      "skipFailed": "序号更新失败。"
     },
     "preferences": {
       "title": "个人偏好",
@@ -276,7 +283,10 @@
     "actions": "操作",
     "nameRequired": "名称不能为空。",
     "sortByName": "名称（A→Z）",
-    "sortByCreatedAt": "最新优先"
+    "sortByCreatedAt": "最新优先",
+    "invoicePrefix": "发票前缀",
+    "invoicePrefixPlaceholder": "如：ACME",
+    "invoicePrefixHint": "对应编号模板中的 {{CUSTOMER_SERIES}} 占位符。"
   },
   "dict": {
     "active": "启用",

@@ -142,10 +142,17 @@
       "section": "Invoice Numbering",
       "template": "Numbering template",
       "sequenceStart": "Starting number",
+      "sequenceStartHint": "Only applies when no invoice has been issued yet; use 'Skip sequence forward' to advance an existing sequence.",
       "save": "Save numbering",
       "saveSuccess": "Numbering config saved.",
       "saveFailed": "Failed to save numbering config.",
-      "m5hint": "Numbering takes effect from M5. Currently only the configuration is stored."
+      "preview": "Next number",
+      "previewHint": "(current sequence: {seq})",
+      "skipSection": "Skip sequence forward",
+      "skipTo": "Jump to number",
+      "skipSave": "Apply skip",
+      "skipSuccess": "Sequence advanced.",
+      "skipFailed": "Failed to advance sequence."
     },
     "preferences": {
       "title": "Preferences",
@@ -276,7 +283,10 @@
     "actions": "Actions",
     "nameRequired": "Name is required.",
     "sortByName": "Name (A–Z)",
-    "sortByCreatedAt": "Newest first"
+    "sortByCreatedAt": "Newest first",
+    "invoicePrefix": "Invoice prefix",
+    "invoicePrefixPlaceholder": "e.g. ACME",
+    "invoicePrefixHint": "Used as {{CUSTOMER_SERIES}} in the numbering template."
   },
   "dict": {
     "active": "Active",

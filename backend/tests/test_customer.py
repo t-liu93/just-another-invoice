@@ -48,6 +48,7 @@ def _make_customer_orm(**overrides: object) -> SimpleNamespace:
         "website": None,
         "vat_id": None,
         "currency": None,
+        "invoice_prefix": None,
         "extra": {},
         "addresses": [],
         "created_at": datetime.now(UTC),

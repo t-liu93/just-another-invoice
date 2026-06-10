@@ -40,6 +40,10 @@ class CustomerWrite(BaseModel):
     website: str | None = None
     vat_id: str | None = None
     currency: str | None = None
+    invoice_prefix: str | None = Field(
+        default=None,
+        description="Customer series prefix for {{CUSTOMER_SERIES}} in numbering templates.",
+    )
     extra: dict[str, Any] = Field(default_factory=dict)
     addresses: list[AddressWrite] = Field(default_factory=list)
 
@@ -83,6 +87,7 @@ class CustomerRead(BaseModel):
     website: str | None = None
     vat_id: str | None = None
     currency: str | None = None
+    invoice_prefix: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
     addresses: list[AddressRead] = Field(default_factory=list)
     created_at: datetime

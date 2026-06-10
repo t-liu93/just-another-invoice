@@ -70,6 +70,7 @@ def _to_read(customer: Customer, addresses: list[Address] | None = None) -> Cust
         website=customer.website,
         vat_id=customer.vat_id,
         currency=customer.currency,
+        invoice_prefix=customer.invoice_prefix,
         extra=customer.extra if customer.extra else {},
         addresses=[_address_to_read(a) for a in addrs],
         created_at=customer.created_at,
@@ -211,6 +212,7 @@ async def create_customer(
         website=data.website,
         vat_id=data.vat_id,
         currency=data.currency,
+        invoice_prefix=data.invoice_prefix,
         extra=data.extra,
     )
     session.add(customer)
@@ -238,6 +240,7 @@ async def update_customer(
     customer.website = data.website
     customer.vat_id = data.vat_id
     customer.currency = data.currency
+    customer.invoice_prefix = data.invoice_prefix
     customer.extra = data.extra
     await session.flush()
     await session.refresh(customer)

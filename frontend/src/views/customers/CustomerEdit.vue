@@ -33,6 +33,7 @@ const phone = ref<string | null>(null)
 const website = ref<string | null>(null)
 const vatId = ref<string | null>(null)
 const currency = ref<string | null>(null)
+const invoicePrefix = ref<string | null>(null)
 
 // Address models.
 const billingAddress = ref<AddressModel>({})
@@ -69,6 +70,7 @@ onMounted(async () => {
       website.value = customer.website ?? null
       vatId.value = customer.vat_id ?? null
       currency.value = customer.currency ?? null
+      invoicePrefix.value = customer.invoice_prefix ?? null
 
       // Populate address fields from existing data.
       for (const addr of customer.addresses ?? []) {
@@ -108,6 +110,7 @@ async function handleSave() {
       website: website.value?.trim() || null,
       vat_id: vatId.value?.trim() || null,
       currency: currency.value?.trim() || null,
+      invoice_prefix: invoicePrefix.value?.trim() || null,
       addresses: buildAddressesPayload(),
     }
     if (isEdit.value) {
@@ -185,6 +188,17 @@ function handleCancel() {
 
                 <n-form-item :label="t('customers.currency')">
                   <n-input v-model:value="currency" :placeholder="t('customers.currencyPlaceholder')" style="max-width: 200px" />
+                </n-form-item>
+
+                <n-form-item :label="t('customers.invoicePrefix')">
+                  <n-input
+                    v-model:value="invoicePrefix"
+                    :placeholder="t('customers.invoicePrefixPlaceholder')"
+                    style="max-width: 200px"
+                  />
+                  <n-text depth="3" style="margin-left: 8px; font-size: 12px">
+                    {{ t('customers.invoicePrefixHint') }}
+                  </n-text>
                 </n-form-item>
 
                 <!-- Addresses section -->

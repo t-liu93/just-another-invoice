@@ -116,20 +116,56 @@ class InvoiceNumberingConfig(BaseModel):
     """Invoice numbering template and sequence configuration.
 
     Stored at ``COMPANY`` level with key ``SETTING_KEY_INVOICE_NUMBERING``
-    (``"invoice.numbering"``).  M2 only persists the configuration; the
-    rendering / sequence / concurrency-safe engine is implemented in M5.
+    (``"invoice.numbering"``).
 
-    Fields are intentionally minimal — M5 will extend when the engine is built.
+    ``sequence_start`` is consumed only once, when the sequence row is first
+    created; changing it afterwards has no effect on an already-running counter.
+    ``preview`` is read-only (populated by the GET endpoint, ignored on PUT).
     """
 
     template: str = Field(
         default="{{SERIES:INV}}-{{SEQUENCE:6}}",
-        description="Numbering template with placeholders.  M5 implements rendering.",
+        description=(
+            "Numbering template. Supported placeholders: "
+            "{{SERIES:VALUE}}, {{SEQUENCE:n}}, {{CUSTOMER_SERIES}}, "
+            "{{CUSTOMER_SEQUENCE:n}}, {{DATE:format}}."
+        ),
     )
     sequence_start: int = Field(
         default=1,
         ge=1,
-        description="Starting number for the sequence counter.  M5 uses this.",
+        description=(
+            "Starting number used only when the sequence row is first created. "
+            "Changing this after the first invoice has no effect."
+        ),
+    )
+    preview: str | None = Field(
+        default=None,
+        description="Read-only: preview of the next invoice number (ignored on PUT).",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Invoice number sequence read/write (M5 step 2)
+# ---------------------------------------------------------------------------
+
+
+class InvoiceNumberSequenceRead(BaseModel):
+    """Response for GET/PUT /settings/invoice-number-sequence."""
+
+    next_sequence: int = Field(description="The next sequence value that will be issued.")
+    preview_number: str = Field(description="Preview of the next invoice number.")
+
+
+class InvoiceNumberSequenceWrite(BaseModel):
+    """Request body for PUT /settings/invoice-number-sequence."""
+
+    next_sequence: int = Field(
+        ge=1,
+        description=(
+            "New next sequence value. Must be strictly greater than the current "
+            "next_sequence if a sequence already exists (forward-only)."
+        ),
     )
 
 

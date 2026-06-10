@@ -72,3 +72,10 @@ class DiscountType(enum.StrEnum):
     NONE = "NONE"
     PERCENTAGE = "PERCENTAGE"
     FIXED = "FIXED"
+
+
+class NumberSequenceScope(enum.StrEnum):
+    """Whether a sequence counter is scoped to the company or a specific customer."""
+
+    COMPANY = "COMPANY"
+    CUSTOMER = "CUSTOMER"

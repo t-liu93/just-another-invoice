@@ -35,6 +35,14 @@ const numberingLoaded = ref(false)
 const numberingSaving = ref(false)
 const numberingMessage = ref('')
 const numberingMessageType = ref<'success' | 'error'>('success')
+const numberingPreview = ref('')
+
+// Sequence skip state
+const sequenceNextValue = ref(1)
+const sequenceSkipTo = ref<number | null>(null)
+const sequenceSkipping = ref(false)
+const sequenceSkipMessage = ref('')
+const sequenceSkipMessageType = ref<'success' | 'error'>('success')
 
 const loadError = computed(() => companyStore.error)
 const hasLogo = computed(() => companyStore.company?.has_logo ?? false)
@@ -69,16 +77,26 @@ onMounted(async () => {
     loading.value = false
   }
 
-  // Load numbering config
+  // Load numbering config + sequence info
   try {
-    const data = await get<{ template: string; sequence_start: number }>('/api/v1/settings/numbering')
+    const data = await get<{ template: string; sequence_start: number; preview?: string }>('/api/v1/settings/numbering')
     if (data) {
       numberingTemplate.value = data.template
       numberingSequenceStart.value = data.sequence_start
+      numberingPreview.value = data.preview ?? ''
       numberingLoaded.value = true
     }
   } catch {
     // Use defaults
+  }
+  try {
+    const seqData = await get<{ next_sequence: number; preview_number: string }>('/api/v1/settings/invoice-number-sequence')
+    if (seqData) {
+      sequenceNextValue.value = seqData.next_sequence
+      numberingPreview.value = seqData.preview_number
+    }
+  } catch {
+    // ignore – company may not exist yet
   }
 })
 
@@ -148,7 +166,7 @@ async function handleSaveNumbering() {
   numberingSaving.value = true
   numberingMessage.value = ''
   try {
-    const result = await put<{ template: string; sequence_start: number }>(
+    const result = await put<{ template: string; sequence_start: number; preview?: string }>(
       '/api/v1/settings/numbering',
       {
         template: numberingTemplate.value,
@@ -157,6 +175,15 @@ async function handleSaveNumbering() {
     )
     numberingTemplate.value = result.template
     numberingSequenceStart.value = result.sequence_start
+    if (result.preview) numberingPreview.value = result.preview
+    // Sync sequence counter so skip-forward min and preview stay current.
+    try {
+      const seqData = await get<{ next_sequence: number; preview_number: string }>('/api/v1/settings/invoice-number-sequence')
+      if (seqData) {
+        sequenceNextValue.value = seqData.next_sequence
+        numberingPreview.value = seqData.preview_number
+      }
+    } catch { /* ignore */ }
     numberingMessage.value = t('settings.numbering.saveSuccess')
     numberingMessageType.value = 'success'
   } catch (e: unknown) {
@@ -165,6 +192,29 @@ async function handleSaveNumbering() {
     numberingMessageType.value = 'error'
   } finally {
     numberingSaving.value = false
+  }
+}
+
+async function handleSkipSequence() {
+  if (!sequenceSkipTo.value || sequenceSkipTo.value <= sequenceNextValue.value) return
+  sequenceSkipping.value = true
+  sequenceSkipMessage.value = ''
+  try {
+    const result = await put<{ next_sequence: number; preview_number: string }>(
+      '/api/v1/settings/invoice-number-sequence',
+      { next_sequence: sequenceSkipTo.value },
+    )
+    sequenceNextValue.value = result.next_sequence
+    numberingPreview.value = result.preview_number
+    sequenceSkipTo.value = null
+    sequenceSkipMessage.value = t('settings.numbering.skipSuccess')
+    sequenceSkipMessageType.value = 'success'
+  } catch (e: unknown) {
+    const err = e as { message?: string }
+    sequenceSkipMessage.value = err.message || t('settings.numbering.skipFailed')
+    sequenceSkipMessageType.value = 'error'
+  } finally {
+    sequenceSkipping.value = false
   }
 }
 </script>
@@ -284,17 +334,25 @@ async function handleSaveNumbering() {
 
               <n-divider>{{ t('settings.numbering.section') }}</n-divider>
 
-              <n-alert type="info" style="margin-bottom: 16px" closable>
-                {{ t('settings.numbering.m5hint') }}
-              </n-alert>
-
-              <n-form label-placement="left" label-width="140" :disabled="!companyStore.hasCompany" @submit.prevent="handleSaveNumbering">
+              <n-form label-placement="left" label-width="150" :disabled="!companyStore.hasCompany" @submit.prevent="handleSaveNumbering">
                 <n-form-item :label="t('settings.numbering.template')">
                   <n-input v-model:value="numberingTemplate" placeholder="{{SERIES:INV}}-{{SEQUENCE:6}}" />
                 </n-form-item>
 
                 <n-form-item :label="t('settings.numbering.sequenceStart')">
-                  <n-input-number v-model:value="numberingSequenceStart" :min="1" style="width: 100%" />
+                  <div style="width: 100%">
+                    <n-input-number v-model:value="numberingSequenceStart" :min="1" style="width: 100%" />
+                    <n-text depth="3" style="display: block; font-size: 12px; margin-top: 4px">
+                      {{ t('settings.numbering.sequenceStartHint') }}
+                    </n-text>
+                  </div>
+                </n-form-item>
+
+                <n-form-item v-if="numberingPreview" :label="t('settings.numbering.preview')">
+                  <n-text code>{{ numberingPreview }}</n-text>
+                  <n-text depth="3" style="margin-left: 8px; font-size: 12px">
+                    {{ t('settings.numbering.previewHint', { seq: sequenceNextValue }) }}
+                  </n-text>
                 </n-form-item>
 
                 <n-alert v-if="numberingMessage" :type="numberingMessageType" style="margin-bottom: 16px">
@@ -303,6 +361,32 @@ async function handleSaveNumbering() {
 
                 <n-button type="primary" :loading="numberingSaving" :disabled="!companyStore.hasCompany" attr-type="submit">
                   {{ t('settings.numbering.save') }}
+                </n-button>
+              </n-form>
+
+              <!-- Sequence skip (forward only) -->
+              <n-divider style="margin-top: 24px">{{ t('settings.numbering.skipSection') }}</n-divider>
+              <n-form label-placement="left" label-width="150" :disabled="!companyStore.hasCompany">
+                <n-form-item :label="t('settings.numbering.skipTo')">
+                  <n-input-number
+                    v-model:value="sequenceSkipTo"
+                    :min="1"
+                    :placeholder="String(sequenceNextValue + 1)"
+                    style="width: 100%"
+                  />
+                </n-form-item>
+
+                <n-alert v-if="sequenceSkipMessage" :type="sequenceSkipMessageType" style="margin-bottom: 16px">
+                  {{ sequenceSkipMessage }}
+                </n-alert>
+
+                <n-button
+                  type="default"
+                  :loading="sequenceSkipping"
+                  :disabled="!companyStore.hasCompany || !sequenceSkipTo || sequenceSkipTo <= sequenceNextValue"
+                  @click="handleSkipSequence"
+                >
+                  {{ t('settings.numbering.skipSave') }}
                 </n-button>
               </n-form>
             </n-spin>

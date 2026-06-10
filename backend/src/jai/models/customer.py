@@ -67,6 +67,13 @@ class Customer(Base):
         comment="ISO 4217 alpha-3 default currency for this customer.",
     )
 
+    # -- Invoice numbering (M5 step 2) ----------------------------------------
+    invoice_prefix: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Customer series prefix used in {{CUSTOMER_SERIES}} placeholder.",
+    )
+
     # -- Long-tail (JSONB, red-line 12 adjacent) --------------------------------
     extra: Mapped[dict[str, Any]] = mapped_column(
         JSONB,

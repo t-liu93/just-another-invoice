@@ -405,8 +405,7 @@ export interface paths {
          * @description Return the invoice numbering configuration for the current company.
          *
          *     Returns the COMPANY-level setting, or the default if not yet configured.
-         *     The actual numbering engine is implemented in M5; M2 only persists the
-         *     configuration.
+         *     The ``preview`` field is populated with the next invoice number preview.
          */
         get: operations["get_numbering_config_api_v1_settings_numbering_get"];
         /**
@@ -416,6 +415,34 @@ export interface paths {
          *     Stored at COMPANY level (scope = company.id).  Requires owner role.
          */
         put: operations["update_numbering_config_api_v1_settings_numbering_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/invoice-number-sequence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Invoice Number Sequence
+         * @description Return the current next sequence value and a preview of the next invoice number.
+         */
+        get: operations["get_invoice_number_sequence_api_v1_settings_invoice_number_sequence_get"];
+        /**
+         * Update Invoice Number Sequence
+         * @description Advance the company invoice sequence to a new (higher) value.
+         *
+         *     The new value must be strictly greater than the current next_sequence.
+         *     Useful for migrating from an existing invoice series or skipping reserved
+         *     numbers.
+         */
+        put: operations["update_invoice_number_sequence_api_v1_settings_invoice_number_sequence_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -965,6 +992,8 @@ export interface components {
             vat_id?: string | null;
             /** Currency */
             currency?: string | null;
+            /** Invoice Prefix */
+            invoice_prefix?: string | null;
             /** Extra */
             extra?: {
                 [key: string]: unknown;
@@ -1003,6 +1032,11 @@ export interface components {
             vat_id?: string | null;
             /** Currency */
             currency?: string | null;
+            /**
+             * Invoice Prefix
+             * @description Customer series prefix for {{CUSTOMER_SERIES}} in numbering templates.
+             */
+            invoice_prefix?: string | null;
             /** Extra */
             extra?: {
                 [key: string]: unknown;
@@ -1298,28 +1332,61 @@ export interface components {
             tax_amount: string;
         };
         /**
+         * InvoiceNumberSequenceRead
+         * @description Response for GET/PUT /settings/invoice-number-sequence.
+         */
+        InvoiceNumberSequenceRead: {
+            /**
+             * Next Sequence
+             * @description The next sequence value that will be issued.
+             */
+            next_sequence: number;
+            /**
+             * Preview Number
+             * @description Preview of the next invoice number.
+             */
+            preview_number: string;
+        };
+        /**
+         * InvoiceNumberSequenceWrite
+         * @description Request body for PUT /settings/invoice-number-sequence.
+         */
+        InvoiceNumberSequenceWrite: {
+            /**
+             * Next Sequence
+             * @description New next sequence value. Must be strictly greater than the current next_sequence if a sequence already exists (forward-only).
+             */
+            next_sequence: number;
+        };
+        /**
          * InvoiceNumberingConfig
          * @description Invoice numbering template and sequence configuration.
          *
          *     Stored at ``COMPANY`` level with key ``SETTING_KEY_INVOICE_NUMBERING``
-         *     (``"invoice.numbering"``).  M2 only persists the configuration; the
-         *     rendering / sequence / concurrency-safe engine is implemented in M5.
+         *     (``"invoice.numbering"``).
          *
-         *     Fields are intentionally minimal — M5 will extend when the engine is built.
+         *     ``sequence_start`` is consumed only once, when the sequence row is first
+         *     created; changing it afterwards has no effect on an already-running counter.
+         *     ``preview`` is read-only (populated by the GET endpoint, ignored on PUT).
          */
         InvoiceNumberingConfig: {
             /**
              * Template
-             * @description Numbering template with placeholders.  M5 implements rendering.
+             * @description Numbering template. Supported placeholders: {{SERIES:VALUE}}, {{SEQUENCE:n}}, {{CUSTOMER_SERIES}}, {{CUSTOMER_SEQUENCE:n}}, {{DATE:format}}.
              * @default {{SERIES:INV}}-{{SEQUENCE:6}}
              */
             template?: string;
             /**
              * Sequence Start
-             * @description Starting number for the sequence counter.  M5 uses this.
+             * @description Starting number used only when the sequence row is first created. Changing this after the first invoice has no effect.
              * @default 1
              */
             sequence_start?: number;
+            /**
+             * Preview
+             * @description Read-only: preview of the next invoice number (ignored on PUT).
+             */
+            preview?: string | null;
         };
         /**
          * InvoiceTaxMode
@@ -2739,6 +2806,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceNumberingConfig"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_invoice_number_sequence_api_v1_settings_invoice_number_sequence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceNumberSequenceRead"];
+                };
+            };
+        };
+    };
+    update_invoice_number_sequence_api_v1_settings_invoice_number_sequence_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceNumberSequenceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceNumberSequenceRead"];
                 };
             };
             /** @description Validation Error */
