@@ -20,6 +20,7 @@ import {
   LogOutOutline,
   PeopleOutline,
   GridOutline,
+  CubeOutline,
 } from '@vicons/ionicons5'
 import { NIcon, type MenuOption } from 'naive-ui'
 
@@ -37,12 +38,14 @@ function renderIcon(icon: Component) {
 const navOptions = computed<MenuOption[]>(() => [
   { label: t('nav.dashboard'), key: 'dashboard', icon: renderIcon(GridOutline) },
   { label: t('nav.customers'), key: 'customer-list', icon: renderIcon(PeopleOutline) },
+  { label: t('nav.products'), key: 'product-list', icon: renderIcon(CubeOutline) },
 ])
 
 /** Highlight the active top-level section based on the current route name. */
 const activeKey = computed<string | null>(() => {
   const name = route.name
   if (typeof name === 'string' && name.startsWith('customer')) return 'customer-list'
+  if (typeof name === 'string' && name.startsWith('product')) return 'product-list'
   if (name === 'dashboard') return 'dashboard'
   return null
 })
@@ -50,6 +53,7 @@ const activeKey = computed<string | null>(() => {
 function handleNav(key: string) {
   if (key === 'dashboard') router.push('/dashboard')
   else if (key === 'customer-list') router.push('/customers')
+  else if (key === 'product-list') router.push('/products')
 }
 
 function toggleLocale() {

@@ -635,6 +635,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/product-categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Product Categories Endpoint */
+        get: operations["list_product_categories_endpoint_api_v1_product_categories_get"];
+        put?: never;
+        /** Create Product Category Endpoint */
+        post: operations["create_product_category_endpoint_api_v1_product_categories_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/product-categories/{cat_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Product Category Endpoint */
+        get: operations["get_product_category_endpoint_api_v1_product_categories__cat_id__get"];
+        /** Update Product Category Endpoint */
+        put: operations["update_product_category_endpoint_api_v1_product_categories__cat_id__put"];
+        post?: never;
+        /** Delete Product Category Endpoint */
+        delete: operations["delete_product_category_endpoint_api_v1_product_categories__cat_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Products Endpoint */
+        get: operations["list_products_endpoint_api_v1_products_get"];
+        put?: never;
+        /** Create Product Endpoint */
+        post: operations["create_product_endpoint_api_v1_products_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{product_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Product Endpoint */
+        get: operations["get_product_endpoint_api_v1_products__product_id__get"];
+        /** Update Product Endpoint */
+        put: operations["update_product_endpoint_api_v1_products__product_id__put"];
+        post?: never;
+        /** Delete Product Endpoint */
+        delete: operations["delete_product_endpoint_api_v1_products__product_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1086,6 +1160,145 @@ export interface components {
         PaymentMethodWrite: {
             /** Name */
             name: string;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
+        };
+        /**
+         * ProductCategoryListResponse
+         * @description List envelope for GET /api/v1/product-categories.
+         */
+        ProductCategoryListResponse: {
+            /** Items */
+            items: components["schemas"]["ProductCategoryRead"][];
+        };
+        /**
+         * ProductCategoryRead
+         * @description Response body for product category endpoints.
+         */
+        ProductCategoryRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Default Margin Rate */
+            default_margin_rate: string | null;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ProductCategoryWrite
+         * @description Request body for POST/PUT /api/v1/product-categories.
+         */
+        ProductCategoryWrite: {
+            /** Name */
+            name: string;
+            /** Default Margin Rate */
+            default_margin_rate?: number | string | null;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
+        };
+        /**
+         * ProductListResponse
+         * @description Paginated list envelope for GET /api/v1/products.
+         */
+        ProductListResponse: {
+            /** Items */
+            items: components["schemas"]["ProductRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ProductRead
+         * @description Response body for product endpoints.
+         *
+         *     ``effective_margin_rate`` is resolved by the service layer:
+         *     product.margin_rate if set, else category.default_margin_rate, else None.
+         */
+        ProductRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Sku */
+            sku: string | null;
+            /** Category Id */
+            category_id: string | null;
+            /** Unit Id */
+            unit_id: string | null;
+            /** Purchase Cost Excl Vat */
+            purchase_cost_excl_vat: string | null;
+            /** Margin Rate */
+            margin_rate: string | null;
+            /** Effective Margin Rate */
+            effective_margin_rate: string | null;
+            /** Default Vat Rate Id */
+            default_vat_rate_id: string | null;
+            /** Supplier */
+            supplier: string | null;
+            /** Extra */
+            extra: {
+                [key: string]: unknown;
+            };
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ProductWrite
+         * @description Request body for POST/PUT /api/v1/products.
+         */
+        ProductWrite: {
+            /** Name */
+            name: string;
+            /** Sku */
+            sku?: string | null;
+            /** Category Id */
+            category_id?: string | null;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Purchase Cost Excl Vat */
+            purchase_cost_excl_vat?: number | string | null;
+            /** Margin Rate */
+            margin_rate?: number | string | null;
+            /** Default Vat Rate Id */
+            default_vat_rate_id?: string | null;
+            /** Supplier */
+            supplier?: string | null;
+            /** Extra */
+            extra?: {
+                [key: string]: unknown;
+            };
             /**
              * Active
              * @default true
@@ -2969,6 +3182,317 @@ export interface operations {
             header?: never;
             path: {
                 unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_product_categories_endpoint_api_v1_product_categories_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductCategoryListResponse"];
+                };
+            };
+        };
+    };
+    create_product_category_endpoint_api_v1_product_categories_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductCategoryWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_product_category_endpoint_api_v1_product_categories__cat_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_product_category_endpoint_api_v1_product_categories__cat_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductCategoryWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_product_category_endpoint_api_v1_product_categories__cat_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_products_endpoint_api_v1_products_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                category_id?: string | null;
+                limit?: number;
+                offset?: number;
+                sort_by?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_product_endpoint_api_v1_products_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_product_endpoint_api_v1_products__product_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_product_endpoint_api_v1_products__product_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_product_endpoint_api_v1_products__product_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
             };
             cookie?: never;
         };
