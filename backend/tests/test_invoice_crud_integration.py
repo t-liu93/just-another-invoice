@@ -376,6 +376,41 @@ class TestInvoiceCRUDHappyFlow:
         no_resp = await db_client.get("/api/v1/invoices?q=XXXXNOTEXIST")
         assert no_resp.json()["total"] == 0
 
+    async def test_list_customer_name_in_items(self, db_client: AsyncClient) -> None:
+        """List items include customer_name from join."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client, name="Acme Corp")
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        await db_client.post("/api/v1/invoices", json=_invoice_payload(customer_id, rate_21))
+
+        resp = await db_client.get("/api/v1/invoices")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["customer_name"] == "Acme Corp"
+
+    async def test_list_search_by_customer_name(self, db_client: AsyncClient) -> None:
+        """Search q= also matches customer name."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        c1 = await _create_customer(db_client, name="Searchable Corp")
+        c2 = await _create_customer(db_client, name="Other Co")
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        await db_client.post("/api/v1/invoices", json=_invoice_payload(c1, rate_21))
+        await db_client.post("/api/v1/invoices", json=_invoice_payload(c2, rate_21))
+
+        # Search by partial customer name
+        search_resp = await db_client.get("/api/v1/invoices?q=Searchable")
+        assert search_resp.json()["total"] == 1
+        assert search_resp.json()["items"][0]["customer_name"] == "Searchable Corp"
+
+        # Non-matching search
+        no_resp = await db_client.get("/api/v1/invoices?q=XXXXNOTEXIST")
+        assert no_resp.json()["total"] == 0
+
 
 # ---------------------------------------------------------------------------
 # Numbering: create assigns number; delete doesn't recycle

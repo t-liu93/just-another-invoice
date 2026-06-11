@@ -320,11 +320,12 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
     )
 
 
-def _invoice_to_list_item(inv: Invoice) -> InvoiceListItem:
+def _invoice_to_list_item(inv: Invoice, *, customer_name: str) -> InvoiceListItem:
     return InvoiceListItem(
         id=inv.id,
         company_id=inv.company_id,
         customer_id=inv.customer_id,
+        customer_name=customer_name,
         invoice_number=inv.invoice_number,
         reference_number=inv.reference_number,
         invoice_date=inv.invoice_date,
@@ -742,7 +743,12 @@ async def list_invoices(
     sort_by: str = "invoice_date",
 ) -> InvoiceListResponse:
     """Return a paginated list of invoices for the company."""
-    base = select(Invoice).where(Invoice.company_id == company_id)
+    # Always join Customer so we can search by customer name and return it.
+    base = (
+        select(Invoice)
+        .join(Customer, Invoice.customer_id == Customer.id)
+        .where(Invoice.company_id == company_id)
+    )
 
     if q:
         like = f"%{q}%"
@@ -750,6 +756,7 @@ async def list_invoices(
             or_(
                 Invoice.invoice_number.ilike(like),
                 Invoice.reference_number.ilike(like),
+                Customer.name.ilike(like),
             )
         )
     if customer_id is not None:
@@ -775,16 +782,24 @@ async def list_invoices(
         "invoice_number": Invoice.sequence_number,
     }.get(sort_by, Invoice.invoice_date)
 
-    data_stmt = (
-        base.order_by(sort_col.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    data_stmt = base.order_by(sort_col.desc()).limit(limit).offset(offset)
     data_result = await session.execute(data_stmt)
-    rows = data_result.scalars().all()
+    rows = list(data_result.scalars().all())
+
+    # Batch-load customer names in a single secondary query.
+    customer_name_map: dict[uuid.UUID, str] = {}
+    if rows:
+        cust_ids = list({inv.customer_id for inv in rows})
+        cust_result = await session.execute(
+            select(Customer.id, Customer.name).where(Customer.id.in_(cust_ids))
+        )
+        customer_name_map = {cid: name for cid, name in cust_result.all()}
 
     return InvoiceListResponse(
-        items=[_invoice_to_list_item(r) for r in rows],
+        items=[
+            _invoice_to_list_item(r, customer_name=customer_name_map.get(r.customer_id, ""))
+            for r in rows
+        ],
         total=total,
     )
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, computed, h } from 'vue'
+import { onMounted, onBeforeUnmount, computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -12,6 +12,10 @@ import { NIcon } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
 import { useInvoicesStore } from '../../stores/invoices'
 import type { InvoiceListItem } from '../../stores/invoices'
+import { get } from '../../api/http'
+import type { components } from '../../api/schema'
+
+type CustomerRead = components['schemas']['CustomerRead']
 
 const router = useRouter()
 const { t } = useI18n()
@@ -19,8 +23,25 @@ const message = useMessage()
 const dialog = useDialog()
 const store = useInvoicesStore()
 
+// Customer filter state
+const customers = ref<CustomerRead[]>([])
+
+async function searchCustomers(q: string) {
+  const res = await get<{ items: CustomerRead[] }>(`/api/v1/customers?q=${encodeURIComponent(q)}&limit=30`)
+  customers.value = res.items
+}
+
+const customerOptions = computed(() => customers.value.map(c => ({ label: c.name, value: c.id })))
+
+function handleCustomerFilter(val: string | null) {
+  store.customerIdFilter = val
+  store.offset = 0
+  store.fetchInvoices()
+}
+
 onMounted(() => {
   store.fetchInvoices()
+  searchCustomers('')
 })
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -90,6 +111,12 @@ const statusOptions = computed(() => [
   { label: t('invoices.statusCOMPLETED'), value: 'COMPLETED' },
 ])
 
+const paidStatusOptions = computed(() => [
+  { label: t('invoices.paidStatusUNPAID'), value: 'UNPAID' },
+  { label: t('invoices.paidStatusPARTIALLY_PAID'), value: 'PARTIALLY_PAID' },
+  { label: t('invoices.paidStatusPAID'), value: 'PAID' },
+])
+
 function handleSortChange(val: 'invoice_date' | 'created_at' | 'invoice_number') {
   store.sortBy = val
   store.offset = 0
@@ -98,6 +125,12 @@ function handleSortChange(val: 'invoice_date' | 'created_at' | 'invoice_number')
 
 function handleStatusFilter(val: string | null) {
   store.statusFilter = val
+  store.offset = 0
+  store.fetchInvoices()
+}
+
+function handlePaidStatusFilter(val: string | null) {
+  store.paidStatusFilter = val
   store.offset = 0
   store.fetchInvoices()
 }
@@ -112,6 +145,15 @@ function statusTagType(status: string): 'default' | 'info' | 'success' | 'warnin
   return map[status] ?? 'default'
 }
 
+function paidStatusTagType(ps: string): 'default' | 'warning' | 'success' {
+  const map: Record<string, 'default' | 'warning' | 'success'> = {
+    UNPAID: 'default',
+    PARTIALLY_PAID: 'warning',
+    PAID: 'success',
+  }
+  return map[ps] ?? 'default'
+}
+
 const columns = computed(() => [
   {
     title: t('invoices.invoiceNumber'),
@@ -119,35 +161,44 @@ const columns = computed(() => [
     width: 140,
   },
   {
+    title: t('invoices.customer'),
+    key: 'customer_name',
+    ellipsis: { tooltip: true },
+  },
+  {
     title: t('invoices.invoiceDate'),
     key: 'invoice_date',
-    width: 120,
+    width: 110,
   },
   {
     title: t('invoices.status'),
     key: 'status',
-    width: 110,
+    width: 100,
     render(row: InvoiceListItem) {
       return h(NTag, { type: statusTagType(row.status), size: 'small' }, () => t(`invoices.status${row.status}`))
     },
   },
   {
-    title: t('invoices.currency'),
-    key: 'currency',
-    width: 80,
+    title: t('invoices.paidStatus'),
+    key: 'paid_status',
+    width: 120,
+    render(row: InvoiceListItem) {
+      return h(NTag, { type: paidStatusTagType(row.paid_status), size: 'small' }, () => t(`invoices.paidStatus${row.paid_status}`))
+    },
   },
   {
     title: t('invoices.totalInclVat'),
     key: 'total_incl_vat',
     align: 'right' as const,
+    width: 120,
     render(row: InvoiceListItem) {
-      return h('span', {}, `${Number(row.total_incl_vat).toFixed(2)}`)
+      return h('span', {}, `${row.currency} ${Number(row.total_incl_vat).toFixed(2)}`)
     },
   },
   {
     title: t('invoices.actions'),
     key: 'actions',
-    width: 96,
+    width: 88,
     align: 'center' as const,
     render(row: InvoiceListItem) {
       const isEditable = row.status === 'DRAFT'
@@ -190,12 +241,12 @@ const columns = computed(() => [
         <div class="invoice-list-container">
           <div class="invoice-list-header">
             <h2>{{ t('invoices.title') }}</h2>
-            <n-space align="center">
+            <n-space align="center" wrap>
               <n-input
                 v-model:value="store.query"
                 :placeholder="t('invoices.search')"
                 clearable
-                style="width: 220px"
+                style="width: 200px"
                 @input="handleSearchInput"
                 @keyup.enter="handleSearch"
                 @clear="handleSearch"
@@ -205,17 +256,35 @@ const columns = computed(() => [
                 </template>
               </n-input>
               <n-select
+                :value="store.customerIdFilter"
+                :options="customerOptions"
+                :placeholder="t('invoices.customerAll')"
+                style="width: 160px"
+                filterable
+                clearable
+                @search="searchCustomers"
+                @update:value="handleCustomerFilter"
+              />
+              <n-select
                 :value="store.statusFilter"
                 :options="statusOptions"
                 :placeholder="t('invoices.statusAll')"
-                style="width: 130px"
+                style="width: 120px"
                 clearable
                 @update:value="handleStatusFilter"
               />
               <n-select
+                :value="store.paidStatusFilter"
+                :options="paidStatusOptions"
+                :placeholder="t('invoices.paidStatusAll')"
+                style="width: 130px"
+                clearable
+                @update:value="handlePaidStatusFilter"
+              />
+              <n-select
                 :value="store.sortBy"
                 :options="sortOptions"
-                style="width: 150px"
+                style="width: 140px"
                 @update:value="handleSortChange"
               />
               <n-button type="primary" @click="handleCreate">
@@ -234,7 +303,7 @@ const columns = computed(() => [
           <n-spin :show="store.loading">
             <template v-if="!store.loading && store.items.length === 0">
               <n-empty
-                v-if="store.total === 0 && !store.query && !store.statusFilter"
+                v-if="store.total === 0 && !store.query && !store.statusFilter && !store.customerIdFilter && !store.paidStatusFilter"
                 :description="t('invoices.empty')"
               />
               <n-empty v-else :description="t('invoices.noResults')" />
@@ -269,14 +338,14 @@ const columns = computed(() => [
 }
 
 .invoice-list-container {
-  max-width: 1080px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
 }
 
 .invoice-list-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 16px;
   flex-wrap: wrap;

@@ -1498,6 +1498,8 @@ export interface components {
              * Format: uuid
              */
             customer_id: string;
+            /** Customer Name */
+            customer_name: string;
             /** Invoice Number */
             invoice_number: string;
             /** Reference Number */

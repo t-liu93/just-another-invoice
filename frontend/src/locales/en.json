@@ -513,7 +513,14 @@
     "totalsPlaceholder": "Fill in customer and at least one line to see the totals.",
     "backToList": "Back to invoices",
     "validationError": "Please fill in the customer and at least one line item.",
-    "backToInvoices": "Back to invoices"
+    "backToInvoices": "Back to invoices",
+    "customerAll": "All customers",
+    "paidStatus": "Payment",
+    "paidStatusAll": "All payment statuses",
+    "paidStatusUNPAID": "Unpaid",
+    "paidStatusPARTIALLY_PAID": "Partially paid",
+    "paidStatusPAID": "Paid",
+    "due": "Due"
   },
   "theme": {
     "toggle": "Toggle theme"

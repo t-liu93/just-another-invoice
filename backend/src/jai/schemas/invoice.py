@@ -356,6 +356,7 @@ class InvoiceListItem(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     customer_id: uuid.UUID
+    customer_name: str
     invoice_number: str
     reference_number: str | None = None
     invoice_date: date

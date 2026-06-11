@@ -513,7 +513,14 @@
     "totalsPlaceholder": "填写客户和至少一行后显示合计。",
     "backToList": "返回发票列表",
     "validationError": "请填写客户及至少一行行项目。",
-    "backToInvoices": "返回发票列表"
+    "backToInvoices": "返回发票列表",
+    "customerAll": "全部客户",
+    "paidStatus": "收款",
+    "paidStatusAll": "全部收款状态",
+    "paidStatusUNPAID": "未付款",
+    "paidStatusPARTIALLY_PAID": "部分付款",
+    "paidStatusPAID": "已付款",
+    "due": "应付"
   },
   "theme": {
     "toggle": "切换主题"

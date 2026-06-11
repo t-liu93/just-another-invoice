@@ -372,10 +372,16 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
                   ? (existingInvoice ? existingInvoice.invoice_number : t('invoices.edit'))
                   : t('invoices.new') }}
               </h2>
-              <n-space v-if="existingInvoice">
+              <n-space v-if="existingInvoice" align="center">
                 <n-tag :type="existingInvoice.status === 'DRAFT' ? 'default' : existingInvoice.status === 'SENT' ? 'info' : existingInvoice.status === 'COMPLETED' ? 'success' : 'warning'">
                   {{ t(`invoices.status${existingInvoice.status}`) }}
                 </n-tag>
+                <n-tag :type="existingInvoice.paid_status === 'PAID' ? 'success' : existingInvoice.paid_status === 'PARTIALLY_PAID' ? 'warning' : 'default'">
+                  {{ t(`invoices.paidStatus${existingInvoice.paid_status}`) }}
+                </n-tag>
+                <n-text depth="3" style="font-size: 13px">
+                  {{ t('invoices.due') }}: {{ existingInvoice.currency }} {{ fmtMoney(existingInvoice.due_amount) }}
+                </n-text>
                 <template v-if="existingInvoice.status === 'DRAFT'">
                   <n-button size="small" type="info" @click="handleStatusTransition('SENT')">
                     {{ t('invoices.markSent') }}
