@@ -79,3 +79,30 @@ class NumberSequenceScope(enum.StrEnum):
 
     COMPANY = "COMPANY"
     CUSTOMER = "CUSTOMER"
+
+
+class QuoteStatus(enum.StrEnum):
+    """Lifecycle status of a quote."""
+
+    DRAFT = "DRAFT"
+    SENT = "SENT"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+
+
+class ContentBlockKind(enum.StrEnum):
+    """Category of a standard content block."""
+
+    WARRANTY = "WARRANTY"
+    TERMS = "TERMS"
+    BANK = "BANK"
+    PAYMENT_TERMS = "PAYMENT_TERMS"
+
+
+class DocumentTemplateScope(enum.StrEnum):
+    """Which document types a document template applies to."""
+
+    QUOTE = "QUOTE"
+    INVOICE = "INVOICE"
+    BOTH = "BOTH"

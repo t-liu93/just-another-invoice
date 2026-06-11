@@ -852,6 +852,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calculate Quote Endpoint
+         * @description Preview quote pricing without persisting (red-line 1).
+         */
+        post: operations["calculate_quote_endpoint_api_v1_quotes_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2146,6 +2166,87 @@ export interface components {
              * @default true
              */
             active?: boolean;
+        };
+        /**
+         * QuoteCalculationRead
+         * @description Quote pricing preview result.
+         *
+         *     Identical field structure to ``InvoiceCalculationRead``; defined as its own
+         *     Pydantic model so FastAPI emits a distinct ``QuoteCalculationRead`` component
+         *     in OpenAPI and ``schema.d.ts`` carries the quote-specific name.  Future steps
+         *     can add quote-only fields here without touching the invoice schema.
+         */
+        QuoteCalculationRead: {
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /** Amounts Include Vat */
+            amounts_include_vat: boolean;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            vat_treatment_snapshot?: components["schemas"]["VatTreatmentSnapshot"] | null;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Line Discount Total */
+            line_discount_total: string;
+            /** Document Discount Amount */
+            document_discount_amount: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Lines */
+            lines: components["schemas"]["InvoiceLineCalculationRead"][];
+            /** Line Taxes */
+            line_taxes: components["schemas"]["InvoiceLineTaxRead"][];
+            /** Document Taxes */
+            document_taxes: components["schemas"]["InvoiceTaxRead"][];
+        };
+        /**
+         * QuoteCalculationRequest
+         * @description Request body for ``POST /api/v1/quotes/calculate``.
+         */
+        QuoteCalculationRequest: {
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /**
+             * Quote Date
+             * Format: date
+             */
+            quote_date: string;
+            /** Valid Until */
+            valid_until?: string | null;
+            /**
+             * Currency
+             * @description ISO 4217. Must equal company base_currency in M6.
+             */
+            currency?: string | null;
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /**
+             * Amounts Include Vat
+             * @default false
+             */
+            amounts_include_vat?: boolean;
+            /** Vat Treatment Id */
+            vat_treatment_id?: string | null;
+            /** Document Vat Rate Id */
+            document_vat_rate_id?: string | null;
+            /**
+             * @default {
+             *       "type": "NONE",
+             *       "value": "0"
+             *     }
+             */
+            discount?: components["schemas"]["DiscountInput"];
+            /**
+             * Lines
+             * @description At least 1 line required.
+             */
+            lines: components["schemas"]["InvoiceLineInput"][];
         };
         /**
          * RegisterRequest
@@ -4717,6 +4818,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductInvoiceOptionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_quote_endpoint_api_v1_quotes_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteCalculationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteCalculationRead"];
                 };
             };
             /** @description Validation Error */

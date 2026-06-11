@@ -50,6 +50,7 @@ from jai.schemas.invoice import (
     InvoiceTaxRead,
     VatTreatmentSnapshot,
 )
+from jai.schemas.quote import QuoteCalculationRequest
 from jai.services.money import quantize_money
 
 # ---------------------------------------------------------------------------
@@ -784,3 +785,30 @@ async def calculate_invoice(
         calc_result.document_taxes[0].vat_rate_id = request.document_vat_rate_id  # type: ignore[assignment]
 
     return calc_result
+
+
+async def calculate_quote(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    request: QuoteCalculationRequest,
+) -> InvoiceCalculationRead:
+    """Full quote calculation preview – reads DB, calls pure math, never persists.
+
+    Thin wrapper over ``calculate_invoice``: adapts ``QuoteCalculationRequest``
+    (which uses ``quote_date``) to the shared calculation logic.  The date field
+    is not used by the pricing engine itself – only stored on the document record –
+    so the adaptation is lossless for calculation purposes.
+    """
+    invoice_req = InvoiceCalculationRequest(
+        customer_id=request.customer_id,
+        invoice_date=request.quote_date,
+        currency=request.currency,
+        tax_mode=request.tax_mode,
+        amounts_include_vat=request.amounts_include_vat,
+        vat_treatment_id=request.vat_treatment_id,
+        document_vat_rate_id=request.document_vat_rate_id,
+        discount=request.discount,
+        lines=request.lines,
+    )
+    return await calculate_invoice(session, company_id=company_id, request=invoice_req)

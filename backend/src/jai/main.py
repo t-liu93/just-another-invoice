@@ -22,6 +22,7 @@ from jai.api.dictionary import router as dictionary_router
 from jai.api.health import router as health_router
 from jai.api.invoices import router as invoices_router
 from jai.api.products import router as products_router
+from jai.api.quotes import router as quotes_router
 from jai.api.settings import router as settings_router
 from jai.api.vat import router as vat_router
 from jai.auth.secret import resolve_auth_secret
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(dictionary_router)
     app.include_router(products_router)
     app.include_router(invoices_router)
+    app.include_router(quotes_router)
 
     # -- Static files + SPA fallback (deployment mode) ----------------------
     if settings.static_dir is not None:
