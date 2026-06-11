@@ -109,6 +109,30 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/quotes',
+    name: 'quote-list',
+    component: () => import('../views/quotes/QuoteList.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/quotes/new',
+    name: 'quote-new',
+    component: () => import('../views/quotes/QuoteEdit.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/quotes/:id/edit',
+    name: 'quote-edit',
+    component: () => import('../views/quotes/QuoteEdit.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/content-library',
+    name: 'content-library',
+    component: () => import('../views/content/ContentLibrary.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/dashboard',
   },

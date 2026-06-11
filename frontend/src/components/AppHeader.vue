@@ -16,12 +16,14 @@ import { useLocale } from '../composables/useLocale'
 import {
   SettingsOutline,
   BusinessOutline,
+  LibraryOutline,
   GlobeOutline,
   LogOutOutline,
   PeopleOutline,
   GridOutline,
   CubeOutline,
   DocumentTextOutline,
+  ReceiptOutline,
 } from '@vicons/ionicons5'
 import { NIcon, type MenuOption } from 'naive-ui'
 
@@ -41,6 +43,7 @@ const navOptions = computed<MenuOption[]>(() => [
   { label: t('nav.customers'), key: 'customer-list', icon: renderIcon(PeopleOutline) },
   { label: t('nav.products'), key: 'product-list', icon: renderIcon(CubeOutline) },
   { label: t('nav.invoices'), key: 'invoice-list', icon: renderIcon(DocumentTextOutline) },
+  { label: t('nav.quotes'), key: 'quote-list', icon: renderIcon(ReceiptOutline) },
 ])
 
 /** Highlight the active top-level section based on the current route name. */
@@ -49,6 +52,7 @@ const activeKey = computed<string | null>(() => {
   if (typeof name === 'string' && name.startsWith('customer')) return 'customer-list'
   if (typeof name === 'string' && name.startsWith('product')) return 'product-list'
   if (typeof name === 'string' && name.startsWith('invoice')) return 'invoice-list'
+  if (typeof name === 'string' && name.startsWith('quote')) return 'quote-list'
   if (name === 'dashboard') return 'dashboard'
   return null
 })
@@ -58,6 +62,7 @@ function handleNav(key: string) {
   else if (key === 'customer-list') router.push('/customers')
   else if (key === 'product-list') router.push('/products')
   else if (key === 'invoice-list') router.push('/invoices')
+  else if (key === 'quote-list') router.push('/quotes')
 }
 
 function toggleLocale() {
@@ -91,6 +96,11 @@ async function handleLogout() {
       <n-button quaternary size="small" :title="t('settings.panel.company')" @click="router.push('/settings/company')">
         <template #icon>
           <n-icon><BusinessOutline /></n-icon>
+        </template>
+      </n-button>
+      <n-button quaternary size="small" :title="t('nav.contentLibrary')" @click="router.push('/content-library')">
+        <template #icon>
+          <n-icon><LibraryOutline /></n-icon>
         </template>
       </n-button>
       <n-button quaternary size="small" @click="toggleLocale">
