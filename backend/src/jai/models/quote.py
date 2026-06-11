@@ -148,8 +148,12 @@ class Quote(Base):
     base_vat_total: Mapped[object] = mapped_column(_MONEY, nullable=False)
     base_total_incl_vat: Mapped[object] = mapped_column(_MONEY, nullable=False)
 
-    # -- Content fields -------------------------------------------------------
+    # -- Content block snapshot text (M6 step 4) -----------------------------
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    warranty_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    terms_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bank_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payment_terms_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # -- Creator (nullable FK: preserve quote if user is deleted) -------------
     creator_id: Mapped[uuid.UUID | None] = mapped_column(

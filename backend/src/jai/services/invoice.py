@@ -304,6 +304,10 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
         base_total_incl_vat=Decimal(str(inv.base_total_incl_vat)),
         base_due_amount=Decimal(str(inv.base_due_amount)),
         notes=inv.notes,
+        warranty_text=inv.warranty_text,
+        terms_text=inv.terms_text,
+        bank_text=inv.bank_text,
+        payment_terms_text=inv.payment_terms_text,
         creator_id=inv.creator_id,
         lines=[_line_to_read(line) for line in inv.lines],
         taxes=[
@@ -499,6 +503,12 @@ async def _build_and_persist_invoice(
 
     inv.notes = body.notes
 
+    # -- Content block snapshot text (M6 step 4) -----------------------------
+    inv.warranty_text = body.warranty_text
+    inv.terms_text = body.terms_text
+    inv.bank_text = body.bank_text
+    inv.payment_terms_text = body.payment_terms_text
+
     # Persist invoice (create: add + flush to get ID; update: just flush)
     if existing_invoice is None:
         session.add(inv)
@@ -653,6 +663,10 @@ async def clone_quote_to_invoice(
     inv.base_total_incl_vat = Decimal(str(quote.base_total_incl_vat))
     inv.base_due_amount = Decimal(str(quote.base_total_incl_vat))
     inv.notes = quote.notes
+    inv.warranty_text = quote.warranty_text
+    inv.terms_text = quote.terms_text
+    inv.bank_text = quote.bank_text
+    inv.payment_terms_text = quote.payment_terms_text
     inv.creator_id = creator_id
 
     session.add(inv)

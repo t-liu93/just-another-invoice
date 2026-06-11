@@ -1059,6 +1059,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Document Templates Endpoint
+         * @description List document templates for the current company, optionally filtered.
+         */
+        get: operations["list_document_templates_endpoint_api_v1_document_templates_get"];
+        put?: never;
+        /**
+         * Create Document Template Endpoint
+         * @description Create a new document template with lines.
+         */
+        post: operations["create_document_template_endpoint_api_v1_document_templates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Template Endpoint
+         * @description Get a document template by ID.
+         */
+        get: operations["get_document_template_endpoint_api_v1_document_templates__template_id__get"];
+        /**
+         * Update Document Template Endpoint
+         * @description Update a document template (replace all fields + lines).
+         */
+        put: operations["update_document_template_endpoint_api_v1_document_templates__template_id__put"];
+        post?: never;
+        /**
+         * Delete Document Template Endpoint
+         * @description Delete a document template (cascade removes lines).
+         */
+        delete: operations["delete_document_template_endpoint_api_v1_document_templates__template_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/content-blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Content Blocks Endpoint
+         * @description List content blocks for the current company, optionally filtered by kind.
+         */
+        get: operations["list_content_blocks_endpoint_api_v1_content_blocks_get"];
+        put?: never;
+        /**
+         * Create Content Block Endpoint
+         * @description Create a new content block.
+         */
+        post: operations["create_content_block_endpoint_api_v1_content_blocks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/content-blocks/{block_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Content Block Endpoint
+         * @description Get a content block by ID.
+         */
+        get: operations["get_content_block_endpoint_api_v1_content_blocks__block_id__get"];
+        /**
+         * Update Content Block Endpoint
+         * @description Update a content block.
+         */
+        put: operations["update_content_block_endpoint_api_v1_content_blocks__block_id__put"];
+        post?: never;
+        /**
+         * Delete Content Block Endpoint
+         * @description Delete a content block.
+         */
+        delete: operations["delete_content_block_endpoint_api_v1_content_blocks__block_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/note-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Note Templates Endpoint
+         * @description List note templates for the current company.
+         */
+        get: operations["list_note_templates_endpoint_api_v1_note_templates_get"];
+        put?: never;
+        /**
+         * Create Note Template Endpoint
+         * @description Create a new note template.
+         */
+        post: operations["create_note_template_endpoint_api_v1_note_templates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/note-templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Note Template Endpoint
+         * @description Get a note template by ID.
+         */
+        get: operations["get_note_template_endpoint_api_v1_note_templates__template_id__get"];
+        /**
+         * Update Note Template Endpoint
+         * @description Update a note template.
+         */
+        put: operations["update_note_template_endpoint_api_v1_note_templates__template_id__put"];
+        post?: never;
+        /**
+         * Delete Note Template Endpoint
+         * @description Delete a note template.
+         */
+        delete: operations["delete_note_template_endpoint_api_v1_note_templates__template_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1240,6 +1396,61 @@ export interface components {
             base_currency: string;
         };
         /**
+         * ContentBlockKind
+         * @description Category of a standard content block.
+         * @enum {string}
+         */
+        ContentBlockKind: "WARRANTY" | "TERMS" | "BANK" | "PAYMENT_TERMS";
+        /**
+         * ContentBlockRead
+         * @description Full content block returned by CRUD endpoints.
+         */
+        ContentBlockRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            kind: components["schemas"]["ContentBlockKind"];
+            /** Name */
+            name: string;
+            /** Body */
+            body: string;
+            /** Is Default */
+            is_default: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ContentBlockWrite
+         * @description Request body for POST / PUT /api/v1/content-blocks.
+         */
+        ContentBlockWrite: {
+            kind: components["schemas"]["ContentBlockKind"];
+            /** Name */
+            name: string;
+            /** Body */
+            body: string;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default?: boolean;
+        };
+        /**
          * CustomerListResponse
          * @description Paginated list envelope for ``GET /api/v1/customers``.
          */
@@ -1347,6 +1558,121 @@ export interface components {
          * @enum {string}
          */
         DiscountType: "NONE" | "PERCENTAGE" | "FIXED";
+        /**
+         * DocumentTemplateLineRead
+         * @description Single line returned as part of a DocumentTemplateRead.
+         */
+        DocumentTemplateLineRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /** Unit Price */
+            unit_price?: string | null;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+        };
+        /**
+         * DocumentTemplateLineWrite
+         * @description Single line within a document template write request.
+         */
+        DocumentTemplateLineWrite: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Quantity
+             * @description Must be > 0.
+             */
+            quantity: number | string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /** Unit Price */
+            unit_price?: number | string | null;
+            /** @default NONE */
+            discount_type?: components["schemas"]["DiscountType"];
+            /**
+             * Discount Value
+             * @description Discount value. Ignored when discount_type=NONE.
+             * @default 0
+             */
+            discount_value?: number | string;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+        };
+        /**
+         * DocumentTemplateRead
+         * @description Full document template with lines, returned by CRUD endpoints.
+         */
+        DocumentTemplateRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /** Name */
+            name: string;
+            applies_to: components["schemas"]["DocumentTemplateScope"];
+            /**
+             * Lines
+             * @default []
+             */
+            lines?: components["schemas"]["DocumentTemplateLineRead"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * DocumentTemplateScope
+         * @description Which document types a document template applies to.
+         * @enum {string}
+         */
+        DocumentTemplateScope: "QUOTE" | "INVOICE" | "BOTH";
+        /**
+         * DocumentTemplateWrite
+         * @description Request body for POST / PUT /api/v1/document-templates.
+         */
+        DocumentTemplateWrite: {
+            /** Name */
+            name: string;
+            applies_to: components["schemas"]["DocumentTemplateScope"];
+            /**
+             * Lines
+             * @description At least 1 line required.
+             */
+            lines: components["schemas"]["DocumentTemplateLineWrite"][];
+        };
         /**
          * ExpenseCategoryListResponse
          * @description List envelope for GET /api/v1/expense-categories.
@@ -1896,6 +2222,14 @@ export interface components {
             base_due_amount: string;
             /** Notes */
             notes?: string | null;
+            /** Warranty Text */
+            warranty_text?: string | null;
+            /** Terms Text */
+            terms_text?: string | null;
+            /** Bank Text */
+            bank_text?: string | null;
+            /** Payment Terms Text */
+            payment_terms_text?: string | null;
             /** Creator Id */
             creator_id?: string | null;
             /**
@@ -2028,6 +2362,14 @@ export interface components {
             discount?: components["schemas"]["DiscountInput"];
             /** Notes */
             notes?: string | null;
+            /** Warranty Text */
+            warranty_text?: string | null;
+            /** Terms Text */
+            terms_text?: string | null;
+            /** Bank Text */
+            bank_text?: string | null;
+            /** Payment Terms Text */
+            payment_terms_text?: string | null;
             /**
              * Lines
              * @description At least 1 line required.
@@ -2079,6 +2421,46 @@ export interface components {
         MfaVerifyRequest: {
             /** Code */
             code: string;
+        };
+        /**
+         * NoteTemplateRead
+         * @description Full note template returned by CRUD endpoints.
+         */
+        NoteTemplateRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /** Name */
+            name: string;
+            /** Body */
+            body: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * NoteTemplateWrite
+         * @description Request body for POST / PUT /api/v1/note-templates.
+         */
+        NoteTemplateWrite: {
+            /** Name */
+            name: string;
+            /** Body */
+            body: string;
         };
         /**
          * PaymentMethodListResponse
@@ -2742,6 +3124,14 @@ export interface components {
             base_total_incl_vat: string;
             /** Notes */
             notes?: string | null;
+            /** Warranty Text */
+            warranty_text?: string | null;
+            /** Terms Text */
+            terms_text?: string | null;
+            /** Bank Text */
+            bank_text?: string | null;
+            /** Payment Terms Text */
+            payment_terms_text?: string | null;
             /** Creator Id */
             creator_id?: string | null;
             /**
@@ -2847,6 +3237,14 @@ export interface components {
             discount?: components["schemas"]["DiscountInput"];
             /** Notes */
             notes?: string | null;
+            /** Warranty Text */
+            warranty_text?: string | null;
+            /** Terms Text */
+            terms_text?: string | null;
+            /** Bank Text */
+            bank_text?: string | null;
+            /** Payment Terms Text */
+            payment_terms_text?: string | null;
             /**
              * Lines
              * @description At least 1 line required.
@@ -5884,6 +6282,472 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["QuoteRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_document_templates_endpoint_api_v1_document_templates_get: {
+        parameters: {
+            query?: {
+                applies_to?: components["schemas"]["DocumentTemplateScope"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTemplateRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_document_template_endpoint_api_v1_document_templates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentTemplateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_template_endpoint_api_v1_document_templates__template_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_document_template_endpoint_api_v1_document_templates__template_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentTemplateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_template_endpoint_api_v1_document_templates__template_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_content_blocks_endpoint_api_v1_content_blocks_get: {
+        parameters: {
+            query?: {
+                kind?: components["schemas"]["ContentBlockKind"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentBlockRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_content_block_endpoint_api_v1_content_blocks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentBlockWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentBlockRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_content_block_endpoint_api_v1_content_blocks__block_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentBlockRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_content_block_endpoint_api_v1_content_blocks__block_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentBlockWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentBlockRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_content_block_endpoint_api_v1_content_blocks__block_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_note_templates_endpoint_api_v1_note_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteTemplateRead"][];
+                };
+            };
+        };
+    };
+    create_note_template_endpoint_api_v1_note_templates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteTemplateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_note_template_endpoint_api_v1_note_templates__template_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_note_template_endpoint_api_v1_note_templates__template_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteTemplateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_note_template_endpoint_api_v1_note_templates__template_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

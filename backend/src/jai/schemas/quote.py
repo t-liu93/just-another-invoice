@@ -90,6 +90,10 @@ class QuoteWrite(BaseModel):
     document_vat_rate_id: uuid.UUID | None = None
     discount: DiscountInput = DiscountInput()
     notes: str | None = None
+    warranty_text: str | None = None
+    terms_text: str | None = None
+    bank_text: str | None = None
+    payment_terms_text: str | None = None
     lines: list[InvoiceLineInput] = Field(min_length=1, description="At least 1 line required.")
 
 
@@ -200,6 +204,10 @@ class QuoteRead(BaseModel):
     base_total_incl_vat: Decimal
 
     notes: str | None = None
+    warranty_text: str | None = None
+    terms_text: str | None = None
+    bank_text: str | None = None
+    payment_terms_text: str | None = None
     creator_id: uuid.UUID | None = None
 
     lines: list[QuoteLineRead] = []

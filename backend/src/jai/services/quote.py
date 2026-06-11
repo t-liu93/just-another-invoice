@@ -306,6 +306,10 @@ def _quote_to_read(q: Quote) -> QuoteRead:
         base_vat_total=Decimal(str(q.base_vat_total)),
         base_total_incl_vat=Decimal(str(q.base_total_incl_vat)),
         notes=q.notes,
+        warranty_text=q.warranty_text,
+        terms_text=q.terms_text,
+        bank_text=q.bank_text,
+        payment_terms_text=q.payment_terms_text,
         creator_id=q.creator_id,
         lines=[_line_to_read(line) for line in q.lines],
         taxes=[
@@ -497,6 +501,12 @@ async def _build_and_persist_quote(
     q.base_total_incl_vat = total_incl_vat
 
     q.notes = body.notes
+
+    # -- Content block snapshot text (M6 step 4) -----------------------------
+    q.warranty_text = body.warranty_text
+    q.terms_text = body.terms_text
+    q.bank_text = body.bank_text
+    q.payment_terms_text = body.payment_terms_text
 
     if existing_quote is None:
         session.add(q)
