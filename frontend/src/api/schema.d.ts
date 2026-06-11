@@ -1059,6 +1059,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/estimates/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calculate Estimate Endpoint
+         * @description Preview estimate costing without persisting.
+         */
+        post: operations["calculate_estimate_endpoint_api_v1_estimates_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -1672,6 +1692,134 @@ export interface components {
              * @description At least 1 line required.
              */
             lines: components["schemas"]["DocumentTemplateLineWrite"][];
+        };
+        /**
+         * EstimateCalculationRead
+         * @description Estimate costing preview result.
+         */
+        EstimateCalculationRead: {
+            /** Lines */
+            lines: components["schemas"]["EstimateLineCalculationRead"][];
+            /** Groups */
+            groups: components["schemas"]["EstimateGroupCalculationRead"][];
+            /** Total Margin */
+            total_margin: string;
+            /** Total Excl Vat */
+            total_excl_vat: string;
+            /** Total Incl Vat Indicative */
+            total_incl_vat_indicative?: string | null;
+            /** Indicative Vat Rate Percent */
+            indicative_vat_rate_percent?: string | null;
+        };
+        /**
+         * EstimateCalculationRequest
+         * @description Request body for ``POST /api/v1/estimates/calculate``.
+         */
+        EstimateCalculationRequest: {
+            /**
+             * Groups
+             * @default []
+             */
+            groups?: components["schemas"]["EstimateGroupInput"][];
+            /**
+             * Lines
+             * @default []
+             */
+            lines?: components["schemas"]["EstimateLineInput"][];
+        };
+        /**
+         * EstimateGroupCalculationRead
+         * @description Per-group calculation result.
+         */
+        EstimateGroupCalculationRead: {
+            /** Ref */
+            ref: string;
+            /** Group Sell Excl Vat */
+            group_sell_excl_vat: string;
+        };
+        /**
+         * EstimateGroupInput
+         * @description Group projection for estimate -> quote line.
+         */
+        EstimateGroupInput: {
+            /**
+             * Ref
+             * @description Client-side unique key for this group.
+             */
+            ref: string;
+            /**
+             * Public Description
+             * @description The only text that enters the quote.
+             */
+            public_description: string;
+            /**
+             * Vat Rate Id
+             * @description VAT rate for this group. Nullable (draft state).
+             */
+            vat_rate_id?: string | null;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order?: number;
+        };
+        /**
+         * EstimateLineCalculationRead
+         * @description Per-line calculation result (internal, owner-only).
+         */
+        EstimateLineCalculationRead: {
+            /** Sort Order */
+            sort_order: number;
+            /** Line Total */
+            line_total: string;
+            /** Margin Amount */
+            margin_amount: string;
+            /** Line Sell Excl Vat */
+            line_sell_excl_vat: string;
+            /** Group Ref */
+            group_ref?: string | null;
+        };
+        /**
+         * EstimateLineInput
+         * @description Single cost/margin line in an estimate (internal, owner-only).
+         *
+         *     Labor / shipping / overhead are just lines with ``margin_rate = 0``.
+         */
+        EstimateLineInput: {
+            /** Product Id */
+            product_id?: string | null;
+            /**
+             * Name
+             * @description Line name (internal, owner-only).
+             */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Unit Cost Excl Vat
+             * @description Cost per unit (excl. VAT). Must be >= 0.
+             */
+            unit_cost_excl_vat: number | string;
+            /**
+             * Quantity
+             * @description Quantity. Must be > 0.
+             */
+            quantity: number | string;
+            /**
+             * Margin Rate
+             * @description Markup-on-cost rate. Default 0 (labor/shipping/overhead).
+             * @default 0
+             */
+            margin_rate?: number | string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /**
+             * Group Ref
+             * @description Client-side key linking to a group ref.
+             */
+            group_ref?: string | null;
         };
         /**
          * ExpenseCategoryListResponse
@@ -6281,6 +6429,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_estimate_endpoint_api_v1_estimates_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateCalculationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateCalculationRead"];
                 };
             };
             /** @description Validation Error */
