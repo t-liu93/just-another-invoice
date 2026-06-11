@@ -43,7 +43,9 @@
 
 - 后端（`cd backend`）：`uv sync` · `uv run ruff check .` · `uv run mypy --strict src` · `uv run pytest` · `uv run uvicorn jai.main:app --reload` · `uv run alembic upgrade head`
 - 前端（`cd frontend`）：`npm install` · `npm run dev` · `npm run build`（`vue-tsc + vite`）· `npm run codegen`
-- 全栈：`docker compose up`（单容器 app + Postgres）；只起开发用库：`docker compose up postgres`
+- 开发态全栈：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`（显式加载基础 Compose + dev override）
+- 开发态只起 Postgres：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres`
+- 生产 / 普通部署态：`docker compose up -d`（单容器 app + Postgres）
 
 ## 工作流与质量门
 - **原子改动**：一次只做一件可独立部署、附测试的小事。
@@ -52,8 +54,9 @@
 
 ## 实现 / Review 简报
 - **实现简报**：每一轮 implementation 完成后（planning 不算），都要在 `review-notes/` 下用中文写实现简报，内容至少包括：(a) 本轮实现内容；(b) 自动化测试结果；(c) 人工 walkthrough 步骤。
-- **Review 输入**：作者要求 review 时，先直接读取 `review-notes/` 下对应实现简报，再结合增量 diff 和相关设计文档审。
-- **Review 输出**：review 完成后，也在 `review-notes/` 下用中文写 review 报告。
+- **人工 walkthrough 默认启动方式**：默认用开发态 Compose（`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`）启动，不默认拆成分别手动启动前后端。
+- **Review 输入**：作者要求 review 时，优先读取作者指定的实现简报；如果未指定，自动读取 `review-notes/` 下最新的实现简报，再结合增量 diff 和相关设计文档审。
+- **Review 输出**：只有发现修改意见 / findings 时，才在 `review-notes/` 下用中文写 review 报告；如果没有修改意见，直接在聊天框说明即可，不额外落文件。
 
 ## 提交规范（硬要求）
 - 提交信息用**英文 Conventional Commits**：`feat:` / `fix:` / `docs:` / `docs(plan):` / `refactor:` / `chore:` …
