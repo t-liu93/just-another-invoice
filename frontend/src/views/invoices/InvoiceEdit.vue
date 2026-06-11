@@ -2,6 +2,7 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { localDateStr } from '../../utils/date'
 import {
   useMessage,
   NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert,
@@ -72,7 +73,7 @@ const customers = ref<CustomerRead[]>([])
 const selectedCustomer = ref<CustomerRead | null>(null)
 
 const referenceNumber = ref<string | null>(null)
-const invoiceDate = ref(new Date().toISOString().slice(0, 10))
+const invoiceDate = ref(localDateStr(new Date()))
 const dueDate = ref<string | null>(null)
 const taxMode = ref<'LINE' | 'DOCUMENT'>('LINE')
 const amountsIncludeVat = ref(false)
@@ -217,11 +218,11 @@ const vatTreatmentOptions = computed(() => vatTreatments.value
 
 // ------------------------------------------------------------------ line management
 
-const discountTypeOptions = [
-  { label: 'None', value: 'NONE' },
-  { label: 'Percentage (%)', value: 'PERCENTAGE' },
-  { label: 'Fixed amount', value: 'FIXED' },
-]
+const discountTypeOptions = computed(() => [
+  { label: t('common.discountNone'), value: 'NONE' },
+  { label: t('common.discountPercentage'), value: 'PERCENTAGE' },
+  { label: t('common.discountFixed'), value: 'FIXED' },
+])
 
 function addLine() {
   lines.value.push(emptyLine())
@@ -741,7 +742,7 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
                     <!-- Description -->
                     <n-gi :span="12">
                       <n-form-item :label="t('invoices.lineDescription')" size="small">
-                        <n-input v-model:value="line.description" :placeholder="t('invoices.lineDescriptionPlaceholder')" clearable />
+                        <n-input v-model:value="line.description" type="textarea" :autosize="{ minRows: 1, maxRows: 6 }" :placeholder="t('invoices.lineDescriptionPlaceholder')" clearable />
                       </n-form-item>
                     </n-gi>
 

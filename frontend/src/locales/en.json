@@ -180,6 +180,24 @@
       "categoryAi": "AI",
       "categoryDictionary": "Dictionaries",
       "comingSoon": "Coming soon"
+    },
+    "quoteNumbering": {
+      "section": "Quote Numbering",
+      "template": "Numbering template",
+      "save": "Save numbering",
+      "saveSuccess": "Quote numbering config saved.",
+      "saveFailed": "Failed to save quote numbering config.",
+      "preview": "Next number",
+      "previewHint": "(current sequence: {seq})",
+      "skipSection": "Skip quote sequence forward",
+      "skipTo": "Jump to number",
+      "skipSave": "Apply skip",
+      "skipSuccess": "Sequence advanced.",
+      "skipFailed": "Failed to advance sequence.",
+      "defaultValidDays": "Default validity (days)",
+      "defaultValidDaysHint": "Pre-filled when creating a new quote.",
+      "defaultValidDaysSaveSuccess": "Default valid days saved.",
+      "defaultValidDaysSaveFailed": "Failed to save default valid days."
     }
   },
   "vat": {
@@ -728,5 +746,10 @@
   },
   "theme": {
     "toggle": "Toggle theme"
+  },
+  "common": {
+    "discountNone": "None",
+    "discountPercentage": "Percentage (%)",
+    "discountFixed": "Fixed amount"
   }
 }

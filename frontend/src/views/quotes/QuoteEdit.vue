@@ -2,6 +2,7 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { localDateStr } from '../../utils/date'
 import {
   useMessage, useDialog,
   NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert,
@@ -73,7 +74,7 @@ const existingQuote = ref<QuoteRead | null>(null)
 const customerId = ref<string | null>(null)
 const customers = ref<CustomerRead[]>([])
 const referenceNumber = ref<string | null>(null)
-const quoteDate = ref(new Date().toISOString().slice(0, 10))
+const quoteDate = ref(localDateStr(new Date()))
 const validUntil = ref<string | null>(null)
 const taxMode = ref<'LINE' | 'DOCUMENT'>('LINE')
 const amountsIncludeVat = ref(false)
@@ -170,11 +171,11 @@ const vatTreatmentOptions = computed(() => vatTreatments.value
 
 // ------------------------------------------------------------------ line management
 
-const discountTypeOptions = [
-  { label: 'None', value: 'NONE' },
-  { label: 'Percentage (%)', value: 'PERCENTAGE' },
-  { label: 'Fixed amount', value: 'FIXED' },
-]
+const discountTypeOptions = computed(() => [
+  { label: t('common.discountNone'), value: 'NONE' },
+  { label: t('common.discountPercentage'), value: 'PERCENTAGE' },
+  { label: t('common.discountFixed'), value: 'FIXED' },
+])
 
 function addLine() {
   lines.value.push(emptyLine())
@@ -546,7 +547,17 @@ onMounted(async () => {
         customers.value = [custRes, ...customers.value]
       }
     } else {
-      // New quote – apply default content blocks
+      // New quote – pre-fill valid_until from company default, then apply default content blocks
+      try {
+        const vd = await get<{ default_valid_days: number }>('/api/v1/settings/quote-default-valid-days')
+        if (vd?.default_valid_days) {
+          const d = new Date()
+          d.setDate(d.getDate() + vd.default_valid_days)
+          validUntil.value = localDateStr(d)
+        }
+      } catch {
+        // leave validUntil null; backend will fill in its own default on save
+      }
       applyDefaultContentBlocks()
     }
   } catch (e: unknown) {
@@ -904,7 +915,7 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
                     <!-- Description -->
                     <n-gi :span="12">
                       <n-form-item :label="t('quotes.lineDescription')" size="small">
-                        <n-input v-model:value="line.description" :placeholder="t('quotes.lineDescriptionPlaceholder')" clearable />
+                        <n-input v-model:value="line.description" type="textarea" :autosize="{ minRows: 1, maxRows: 6 }" :placeholder="t('quotes.lineDescriptionPlaceholder')" clearable />
                       </n-form-item>
                     </n-gi>
                     <!-- Qty -->

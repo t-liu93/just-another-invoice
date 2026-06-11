@@ -574,7 +574,7 @@ const appliesToOptions = computed(() => [
             </n-gi>
             <n-gi :span="12">
               <n-form-item :label="t('contentLibrary.template.lineDesc')" size="small">
-                <n-input v-model:value="line.description" clearable />
+                <n-input v-model:value="line.description" type="textarea" :autosize="{ minRows: 1, maxRows: 6 }" clearable />
               </n-form-item>
             </n-gi>
             <n-gi :span="3">

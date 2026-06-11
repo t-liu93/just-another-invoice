@@ -44,6 +44,25 @@ const sequenceSkipping = ref(false)
 const sequenceSkipMessage = ref('')
 const sequenceSkipMessageType = ref<'success' | 'error'>('success')
 
+// Quote numbering state
+const quoteNumberingTemplate = ref('{{SERIES:QUO}}-{{SEQUENCE:6}}')
+const quoteNumberingLoaded = ref(false)
+const quoteNumberingSaving = ref(false)
+const quoteNumberingMessage = ref('')
+const quoteNumberingMessageType = ref<'success' | 'error'>('success')
+const quoteNumberingPreview = ref('')
+const quoteSequenceNextValue = ref(1)
+const quoteSequenceSkipTo = ref<number | null>(null)
+const quoteSequenceSkipping = ref(false)
+const quoteSequenceSkipMessage = ref('')
+const quoteSequenceSkipMessageType = ref<'success' | 'error'>('success')
+
+// Quote default valid days state
+const quoteDefaultValidDays = ref(30)
+const quoteDefaultValidDaysSaving = ref(false)
+const quoteDefaultValidDaysMessage = ref('')
+const quoteDefaultValidDaysMessageType = ref<'success' | 'error'>('success')
+
 const loadError = computed(() => companyStore.error)
 const hasLogo = computed(() => companyStore.company?.has_logo ?? false)
 const logoUrl = computed(() => companyStore.company?.logo_url ?? null)
@@ -97,6 +116,33 @@ onMounted(async () => {
     }
   } catch {
     // ignore – company may not exist yet
+  }
+
+  // Quote numbering config
+  try {
+    const qData = await get<{ template: string; preview?: string }>('/api/v1/settings/quote-numbering')
+    if (qData) {
+      quoteNumberingTemplate.value = qData.template
+      quoteNumberingPreview.value = qData.preview ?? ''
+      quoteNumberingLoaded.value = true
+    }
+  } catch {
+    // Use defaults
+  }
+  try {
+    const qSeqData = await get<{ next_sequence: number; preview_number: string }>('/api/v1/settings/quote-number-sequence')
+    if (qSeqData) {
+      quoteSequenceNextValue.value = qSeqData.next_sequence
+      quoteNumberingPreview.value = qSeqData.preview_number
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const vdData = await get<{ default_valid_days: number }>('/api/v1/settings/quote-default-valid-days')
+    if (vdData) quoteDefaultValidDays.value = vdData.default_valid_days
+  } catch {
+    // Use default 30
   }
 })
 
@@ -215,6 +261,77 @@ async function handleSkipSequence() {
     sequenceSkipMessageType.value = 'error'
   } finally {
     sequenceSkipping.value = false
+  }
+}
+
+async function handleSaveQuoteNumbering() {
+  quoteNumberingSaving.value = true
+  quoteNumberingMessage.value = ''
+  try {
+    const result = await put<{ template: string; preview?: string }>(
+      '/api/v1/settings/quote-numbering',
+      { template: quoteNumberingTemplate.value },
+    )
+    quoteNumberingTemplate.value = result.template
+    if (result.preview) quoteNumberingPreview.value = result.preview
+    try {
+      const qSeqData = await get<{ next_sequence: number; preview_number: string }>('/api/v1/settings/quote-number-sequence')
+      if (qSeqData) {
+        quoteSequenceNextValue.value = qSeqData.next_sequence
+        quoteNumberingPreview.value = qSeqData.preview_number
+      }
+    } catch { /* ignore */ }
+    quoteNumberingMessage.value = t('settings.quoteNumbering.saveSuccess')
+    quoteNumberingMessageType.value = 'success'
+  } catch (e: unknown) {
+    const err = e as { message?: string }
+    quoteNumberingMessage.value = err.message || t('settings.quoteNumbering.saveFailed')
+    quoteNumberingMessageType.value = 'error'
+  } finally {
+    quoteNumberingSaving.value = false
+  }
+}
+
+async function handleQuoteSkipSequence() {
+  if (!quoteSequenceSkipTo.value || quoteSequenceSkipTo.value <= quoteSequenceNextValue.value) return
+  quoteSequenceSkipping.value = true
+  quoteSequenceSkipMessage.value = ''
+  try {
+    const result = await put<{ next_sequence: number; preview_number: string }>(
+      '/api/v1/settings/quote-number-sequence',
+      { next_sequence: quoteSequenceSkipTo.value },
+    )
+    quoteSequenceNextValue.value = result.next_sequence
+    quoteNumberingPreview.value = result.preview_number
+    quoteSequenceSkipTo.value = null
+    quoteSequenceSkipMessage.value = t('settings.quoteNumbering.skipSuccess')
+    quoteSequenceSkipMessageType.value = 'success'
+  } catch (e: unknown) {
+    const err = e as { message?: string }
+    quoteSequenceSkipMessage.value = err.message || t('settings.quoteNumbering.skipFailed')
+    quoteSequenceSkipMessageType.value = 'error'
+  } finally {
+    quoteSequenceSkipping.value = false
+  }
+}
+
+async function handleSaveQuoteDefaultValidDays() {
+  quoteDefaultValidDaysSaving.value = true
+  quoteDefaultValidDaysMessage.value = ''
+  try {
+    const result = await put<{ default_valid_days: number }>(
+      '/api/v1/settings/quote-default-valid-days',
+      { default_valid_days: quoteDefaultValidDays.value },
+    )
+    quoteDefaultValidDays.value = result.default_valid_days
+    quoteDefaultValidDaysMessage.value = t('settings.quoteNumbering.defaultValidDaysSaveSuccess')
+    quoteDefaultValidDaysMessageType.value = 'success'
+  } catch (e: unknown) {
+    const err = e as { message?: string }
+    quoteDefaultValidDaysMessage.value = err.message || t('settings.quoteNumbering.defaultValidDaysSaveFailed')
+    quoteDefaultValidDaysMessageType.value = 'error'
+  } finally {
+    quoteDefaultValidDaysSaving.value = false
   }
 }
 </script>
@@ -387,6 +504,82 @@ async function handleSkipSequence() {
                   @click="handleSkipSequence"
                 >
                   {{ t('settings.numbering.skipSave') }}
+                </n-button>
+              </n-form>
+
+              <!-- Quote Numbering -->
+              <n-divider style="margin-top: 32px">{{ t('settings.quoteNumbering.section') }}</n-divider>
+
+              <n-form label-placement="left" label-width="150" :disabled="!companyStore.hasCompany" @submit.prevent="handleSaveQuoteNumbering">
+                <n-form-item :label="t('settings.quoteNumbering.template')">
+                  <n-input v-model:value="quoteNumberingTemplate" placeholder="{{SERIES:QUO}}-{{SEQUENCE:6}}" />
+                </n-form-item>
+
+                <n-form-item v-if="quoteNumberingPreview" :label="t('settings.quoteNumbering.preview')">
+                  <n-text code>{{ quoteNumberingPreview }}</n-text>
+                  <n-text depth="3" style="margin-left: 8px; font-size: 12px">
+                    {{ t('settings.quoteNumbering.previewHint', { seq: quoteSequenceNextValue }) }}
+                  </n-text>
+                </n-form-item>
+
+                <n-alert v-if="quoteNumberingMessage" :type="quoteNumberingMessageType" style="margin-bottom: 16px">
+                  {{ quoteNumberingMessage }}
+                </n-alert>
+
+                <n-button type="primary" :loading="quoteNumberingSaving" :disabled="!companyStore.hasCompany" attr-type="submit">
+                  {{ t('settings.quoteNumbering.save') }}
+                </n-button>
+              </n-form>
+
+              <!-- Quote sequence skip (forward only) -->
+              <n-divider style="margin-top: 24px">{{ t('settings.quoteNumbering.skipSection') }}</n-divider>
+              <n-form label-placement="left" label-width="150" :disabled="!companyStore.hasCompany">
+                <n-form-item :label="t('settings.quoteNumbering.skipTo')">
+                  <n-input-number
+                    v-model:value="quoteSequenceSkipTo"
+                    :min="1"
+                    :placeholder="String(quoteSequenceNextValue + 1)"
+                    style="width: 100%"
+                  />
+                </n-form-item>
+
+                <n-alert v-if="quoteSequenceSkipMessage" :type="quoteSequenceSkipMessageType" style="margin-bottom: 16px">
+                  {{ quoteSequenceSkipMessage }}
+                </n-alert>
+
+                <n-button
+                  type="default"
+                  :loading="quoteSequenceSkipping"
+                  :disabled="!companyStore.hasCompany || !quoteSequenceSkipTo || quoteSequenceSkipTo <= quoteSequenceNextValue"
+                  @click="handleQuoteSkipSequence"
+                >
+                  {{ t('settings.quoteNumbering.skipSave') }}
+                </n-button>
+              </n-form>
+
+              <!-- Quote default valid days -->
+              <n-divider style="margin-top: 24px">{{ t('settings.quoteNumbering.defaultValidDays') }}</n-divider>
+              <n-form label-placement="left" label-width="150" :disabled="!companyStore.hasCompany">
+                <n-form-item :label="t('settings.quoteNumbering.defaultValidDays')">
+                  <div style="width: 100%">
+                    <n-input-number v-model:value="quoteDefaultValidDays" :min="1" :max="3650" style="width: 100%" />
+                    <n-text depth="3" style="display: block; font-size: 12px; margin-top: 4px">
+                      {{ t('settings.quoteNumbering.defaultValidDaysHint') }}
+                    </n-text>
+                  </div>
+                </n-form-item>
+
+                <n-alert v-if="quoteDefaultValidDaysMessage" :type="quoteDefaultValidDaysMessageType" style="margin-bottom: 16px">
+                  {{ quoteDefaultValidDaysMessage }}
+                </n-alert>
+
+                <n-button
+                  type="primary"
+                  :loading="quoteDefaultValidDaysSaving"
+                  :disabled="!companyStore.hasCompany"
+                  @click="handleSaveQuoteDefaultValidDays"
+                >
+                  {{ t('settings.numbering.save') }}
                 </n-button>
               </n-form>
             </n-spin>

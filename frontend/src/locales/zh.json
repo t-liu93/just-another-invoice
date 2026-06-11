@@ -180,6 +180,24 @@
       "categoryAi": "AI",
       "categoryDictionary": "字典",
       "comingSoon": "敬请期待"
+    },
+    "quoteNumbering": {
+      "section": "报价编号",
+      "template": "编号模板",
+      "save": "保存编号配置",
+      "saveSuccess": "报价编号配置已保存。",
+      "saveFailed": "保存报价编号配置失败。",
+      "preview": "下一张编号",
+      "previewHint": "（当前序号：{seq}）",
+      "skipSection": "跳号（仅向前）",
+      "skipTo": "跳至序号",
+      "skipSave": "应用跳号",
+      "skipSuccess": "序号已更新。",
+      "skipFailed": "序号更新失败。",
+      "defaultValidDays": "默认有效天数",
+      "defaultValidDaysHint": "新建报价时自动预填。",
+      "defaultValidDaysSaveSuccess": "默认有效天数已保存。",
+      "defaultValidDaysSaveFailed": "保存失败。"
     }
   },
   "vat": {
@@ -728,5 +746,10 @@
   },
   "theme": {
     "toggle": "切换主题"
+  },
+  "common": {
+    "discountNone": "无折扣",
+    "discountPercentage": "百分比 (%)",
+    "discountFixed": "固定金额"
   }
 }
