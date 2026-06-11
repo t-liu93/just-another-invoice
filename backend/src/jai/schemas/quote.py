@@ -252,6 +252,17 @@ class QuoteStatusWrite(BaseModel):
     status: QuoteStatus
 
 
+# ---------------------------------------------------------------------------
+# Reactivate (step 3)
+# ---------------------------------------------------------------------------
+
+
+class QuoteReactivateWrite(BaseModel):
+    """Request body for ``POST /api/v1/quotes/{id}/reactivate``."""
+
+    valid_until: date | None = None
+
+
 # Re-export shared input types for consumers that import from schemas.quote
 __all__ = [
     "DiscountInput",
@@ -263,6 +274,7 @@ __all__ = [
     "QuoteListItem",
     "QuoteListResponse",
     "QuoteRead",
+    "QuoteReactivateWrite",
     "QuoteStatusWrite",
     "QuoteTaxRowRead",
     "QuoteWrite",

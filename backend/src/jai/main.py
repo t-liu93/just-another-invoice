@@ -6,7 +6,9 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +32,27 @@ from jai.db import get_engine, get_session_maker
 from jai.startup import check_db_migration
 
 logger = logging.getLogger("jai")
+
+
+# ---------------------------------------------------------------------------
+# APScheduler jobs
+# ---------------------------------------------------------------------------
+
+
+async def _expire_quotes_job() -> None:
+    """Daily job: expire all SENT quotes past their valid_until."""
+    from jai.services.quote import expire_due_quotes_all  # local import avoids cycle
+
+    session_maker = get_session_maker()
+    async with session_maker() as session:
+        try:
+            count = await expire_due_quotes_all(session)
+            if count > 0:
+                await session.commit()
+            logger.info("APScheduler: expired %d quote(s)", count)
+        except Exception:
+            await session.rollback()
+            logger.exception("APScheduler: error in expire_quotes job")
 
 # index.html is the SPA entry point: it is NOT content-hashed, so it must never
 # be served from the browser cache without revalidation — otherwise a cached
@@ -59,11 +82,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine = get_engine()
     await check_db_migration(engine)
     # -- Startup: resolve the JWT signing secret -----------------------------
-    # Env override wins; otherwise an auto-generated secret is loaded from /
-    # persisted to the DB (first boot).  Runs after the migration check so
-    # the ``setting`` table is guaranteed to exist.
     await resolve_auth_secret(get_session_maker())
+
+    # -- Startup: APScheduler (quote expiry job) -----------------------------
+    settings = _cfg.get_settings()
+    scheduler: Any = None
+    if settings.scheduler_enabled:
+        scheduler = AsyncIOScheduler(timezone="UTC")
+        scheduler.add_job(
+            _expire_quotes_job,
+            "cron",
+            hour=settings.scheduler_expire_quotes_hour,
+            minute=0,
+        )
+        scheduler.start()
+        logger.info(
+            "APScheduler started; expire_quotes runs daily at %02d:00 UTC",
+            settings.scheduler_expire_quotes_hour,
+        )
+
     yield
+
+    # -- Shutdown: stop scheduler cleanly ------------------------------------
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
+        logger.info("APScheduler shut down")
 
 
 def create_app() -> FastAPI:

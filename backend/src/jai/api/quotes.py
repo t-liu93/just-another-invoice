@@ -1,4 +1,4 @@
-"""Quote API routes – calculate + CRUD + status (M6 steps 1 & 2).
+"""Quote API routes – calculate + CRUD + status + convert + reactivate (M6 steps 1–3).
 
 Endpoints:
   POST   /api/v1/quotes/calculate        – pricing preview (no persistence)
@@ -8,6 +8,8 @@ Endpoints:
   PUT    /api/v1/quotes/{id}             – update (ACCEPTED blocks)
   DELETE /api/v1/quotes/{id}             – delete (cascade)
   POST   /api/v1/quotes/{id}/status      – status transition
+  POST   /api/v1/quotes/{id}/convert     – convert quote → new DRAFT invoice
+  POST   /api/v1/quotes/{id}/reactivate  – EXPIRED → SENT + extend valid_until
 """
 
 from __future__ import annotations
@@ -23,11 +25,12 @@ from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models._enums import QuoteStatus
 from jai.models.user import User
-from jai.schemas.invoice import InvoiceCalculationRead
+from jai.schemas.invoice import InvoiceCalculationRead, InvoiceRead
 from jai.schemas.quote import (
     QuoteCalculationRead,
     QuoteCalculationRequest,
     QuoteListResponse,
+    QuoteReactivateWrite,
     QuoteRead,
     QuoteStatusWrite,
     QuoteWrite,
@@ -35,10 +38,12 @@ from jai.schemas.quote import (
 from jai.services import company as company_svc
 from jai.services.pricing import calculate_quote
 from jai.services.quote import (
+    convert_to_invoice,
     create_quote,
     delete_quote,
     get_quote,
     list_quotes,
+    reactivate,
     transition_status,
     update_quote,
 )
@@ -245,6 +250,63 @@ async def transition_status_endpoint(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Convert / Reactivate (step 3)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/quotes/{quote_id}/convert",
+    response_model=InvoiceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def convert_quote_endpoint(
+    quote_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceRead:
+    """Convert a quote to a new DRAFT/UNPAID invoice.
+
+    Valid source statuses: SENT, ACCEPTED, EXPIRED (soft-expiry rule).
+    Returns 409 if the quote was already converted.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        result = await convert_to_invoice(session, quote_id, company_id, creator_id=user.id)
+    except ValueError as exc:
+        msg = str(exc)
+        if "already been converted" in msg:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=msg
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")
+    return result
+
+
+@router.post("/quotes/{quote_id}/reactivate", response_model=QuoteRead)
+async def reactivate_quote_endpoint(
+    quote_id: uuid.UUID,
+    body: QuoteReactivateWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteRead:
+    """Reactivate an EXPIRED quote: set status back to SENT and extend valid_until."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        result = await reactivate(session, quote_id, company_id, body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")

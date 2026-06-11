@@ -28,6 +28,7 @@ from decimal import Decimal
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from jai.models._enums import (
     DiscountType,
@@ -42,6 +43,8 @@ from jai.models.customer import Customer
 from jai.models.dictionary import Unit
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
 from jai.models.product import Product
+from jai.models.quote import Quote as _Quote
+from jai.models.quote import QuoteLine as _QuoteLine
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.invoice import (
     InvoiceLineRead,
@@ -575,6 +578,160 @@ async def _build_and_persist_invoice(
 # ---------------------------------------------------------------------------
 # Public service functions
 # ---------------------------------------------------------------------------
+
+
+async def clone_quote_to_invoice(
+    session: AsyncSession,
+    quote: _Quote,
+    *,
+    company_id: uuid.UUID,
+    creator_id: uuid.UUID | None,
+) -> InvoiceRead:
+    """Build an Invoice by copying the quote's stored snapshots verbatim.
+
+    No pricing re-computation occurs.  All amounts, VAT rate labels/percentages,
+    and the treatment snapshot are cloned directly from the quote's persisted
+    rows.  Only a fresh invoice number is allocated.
+
+    The caller owns the ``session.commit()`` so that invoice creation and the
+    quote's ``converted_invoice_id`` back-link update are atomic.
+    """
+    # Need customer only for customer_invoice_prefix (invoice numbering).
+    cust_stmt = select(Customer).where(Customer.id == quote.customer_id)
+    cust_result = await session.execute(cust_stmt)
+    customer = cust_result.scalar_one()
+
+    numbering_config = await _load_numbering_config(session, company_id)
+    invoice_number, sequence_number, customer_sequence_number = (
+        await allocate_invoice_number(
+            session,
+            company_id,
+            customer.id,
+            date.today(),
+            numbering_config=numbering_config,
+            customer_invoice_prefix=customer.invoice_prefix,
+        )
+    )
+
+    inv = Invoice()
+    inv.company_id = company_id
+    inv.customer_id = quote.customer_id
+    inv.invoice_number = invoice_number
+    inv.sequence_number = sequence_number
+    inv.customer_sequence_number = customer_sequence_number
+    inv.reference_number = quote.reference_number
+    inv.invoice_date = date.today()
+    inv.due_date = None
+    inv.status = InvoiceStatus.DRAFT
+    inv.paid_status = InvoicePaidStatus.UNPAID
+    inv.currency = quote.currency
+    inv.exchange_rate = Decimal(str(quote.exchange_rate))
+    inv.tax_mode = InvoiceTaxMode(quote.tax_mode)
+    inv.amounts_include_vat = quote.amounts_include_vat
+    inv.vat_treatment_id = quote.vat_treatment_id
+    inv.document_vat_rate_id = quote.document_vat_rate_id
+    # Copy treatment snapshot verbatim — no re-resolution against current dictionary
+    inv.vat_treatment_code = quote.vat_treatment_code
+    inv.vat_treatment_label = quote.vat_treatment_label
+    inv.vat_treatment_effect = quote.vat_treatment_effect
+    inv.vat_treatment_requires_icp = quote.vat_treatment_requires_icp
+    # Copy discount
+    inv.discount_type = DiscountType(quote.discount_type)
+    inv.discount_value = Decimal(str(quote.discount_value))
+    inv.document_discount_amount = Decimal(str(quote.document_discount_amount))
+    # Copy all computed amounts verbatim
+    inv.subtotal_excl_vat = Decimal(str(quote.subtotal_excl_vat))
+    inv.line_discount_total = Decimal(str(quote.line_discount_total))
+    inv.taxable_amount = Decimal(str(quote.taxable_amount))
+    inv.vat_total = Decimal(str(quote.vat_total))
+    inv.total_incl_vat = Decimal(str(quote.total_incl_vat))
+    inv.due_amount = Decimal(str(quote.total_incl_vat))
+    inv.base_subtotal_excl_vat = Decimal(str(quote.base_subtotal_excl_vat))
+    inv.base_line_discount_total = Decimal(str(quote.base_line_discount_total))
+    inv.base_taxable_amount = Decimal(str(quote.base_taxable_amount))
+    inv.base_vat_total = Decimal(str(quote.base_vat_total))
+    inv.base_total_incl_vat = Decimal(str(quote.base_total_incl_vat))
+    inv.base_due_amount = Decimal(str(quote.base_total_incl_vat))
+    inv.notes = quote.notes
+    inv.creator_id = creator_id
+
+    session.add(inv)
+    await session.flush()  # get inv.id for child FKs
+
+    # Clone line rows
+    line_pairs: list[tuple[_QuoteLine, InvoiceLine]] = []
+    for q_line in quote.lines:
+        inv_line = InvoiceLine()
+        inv_line.invoice_id = inv.id
+        inv_line.sort_order = q_line.sort_order
+        inv_line.product_id = q_line.product_id
+        inv_line.name = q_line.name
+        inv_line.description = q_line.description
+        inv_line.quantity = Decimal(str(q_line.quantity))
+        inv_line.unit_id = q_line.unit_id
+        inv_line.unit_name = q_line.unit_name
+        inv_line.unit_price = Decimal(str(q_line.unit_price))
+        inv_line.discount_type = DiscountType(q_line.discount_type)
+        inv_line.discount_value = Decimal(str(q_line.discount_value))
+        inv_line.vat_rate_id = q_line.vat_rate_id
+        inv_line.vat_rate_label = q_line.vat_rate_label
+        inv_line.vat_rate_percent = (
+            Decimal(str(q_line.vat_rate_percent))
+            if q_line.vat_rate_percent is not None
+            else None
+        )
+        inv_line.subtotal_excl_vat = Decimal(str(q_line.subtotal_excl_vat))
+        inv_line.subtotal_incl_vat = Decimal(str(q_line.subtotal_incl_vat))
+        inv_line.line_discount_amount = Decimal(str(q_line.line_discount_amount))
+        inv_line.document_discount_share = Decimal(str(q_line.document_discount_share))
+        inv_line.taxable_amount = Decimal(str(q_line.taxable_amount))
+        inv_line.vat_total = Decimal(str(q_line.vat_total))
+        inv_line.total_incl_vat = Decimal(str(q_line.total_incl_vat))
+        session.add(inv_line)
+        line_pairs.append((q_line, inv_line))
+
+    await session.flush()  # get inv_line.id for child FKs
+
+    # Clone per-line taxes (LINE mode)
+    for q_line, inv_line in line_pairs:
+        for q_lt in q_line.line_taxes:
+            inv_lt = InvoiceLineTax()
+            inv_lt.invoice_line_id = inv_line.id
+            inv_lt.vat_rate_id = q_lt.vat_rate_id
+            inv_lt.vat_rate_label = q_lt.vat_rate_label
+            inv_lt.vat_rate_percent = Decimal(str(q_lt.vat_rate_percent))
+            inv_lt.effective_vat_percent = Decimal(str(q_lt.effective_vat_percent))
+            inv_lt.taxable_amount = Decimal(str(q_lt.taxable_amount))
+            inv_lt.tax_amount = Decimal(str(q_lt.tax_amount))
+            session.add(inv_lt)
+
+    # Clone document-level taxes (DOCUMENT mode)
+    for q_tax in quote.taxes:
+        inv_tax = InvoiceTax()
+        inv_tax.invoice_id = inv.id
+        inv_tax.vat_rate_id = q_tax.vat_rate_id
+        inv_tax.vat_rate_label = q_tax.vat_rate_label
+        inv_tax.vat_rate_percent = Decimal(str(q_tax.vat_rate_percent))
+        inv_tax.effective_vat_percent = Decimal(str(q_tax.effective_vat_percent))
+        inv_tax.taxable_amount = Decimal(str(q_tax.taxable_amount))
+        inv_tax.tax_amount = Decimal(str(q_tax.tax_amount))
+        session.add(inv_tax)
+
+    await session.flush()
+    # Use an explicit SELECT with nested selectinload so that inv.lines and
+    # line.line_taxes are loaded in the async context before _invoice_to_read
+    # accesses them synchronously.  A plain session.refresh(inv) only loads
+    # inv.lines (one level deep) and leaves line.line_taxes unloaded.
+    load_stmt = (
+        select(Invoice)
+        .options(
+            selectinload(Invoice.lines).selectinload(InvoiceLine.line_taxes),
+            selectinload(Invoice.taxes),
+        )
+        .where(Invoice.id == inv.id)
+    )
+    result = await session.execute(load_stmt)
+    return _invoice_to_read(result.scalar_one())
 
 
 async def create_invoice(

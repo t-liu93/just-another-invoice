@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     pre_auth_ttl_minutes: int = 5  # Pre-auth (post-password, pre-MFA) window
     reset_password_ttl_minutes: int = 60  # Password-reset token lifetime
 
+    # -- APScheduler (M6 step 3) -------------------------------------------
+    # Set SCHEDULER_ENABLED=false in test environments or when running the
+    # scheduler externally.
+    scheduler_enabled: bool = True
+    # Hour (0–23 UTC) at which the daily quote-expiry job fires.
+    scheduler_expire_quotes_hour: int = 1
+
     # -- SMTP env fallback (step 4) -----------------------------------------
     # These are used as fallback when no SMTP settings exist in the DB.
     smtp_host: str = ""

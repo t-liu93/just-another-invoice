@@ -1,13 +1,17 @@
-"""Quote service – CRUD + status transitions (M6 step 2).
+"""Quote service – CRUD + status transitions + convert + expiry (M6 steps 2 & 3).
 
 Public API
 ----------
-- ``create_quote``        – allocate number, calculate, persist (within transaction)
-- ``update_quote``        – recalculate + replace sub-tables (preserves number; ACCEPTED blocks)
-- ``delete_quote``        – DB cascade removes lines/taxes; number not recycled
-- ``get_quote``           – fetch by id + company_id (returns None if not found)
-- ``list_quotes``         – filtered/paginated list
-- ``transition_status``   – M6 lifecycle state machine
+- ``create_quote``           – allocate number, calculate, persist (within transaction)
+- ``update_quote``           – recalculate + replace sub-tables (preserves number; ACCEPTED blocks)
+- ``delete_quote``           – DB cascade removes lines/taxes; number not recycled
+- ``get_quote``              – fetch by id + company_id (returns None if not found)
+- ``list_quotes``            – filtered/paginated list
+- ``transition_status``      – M6 lifecycle state machine
+- ``convert_to_invoice``     – Convert a quote to a new DRAFT invoice (M6 step 3)
+- ``reactivate``             – EXPIRED → SENT + extend valid_until (M6 step 3)
+- ``expire_due_quotes``      – batch-expire by company (used by list)
+- ``expire_due_quotes_all``  – batch-expire across all companies (APScheduler job)
 
 Red-line compliance
 -------------------
@@ -40,12 +44,16 @@ from jai.models.dictionary import Unit
 from jai.models.product import Product
 from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax
 from jai.models.vat import VatRate, VatTreatment
-from jai.schemas.invoice import VatTreatmentSnapshot
+from jai.schemas.invoice import (
+    InvoiceRead,
+    VatTreatmentSnapshot,
+)
 from jai.schemas.quote import (
     QuoteLineRead,
     QuoteLineReadTax,
     QuoteListItem,
     QuoteListResponse,
+    QuoteReactivateWrite,
     QuoteRead,
     QuoteStatusWrite,
     QuoteTaxRowRead,
@@ -57,6 +65,7 @@ from jai.schemas.setting import (
     QuoteDefaultValidDaysRead,
     QuoteNumberingConfig,
 )
+from jai.services.invoice import clone_quote_to_invoice
 from jai.services.money import quantize_money
 from jai.services.numbering import allocate_quote_number
 from jai.services.pricing import (
@@ -834,6 +843,135 @@ async def list_quotes(
         await session.commit()
 
     return response
+
+
+_CONVERTIBLE_STATUSES: frozenset[QuoteStatus] = frozenset(
+    {QuoteStatus.SENT, QuoteStatus.ACCEPTED, QuoteStatus.EXPIRED}
+)
+
+
+async def convert_to_invoice(
+    session: AsyncSession,
+    quote_id: uuid.UUID,
+    company_id: uuid.UUID,
+    creator_id: uuid.UUID | None,
+) -> InvoiceRead | None:
+    """Convert a quote to a new DRAFT/UNPAID invoice.
+
+    - Status must be SENT, ACCEPTED, or EXPIRED (soft-expiry rule).
+    - ``converted_invoice_id`` must be NULL (re-convert → ValueError).
+    - Quote is set to ACCEPTED + ``converted_invoice_id`` as a single commit.
+    Returns None if the quote is not found.
+    """
+    # Row-lock the quote so concurrent Convert requests serialise and the
+    # second sees converted_invoice_id != NULL (preventing duplicate invoices).
+    stmt = (
+        select(Quote)
+        .where(
+            Quote.id == quote_id,
+            Quote.company_id == company_id,
+        )
+        .with_for_update()
+    )
+    result = await session.execute(stmt)
+    q = result.scalar_one_or_none()
+    if q is None:
+        return None
+
+    # Apply read-time expiry before evaluating convertibility.
+    if _apply_expiry_in_memory(q):
+        q.status = QuoteStatus.EXPIRED
+        await session.flush()
+
+    if QuoteStatus(q.status) not in _CONVERTIBLE_STATUSES:
+        raise ValueError(
+            f"Only SENT, ACCEPTED, or EXPIRED quotes can be converted; "
+            f"this quote is {q.status.value}."
+        )
+
+    if q.converted_invoice_id is not None:
+        raise ValueError(
+            "This quote has already been converted to an invoice "
+            f"({q.converted_invoice_id})."
+        )
+
+    inv_read = await clone_quote_to_invoice(
+        session, q, company_id=company_id, creator_id=creator_id
+    )
+
+    q.status = QuoteStatus.ACCEPTED
+    q.converted_invoice_id = inv_read.id
+
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ValueError("Invoice number already exists (concurrent creation).") from exc
+
+    return inv_read
+
+
+async def reactivate(
+    session: AsyncSession,
+    quote_id: uuid.UUID,
+    company_id: uuid.UUID,
+    body: QuoteReactivateWrite,
+) -> QuoteRead | None:
+    """Reactivate an EXPIRED quote: set status to SENT and extend valid_until.
+
+    If ``body.valid_until`` is not provided, extends by the company default
+    number of days from today.  Returns None if the quote is not found.
+    """
+    stmt = select(Quote).where(
+        Quote.id == quote_id,
+        Quote.company_id == company_id,
+    )
+    result = await session.execute(stmt)
+    q = result.scalar_one_or_none()
+    if q is None:
+        return None
+
+    if QuoteStatus(q.status) != QuoteStatus.EXPIRED:
+        raise ValueError(
+            f"Only EXPIRED quotes can be reactivated; this quote is {q.status.value}."
+        )
+
+    q.status = QuoteStatus.SENT
+
+    if body.valid_until is not None:
+        if body.valid_until < date.today():
+            raise ValueError(
+                f"valid_until must be today or a future date; got {body.valid_until}."
+            )
+        q.valid_until = body.valid_until
+    else:
+        days = await _load_default_valid_days(session, company_id)
+        q.valid_until = date.today() + timedelta(days=days)
+
+    await session.commit()
+    await session.refresh(q)
+    return _quote_to_read(q)
+
+
+async def expire_due_quotes_all(session: AsyncSession) -> int:
+    """Batch-expire SENT quotes past their valid_until across all companies.
+
+    Called by the APScheduler daily job.  Idempotent – re-running produces no
+    extra changes.  Returns the number of quotes flipped to EXPIRED.
+    """
+    today = date.today()
+    stmt = select(Quote).where(
+        Quote.status == QuoteStatus.SENT,
+        Quote.valid_until.isnot(None),
+        Quote.valid_until < today,
+    )
+    result = await session.execute(stmt)
+    quotes = result.scalars().all()
+    for q in quotes:
+        q.status = QuoteStatus.EXPIRED
+    if quotes:
+        await session.flush()
+    return len(quotes)
 
 
 async def transition_status(

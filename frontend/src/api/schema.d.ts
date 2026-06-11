@@ -1016,6 +1016,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/{quote_id}/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Convert Quote Endpoint
+         * @description Convert a quote to a new DRAFT/UNPAID invoice.
+         *
+         *     Valid source statuses: SENT, ACCEPTED, EXPIRED (soft-expiry rule).
+         *     Returns 409 if the quote was already converted.
+         */
+        post: operations["convert_quote_endpoint_api_v1_quotes__quote_id__convert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reactivate Quote Endpoint
+         * @description Reactivate an EXPIRED quote: set status back to SENT and extend valid_until.
+         */
+        post: operations["reactivate_quote_endpoint_api_v1_quotes__quote_id__reactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2608,6 +2651,14 @@ export interface components {
              * @description Read-only: preview of the next quote number (ignored on PUT).
              */
             preview?: string | null;
+        };
+        /**
+         * QuoteReactivateWrite
+         * @description Request body for ``POST /api/v1/quotes/{id}/reactivate``.
+         */
+        QuoteReactivateWrite: {
+            /** Valid Until */
+            valid_until?: string | null;
         };
         /**
          * QuoteRead
@@ -5756,6 +5807,72 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["QuoteStatusWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    convert_quote_endpoint_api_v1_quotes__quote_id__convert_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reactivate_quote_endpoint_api_v1_quotes__quote_id__reactivate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteReactivateWrite"];
             };
         };
         responses: {
