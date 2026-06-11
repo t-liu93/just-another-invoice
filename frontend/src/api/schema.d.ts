@@ -477,6 +477,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/quote-numbering": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quote Numbering Config
+         * @description Return the quote numbering configuration for the current company.
+         */
+        get: operations["get_quote_numbering_config_api_v1_settings_quote_numbering_get"];
+        /**
+         * Update Quote Numbering Config
+         * @description Update the quote numbering configuration for the current company.
+         */
+        put: operations["update_quote_numbering_config_api_v1_settings_quote_numbering_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/quote-number-sequence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quote Number Sequence
+         * @description Return the current next quote sequence value and a preview.
+         */
+        get: operations["get_quote_number_sequence_api_v1_settings_quote_number_sequence_get"];
+        /**
+         * Update Quote Number Sequence
+         * @description Advance the company quote sequence to a new (higher) value.
+         */
+        put: operations["update_quote_number_sequence_api_v1_settings_quote_number_sequence_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/quote-default-valid-days": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quote Default Valid Days
+         * @description Return the company default valid days for new quotes.
+         */
+        get: operations["get_quote_default_valid_days_api_v1_settings_quote_default_valid_days_get"];
+        /**
+         * Update Quote Default Valid Days
+         * @description Update the company default valid days for new quotes.
+         */
+        put: operations["update_quote_default_valid_days_api_v1_settings_quote_default_valid_days_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vat-rates": {
         parameters: {
             query?: never;
@@ -866,6 +938,78 @@ export interface paths {
          * @description Preview quote pricing without persisting (red-line 1).
          */
         post: operations["calculate_quote_endpoint_api_v1_quotes_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Quotes Endpoint
+         * @description Return a paginated list of quotes for the current company.
+         */
+        get: operations["list_quotes_endpoint_api_v1_quotes_get"];
+        put?: never;
+        /**
+         * Create Quote Endpoint
+         * @description Create a new quote, allocate a quote number, and return the full record.
+         */
+        post: operations["create_quote_endpoint_api_v1_quotes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quote Endpoint
+         * @description Return a quote by ID. Applies read-time expiry check.
+         */
+        get: operations["get_quote_endpoint_api_v1_quotes__quote_id__get"];
+        /**
+         * Update Quote Endpoint
+         * @description Update a quote. Returns 409 if the quote is ACCEPTED.
+         */
+        put: operations["update_quote_endpoint_api_v1_quotes__quote_id__put"];
+        post?: never;
+        /**
+         * Delete Quote Endpoint
+         * @description Delete a quote (cascade removes lines/taxes). Number is not recycled.
+         */
+        delete: operations["delete_quote_endpoint_api_v1_quotes__quote_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transition Status Endpoint
+         * @description Transition quote status per M6 state machine.
+         */
+        post: operations["transition_status_endpoint_api_v1_quotes__quote_id__status_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2173,8 +2317,7 @@ export interface components {
          *
          *     Identical field structure to ``InvoiceCalculationRead``; defined as its own
          *     Pydantic model so FastAPI emits a distinct ``QuoteCalculationRead`` component
-         *     in OpenAPI and ``schema.d.ts`` carries the quote-specific name.  Future steps
-         *     can add quote-only fields here without touching the invoice schema.
+         *     in OpenAPI and ``schema.d.ts`` carries the quote-specific name.
          */
         QuoteCalculationRead: {
             tax_mode: components["schemas"]["InvoiceTaxMode"];
@@ -2242,6 +2385,417 @@ export interface components {
              *     }
              */
             discount?: components["schemas"]["DiscountInput"];
+            /**
+             * Lines
+             * @description At least 1 line required.
+             */
+            lines: components["schemas"]["InvoiceLineInput"][];
+        };
+        /**
+         * QuoteDefaultValidDaysRead
+         * @description Response for GET /settings/quote-default-valid-days.
+         */
+        QuoteDefaultValidDaysRead: {
+            /**
+             * Default Valid Days
+             * @description Default number of days until a quote expires.
+             */
+            default_valid_days: number;
+        };
+        /**
+         * QuoteDefaultValidDaysWrite
+         * @description Request body for PUT /settings/quote-default-valid-days.
+         */
+        QuoteDefaultValidDaysWrite: {
+            /**
+             * Default Valid Days
+             * @description Default number of days until a quote expires.
+             */
+            default_valid_days: number;
+        };
+        /**
+         * QuoteLineRead
+         * @description Quote line as returned in QuoteRead.
+         */
+        QuoteLineRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Product Id */
+            product_id?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /** Unit Price */
+            unit_price: string;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Vat Rate Label */
+            vat_rate_label?: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent?: string | null;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Subtotal Incl Vat */
+            subtotal_incl_vat: string;
+            /** Line Discount Amount */
+            line_discount_amount: string;
+            /** Document Discount Share */
+            document_discount_share: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /**
+             * Line Taxes
+             * @default []
+             */
+            line_taxes?: components["schemas"]["QuoteLineReadTax"][];
+        };
+        /**
+         * QuoteLineReadTax
+         * @description Per-line tax read (for QuoteLineRead).
+         */
+        QuoteLineReadTax: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
+        };
+        /**
+         * QuoteListItem
+         * @description Summary row in QuoteListResponse.
+         */
+        QuoteListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Customer Name */
+            customer_name: string;
+            /** Quote Number */
+            quote_number: string;
+            /** Reference Number */
+            reference_number?: string | null;
+            /**
+             * Quote Date
+             * Format: date
+             */
+            quote_date: string;
+            /** Valid Until */
+            valid_until?: string | null;
+            status: components["schemas"]["QuoteStatus"];
+            /** Converted Invoice Id */
+            converted_invoice_id?: string | null;
+            /** Currency */
+            currency: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            vat_treatment_snapshot: components["schemas"]["VatTreatmentSnapshot"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * QuoteListResponse
+         * @description Paginated quote list.
+         */
+        QuoteListResponse: {
+            /** Items */
+            items: components["schemas"]["QuoteListItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * QuoteNumberSequenceRead
+         * @description Response for GET/PUT /settings/quote-number-sequence.
+         */
+        QuoteNumberSequenceRead: {
+            /**
+             * Next Sequence
+             * @description The next sequence value that will be issued.
+             */
+            next_sequence: number;
+            /**
+             * Preview Number
+             * @description Preview of the next quote number.
+             */
+            preview_number: string;
+        };
+        /**
+         * QuoteNumberSequenceWrite
+         * @description Request body for PUT /settings/quote-number-sequence.
+         */
+        QuoteNumberSequenceWrite: {
+            /**
+             * Next Sequence
+             * @description New next sequence value. Must be strictly greater than the current next_sequence if a sequence already exists (forward-only).
+             */
+            next_sequence: number;
+        };
+        /**
+         * QuoteNumberingConfig
+         * @description Quote numbering template and sequence configuration.
+         *
+         *     Same shape as ``InvoiceNumberingConfig``; stored at COMPANY level with key
+         *     ``SETTING_KEY_QUOTE_NUMBERING``.
+         */
+        QuoteNumberingConfig: {
+            /**
+             * Template
+             * @description Numbering template. Supported placeholders: {{SERIES:VALUE}}, {{SEQUENCE:n}}, {{CUSTOMER_SERIES}}, {{CUSTOMER_SEQUENCE:n}}, {{DATE:format}}.
+             * @default {{SERIES:QUO}}-{{SEQUENCE:6}}
+             */
+            template?: string;
+            /**
+             * Sequence Start
+             * @description Starting number used only when the sequence row is first created. Changing this after the first quote has no effect.
+             * @default 1
+             */
+            sequence_start?: number;
+            /**
+             * Preview
+             * @description Read-only: preview of the next quote number (ignored on PUT).
+             */
+            preview?: string | null;
+        };
+        /**
+         * QuoteRead
+         * @description Full quote representation returned by CRUD endpoints.
+         */
+        QuoteRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Quote Number */
+            quote_number: string;
+            /** Sequence Number */
+            sequence_number: number;
+            /** Customer Sequence Number */
+            customer_sequence_number?: number | null;
+            /** Unique Hash */
+            unique_hash?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+            /**
+             * Quote Date
+             * Format: date
+             */
+            quote_date: string;
+            /** Valid Until */
+            valid_until?: string | null;
+            status: components["schemas"]["QuoteStatus"];
+            /** Converted Invoice Id */
+            converted_invoice_id?: string | null;
+            /** Currency */
+            currency: string;
+            /** Exchange Rate */
+            exchange_rate: string;
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /** Amounts Include Vat */
+            amounts_include_vat: boolean;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /** Document Vat Rate Id */
+            document_vat_rate_id?: string | null;
+            vat_treatment_snapshot: components["schemas"]["VatTreatmentSnapshot"];
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Document Discount Amount */
+            document_discount_amount: string;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Line Discount Total */
+            line_discount_total: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Base Subtotal Excl Vat */
+            base_subtotal_excl_vat: string;
+            /** Base Line Discount Total */
+            base_line_discount_total: string;
+            /** Base Taxable Amount */
+            base_taxable_amount: string;
+            /** Base Vat Total */
+            base_vat_total: string;
+            /** Base Total Incl Vat */
+            base_total_incl_vat: string;
+            /** Notes */
+            notes?: string | null;
+            /** Creator Id */
+            creator_id?: string | null;
+            /**
+             * Lines
+             * @default []
+             */
+            lines?: components["schemas"]["QuoteLineRead"][];
+            /**
+             * Taxes
+             * @default []
+             */
+            taxes?: components["schemas"]["QuoteTaxRowRead"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * QuoteStatus
+         * @description Lifecycle status of a quote.
+         * @enum {string}
+         */
+        QuoteStatus: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED" | "EXPIRED";
+        /**
+         * QuoteStatusWrite
+         * @description Request body for ``POST /api/v1/quotes/{id}/status``.
+         */
+        QuoteStatusWrite: {
+            status: components["schemas"]["QuoteStatus"];
+        };
+        /**
+         * QuoteTaxRowRead
+         * @description Document-level tax row as returned in QuoteRead.
+         */
+        QuoteTaxRowRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
+        };
+        /**
+         * QuoteWrite
+         * @description Request body for POST / PUT /api/v1/quotes.
+         */
+        QuoteWrite: {
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Reference Number */
+            reference_number?: string | null;
+            /**
+             * Quote Date
+             * Format: date
+             */
+            quote_date: string;
+            /** Valid Until */
+            valid_until?: string | null;
+            /**
+             * Currency
+             * @description Must equal company base_currency in M6.
+             */
+            currency?: string | null;
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /**
+             * Amounts Include Vat
+             * @default false
+             */
+            amounts_include_vat?: boolean;
+            /** Vat Treatment Id */
+            vat_treatment_id?: string | null;
+            /** Document Vat Rate Id */
+            document_vat_rate_id?: string | null;
+            /**
+             * @default {
+             *       "type": "NONE",
+             *       "value": "0"
+             *     }
+             */
+            discount?: components["schemas"]["DiscountInput"];
+            /** Notes */
+            notes?: string | null;
             /**
              * Lines
              * @description At least 1 line required.
@@ -3455,6 +4009,165 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserPreferences"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quote_numbering_config_api_v1_settings_quote_numbering_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteNumberingConfig"];
+                };
+            };
+        };
+    };
+    update_quote_numbering_config_api_v1_settings_quote_numbering_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteNumberingConfig"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteNumberingConfig"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quote_number_sequence_api_v1_settings_quote_number_sequence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteNumberSequenceRead"];
+                };
+            };
+        };
+    };
+    update_quote_number_sequence_api_v1_settings_quote_number_sequence_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteNumberSequenceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteNumberSequenceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quote_default_valid_days_api_v1_settings_quote_default_valid_days_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteDefaultValidDaysRead"];
+                };
+            };
+        };
+    };
+    update_quote_default_valid_days_api_v1_settings_quote_default_valid_days_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteDefaultValidDaysWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteDefaultValidDaysRead"];
                 };
             };
             /** @description Validation Error */
@@ -4851,6 +5564,208 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuoteCalculationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_quotes_endpoint_api_v1_quotes_get: {
+        parameters: {
+            query?: {
+                /** @description Search by number/reference/customer name */
+                q?: string | null;
+                customer_id?: string | null;
+                status?: components["schemas"]["QuoteStatus"] | null;
+                date_from?: string | null;
+                date_to?: string | null;
+                limit?: number;
+                offset?: number;
+                sort_by?: "quote_date" | "created_at" | "quote_number";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_quote_endpoint_api_v1_quotes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quote_endpoint_api_v1_quotes__quote_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_quote_endpoint_api_v1_quotes__quote_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_quote_endpoint_api_v1_quotes__quote_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transition_status_endpoint_api_v1_quotes__quote_id__status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteStatusWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteRead"];
                 };
             };
             /** @description Validation Error */

@@ -26,18 +26,27 @@ from jai.models._enums import SettingLevel
 from jai.models.user import User
 from jai.schemas.setting import (
     SETTING_KEY_INVOICE_NUMBERING,
+    SETTING_KEY_QUOTE_DEFAULT_VALID_DAYS,
+    SETTING_KEY_QUOTE_NUMBERING,
     SETTING_KEY_SMTP,
     SETTING_KEY_USER_PREFERENCES,
     InvoiceNumberingConfig,
     InvoiceNumberSequenceRead,
     InvoiceNumberSequenceWrite,
+    QuoteDefaultValidDaysRead,
+    QuoteDefaultValidDaysWrite,
+    QuoteNumberingConfig,
+    QuoteNumberSequenceRead,
+    QuoteNumberSequenceWrite,
     SmtpSettings,
     SmtpSettingsRead,
     UserPreferences,
 )
 from jai.services import email as email_svc
 from jai.services.numbering import (
+    advance_quote_sequence,
     advance_sequence,
+    get_next_quote_sequence_info,
     get_next_sequence_info,
     needs_sequence_placeholder,
     validate_template,
@@ -400,3 +409,207 @@ async def update_user_preferences(
     )
     await session.commit()
     return body
+
+
+# ---------------------------------------------------------------------------
+# Quote numbering configuration (COMPANY level, owner-only)
+# ---------------------------------------------------------------------------
+
+
+async def _get_quote_numbering_config(
+    session: AsyncSession,
+    company_id: object,
+) -> QuoteNumberingConfig:
+    import uuid as _uuid
+    company_uuid = company_id if isinstance(company_id, _uuid.UUID) else _uuid.UUID(str(company_id))
+    cfg = await get_setting(
+        session,
+        SETTING_KEY_QUOTE_NUMBERING,
+        level=SettingLevel.COMPANY,
+        scope_id=company_uuid,
+        value_type=QuoteNumberingConfig,
+    )
+    return cfg if cfg is not None else QuoteNumberingConfig()
+
+
+@router.get("/quote-numbering", response_model=QuoteNumberingConfig)
+async def get_quote_numbering_config(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteNumberingConfig:
+    """Return the quote numbering configuration for the current company."""
+    _owner_only(user)
+    if user.company_id is None:
+        return QuoteNumberingConfig()
+
+    config = await _get_quote_numbering_config(session, user.company_id)
+
+    _, preview = await get_next_quote_sequence_info(
+        session,
+        user.company_id,
+        date.today(),
+        numbering_config=config,
+    )
+    config.preview = preview
+    return config
+
+
+@router.put("/quote-numbering", response_model=QuoteNumberingConfig)
+async def update_quote_numbering_config(
+    body: QuoteNumberingConfig,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteNumberingConfig:
+    """Update the quote numbering configuration for the current company."""
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile must be created before configuring numbering.",
+        )
+
+    try:
+        validate_template(body.template)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    if not needs_sequence_placeholder(body.template):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Template must contain at least one company-level {{SEQUENCE:n}} "
+                "placeholder to guarantee unique quote numbers."
+            ),
+        )
+
+    await set_setting(
+        session,
+        SETTING_KEY_QUOTE_NUMBERING,
+        body.model_copy(update={"preview": None}),
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+    )
+    await session.commit()
+
+    _, preview = await get_next_quote_sequence_info(
+        session,
+        user.company_id,
+        date.today(),
+        numbering_config=body,
+    )
+    body.preview = preview
+    return body
+
+
+# ---------------------------------------------------------------------------
+# Quote number sequence (M6 step 2)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/quote-number-sequence", response_model=QuoteNumberSequenceRead)
+async def get_quote_number_sequence(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteNumberSequenceRead:
+    """Return the current next quote sequence value and a preview."""
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile must be created first.",
+        )
+
+    config = await _get_quote_numbering_config(session, user.company_id)
+    next_seq, preview = await get_next_quote_sequence_info(
+        session,
+        user.company_id,
+        date.today(),
+        numbering_config=config,
+    )
+    return QuoteNumberSequenceRead(next_sequence=next_seq, preview_number=preview)
+
+
+@router.put("/quote-number-sequence", response_model=QuoteNumberSequenceRead)
+async def update_quote_number_sequence(
+    body: QuoteNumberSequenceWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteNumberSequenceRead:
+    """Advance the company quote sequence to a new (higher) value."""
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile must be created first.",
+        )
+
+    config = await _get_quote_numbering_config(session, user.company_id)
+    try:
+        new_next, preview = await advance_quote_sequence(
+            session,
+            user.company_id,
+            body.next_sequence,
+            numbering_config=config,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    await session.commit()
+    return QuoteNumberSequenceRead(next_sequence=new_next, preview_number=preview)
+
+
+# ---------------------------------------------------------------------------
+# Quote default valid days (COMPANY level)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/quote-default-valid-days", response_model=QuoteDefaultValidDaysRead)
+async def get_quote_default_valid_days(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteDefaultValidDaysRead:
+    """Return the company default valid days for new quotes."""
+    _owner_only(user)
+    if user.company_id is None:
+        return QuoteDefaultValidDaysRead(default_valid_days=30)
+
+    raw = await get_setting(
+        session,
+        SETTING_KEY_QUOTE_DEFAULT_VALID_DAYS,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+        value_type=QuoteDefaultValidDaysRead,
+    )
+    return raw if raw is not None else QuoteDefaultValidDaysRead(default_valid_days=30)
+
+
+@router.put("/quote-default-valid-days", response_model=QuoteDefaultValidDaysRead)
+async def update_quote_default_valid_days(
+    body: QuoteDefaultValidDaysWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteDefaultValidDaysRead:
+    """Update the company default valid days for new quotes."""
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile must be created first.",
+        )
+
+    value = QuoteDefaultValidDaysRead(default_valid_days=body.default_valid_days)
+    await set_setting(
+        session,
+        SETTING_KEY_QUOTE_DEFAULT_VALID_DAYS,
+        value,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+    )
+    await session.commit()
+    return value

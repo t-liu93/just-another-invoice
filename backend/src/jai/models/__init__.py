@@ -7,6 +7,7 @@ from jai.models.dictionary import ExpenseCategory, PaymentMethod, Unit  # noqa: 
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax  # noqa: F401
 from jai.models.number_sequence import NumberSequence  # noqa: F401
 from jai.models.product import Product, ProductCategory  # noqa: F401
+from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax  # noqa: F401
 from jai.models.setting import Setting  # noqa: F401
 from jai.models.user import User  # noqa: F401
 from jai.models.vat import VatRate, VatTreatment  # noqa: F401

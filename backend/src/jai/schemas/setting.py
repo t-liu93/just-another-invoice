@@ -36,6 +36,12 @@ SETTING_KEY_AUTH_SECRET: str = "auth.secret"
 #: configuration; the rendering engine is implemented in M5.
 SETTING_KEY_INVOICE_NUMBERING: str = "invoice.numbering"
 
+#: Quote numbering template config (COMPANY level).
+SETTING_KEY_QUOTE_NUMBERING: str = "quote.numbering"
+
+#: Default valid days for new quotes (COMPANY level, int).
+SETTING_KEY_QUOTE_DEFAULT_VALID_DAYS: str = "quote.default_valid_days"
+
 #: User-level preferences (theme, locale, …).
 SETTING_KEY_USER_PREFERENCES: str = "user.preferences"
 
@@ -166,6 +172,77 @@ class InvoiceNumberSequenceWrite(BaseModel):
             "New next sequence value. Must be strictly greater than the current "
             "next_sequence if a sequence already exists (forward-only)."
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Quote numbering config (COMPANY level, stored only – M6 consumes)
+# ---------------------------------------------------------------------------
+
+
+class QuoteNumberingConfig(BaseModel):
+    """Quote numbering template and sequence configuration.
+
+    Same shape as ``InvoiceNumberingConfig``; stored at COMPANY level with key
+    ``SETTING_KEY_QUOTE_NUMBERING``.
+    """
+
+    template: str = Field(
+        default="{{SERIES:QUO}}-{{SEQUENCE:6}}",
+        description=(
+            "Numbering template. Supported placeholders: "
+            "{{SERIES:VALUE}}, {{SEQUENCE:n}}, {{CUSTOMER_SERIES}}, "
+            "{{CUSTOMER_SEQUENCE:n}}, {{DATE:format}}."
+        ),
+    )
+    sequence_start: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Starting number used only when the sequence row is first created. "
+            "Changing this after the first quote has no effect."
+        ),
+    )
+    preview: str | None = Field(
+        default=None,
+        description="Read-only: preview of the next quote number (ignored on PUT).",
+    )
+
+
+class QuoteNumberSequenceRead(BaseModel):
+    """Response for GET/PUT /settings/quote-number-sequence."""
+
+    next_sequence: int = Field(description="The next sequence value that will be issued.")
+    preview_number: str = Field(description="Preview of the next quote number.")
+
+
+class QuoteNumberSequenceWrite(BaseModel):
+    """Request body for PUT /settings/quote-number-sequence."""
+
+    next_sequence: int = Field(
+        ge=1,
+        description=(
+            "New next sequence value. Must be strictly greater than the current "
+            "next_sequence if a sequence already exists (forward-only)."
+        ),
+    )
+
+
+class QuoteDefaultValidDaysRead(BaseModel):
+    """Response for GET /settings/quote-default-valid-days."""
+
+    default_valid_days: int = Field(
+        ge=1,
+        description="Default number of days until a quote expires.",
+    )
+
+
+class QuoteDefaultValidDaysWrite(BaseModel):
+    """Request body for PUT /settings/quote-default-valid-days."""
+
+    default_valid_days: int = Field(
+        ge=1,
+        description="Default number of days until a quote expires.",
     )
 
 

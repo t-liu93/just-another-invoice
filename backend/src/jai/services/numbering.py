@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.models._enums import NumberSequenceScope
 from jai.models.number_sequence import NumberSequence
-from jai.schemas.setting import InvoiceNumberingConfig
+from jai.schemas.setting import InvoiceNumberingConfig, QuoteNumberingConfig
 
 # ---------------------------------------------------------------------------
 # Placeholder regex
@@ -51,8 +51,9 @@ _PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
 # Deliberately excludes / and . to block path-traversal-looking inputs.
 _SAFE_DATE_FORMAT_RE = re.compile(r"^[A-Za-z0-9%\-_ ]+$")
 
-# Document type constant used for invoice sequences.
+# Document type constants.
 DOCUMENT_TYPE_INVOICE = "INVOICE"
+DOCUMENT_TYPE_QUOTE = "QUOTE"
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +496,143 @@ async def advance_sequence(
     await session.flush()
 
     # Build preview
+    today = date.today()
+    try:
+        validate_template(numbering_config.template)
+        preview = render_template(
+            numbering_config.template,
+            sequence=new_next_value,
+            customer_series=None,
+            customer_sequence=1 if needs_customer_sequence(numbering_config.template) else None,
+            invoice_date=today,
+        )
+    except ValueError:
+        preview = "<invalid template>"
+
+    return new_next_value, preview
+
+
+# ---------------------------------------------------------------------------
+# Quote numbering – wrappers that pass DOCUMENT_TYPE_QUOTE
+# ---------------------------------------------------------------------------
+
+
+async def allocate_quote_number(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    customer_id: uuid.UUID,
+    quote_date: date,
+    *,
+    numbering_config: QuoteNumberingConfig,
+    customer_invoice_prefix: str | None,
+) -> tuple[str, int, int | None]:
+    """Allocate the next quote number within the caller's open transaction.
+
+    Mirrors ``allocate_invoice_number`` but uses ``DOCUMENT_TYPE_QUOTE``.
+    """
+    template = numbering_config.template
+    sequence_start = numbering_config.sequence_start
+
+    validate_template(template)
+
+    await _upsert_company_sequence(
+        session, company_id, DOCUMENT_TYPE_QUOTE, sequence_start
+    )
+    company_seq_row = await _lock_company_sequence(
+        session, company_id, DOCUMENT_TYPE_QUOTE
+    )
+    allocated_company = company_seq_row.next_value
+    company_seq_row.next_value = allocated_company + 1
+    await session.flush()
+
+    customer_seq_value: int | None = None
+    if needs_customer_sequence(template):
+        await _upsert_customer_sequence(
+            session, company_id, DOCUMENT_TYPE_QUOTE, customer_id
+        )
+        cust_seq_row = await _lock_customer_sequence(
+            session, company_id, DOCUMENT_TYPE_QUOTE, customer_id
+        )
+        customer_seq_value = cust_seq_row.next_value
+        cust_seq_row.next_value = customer_seq_value + 1
+        await session.flush()
+
+    quote_number = render_template(
+        template,
+        sequence=allocated_company,
+        customer_series=customer_invoice_prefix,
+        customer_sequence=customer_seq_value,
+        invoice_date=quote_date,
+    )
+
+    return quote_number, allocated_company, customer_seq_value
+
+
+async def get_next_quote_sequence_info(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    quote_date: date,
+    *,
+    numbering_config: QuoteNumberingConfig,
+) -> tuple[int, str]:
+    """Return (next_sequence, preview_number) without mutating the sequence."""
+    template = numbering_config.template
+    sequence_start = numbering_config.sequence_start
+
+    try:
+        validate_template(template)
+    except ValueError:
+        return sequence_start, f"<invalid template: {template}>"
+
+    stmt = select(NumberSequence).where(
+        NumberSequence.company_id == company_id,
+        NumberSequence.document_type == DOCUMENT_TYPE_QUOTE,
+        NumberSequence.scope == NumberSequenceScope.COMPANY,
+    )
+    result = await session.execute(stmt)
+    row = result.scalar_one_or_none()
+    next_seq = row.next_value if row is not None else sequence_start
+
+    try:
+        preview = render_template(
+            template,
+            sequence=next_seq,
+            customer_series=None,
+            customer_sequence=1 if needs_customer_sequence(template) else None,
+            invoice_date=quote_date,
+        )
+    except ValueError:
+        preview = "<render error>"
+
+    return next_seq, preview
+
+
+async def advance_quote_sequence(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    new_next_value: int,
+    *,
+    numbering_config: QuoteNumberingConfig,
+) -> tuple[int, str]:
+    """Advance the company quote sequence to ``new_next_value`` (forward only)."""
+    sequence_start = numbering_config.sequence_start
+
+    await _upsert_company_sequence(
+        session, company_id, DOCUMENT_TYPE_QUOTE, sequence_start
+    )
+
+    seq_row = await _lock_company_sequence(session, company_id, DOCUMENT_TYPE_QUOTE)
+
+    if new_next_value <= seq_row.next_value:
+        raise ValueError(
+            f"Can only advance the sequence forward. "
+            f"Current next value is {seq_row.next_value}; "
+            f"requested {new_next_value}."
+        )
+
+    seq_row.next_value = new_next_value
+    await session.flush()
+
     today = date.today()
     try:
         validate_template(numbering_config.template)

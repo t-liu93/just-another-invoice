@@ -1,8 +1,12 @@
-"""Pydantic schemas for quote (M6).
+"""Pydantic schemas for quote (M6 steps 1 & 2).
 
 Step 1 schemas (pricing preview):
   QuoteCalculationRequest – mirrors InvoiceCalculationRequest with quote_date
   QuoteCalculationRead    – proper Pydantic subclass (identical fields, own OpenAPI schema)
+
+Step 2 schemas (CRUD):
+  QuoteWrite, QuoteRead, QuoteLineRead, QuoteLineReadTax,
+  QuoteTaxRowRead, QuoteListItem, QuoteListResponse, QuoteStatusWrite
 
 Line/discount inputs reuse invoice schema types directly (same model, red-line 1).
 """
@@ -10,15 +14,17 @@ Line/discount inputs reuse invoice schema types directly (same model, red-line 1
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from jai.models._enums import InvoiceTaxMode
+from jai.models._enums import DiscountType, InvoiceTaxMode, QuoteStatus
 from jai.schemas.invoice import (
     DiscountInput,
     InvoiceCalculationRead,
     InvoiceLineInput,
+    VatTreatmentSnapshot,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,9 +62,194 @@ class QuoteCalculationRead(InvoiceCalculationRead):
 
     Identical field structure to ``InvoiceCalculationRead``; defined as its own
     Pydantic model so FastAPI emits a distinct ``QuoteCalculationRead`` component
-    in OpenAPI and ``schema.d.ts`` carries the quote-specific name.  Future steps
-    can add quote-only fields here without touching the invoice schema.
+    in OpenAPI and ``schema.d.ts`` carries the quote-specific name.
     """
+
+
+# ---------------------------------------------------------------------------
+# Quote write (step 2)
+# ---------------------------------------------------------------------------
+
+
+class QuoteWrite(BaseModel):
+    """Request body for POST / PUT /api/v1/quotes."""
+
+    customer_id: uuid.UUID
+    reference_number: str | None = None
+    quote_date: date
+    valid_until: date | None = None
+    currency: str | None = Field(
+        default=None,
+        max_length=3,
+        min_length=3,
+        description="Must equal company base_currency in M6.",
+    )
+    tax_mode: InvoiceTaxMode
+    amounts_include_vat: bool = False
+    vat_treatment_id: uuid.UUID | None = None
+    document_vat_rate_id: uuid.UUID | None = None
+    discount: DiscountInput = DiscountInput()
+    notes: str | None = None
+    lines: list[InvoiceLineInput] = Field(min_length=1, description="At least 1 line required.")
+
+
+# ---------------------------------------------------------------------------
+# Quote line read (step 2)
+# ---------------------------------------------------------------------------
+
+
+class QuoteLineReadTax(BaseModel):
+    """Per-line tax read (for QuoteLineRead)."""
+
+    id: uuid.UUID
+    vat_rate_id: uuid.UUID
+    vat_rate_label: str
+    vat_rate_percent: Decimal
+    effective_vat_percent: Decimal
+    taxable_amount: Decimal
+    tax_amount: Decimal
+
+
+class QuoteLineRead(BaseModel):
+    """Quote line as returned in QuoteRead."""
+
+    id: uuid.UUID
+    sort_order: int
+    product_id: uuid.UUID | None = None
+    name: str
+    description: str | None = None
+    quantity: Decimal
+    unit_id: uuid.UUID | None = None
+    unit_name: str | None = None
+    unit_price: Decimal
+    discount_type: DiscountType
+    discount_value: Decimal
+    vat_rate_id: uuid.UUID | None = None
+    vat_rate_label: str | None = None
+    vat_rate_percent: Decimal | None = None
+    subtotal_excl_vat: Decimal
+    subtotal_incl_vat: Decimal
+    line_discount_amount: Decimal
+    document_discount_share: Decimal
+    taxable_amount: Decimal
+    vat_total: Decimal
+    total_incl_vat: Decimal
+    line_taxes: list[QuoteLineReadTax] = []
+
+
+class QuoteTaxRowRead(BaseModel):
+    """Document-level tax row as returned in QuoteRead."""
+
+    id: uuid.UUID
+    vat_rate_id: uuid.UUID
+    vat_rate_label: str
+    vat_rate_percent: Decimal
+    effective_vat_percent: Decimal
+    taxable_amount: Decimal
+    tax_amount: Decimal
+
+
+# ---------------------------------------------------------------------------
+# Quote read (step 2)
+# ---------------------------------------------------------------------------
+
+
+class QuoteRead(BaseModel):
+    """Full quote representation returned by CRUD endpoints."""
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    customer_id: uuid.UUID
+
+    quote_number: str
+    sequence_number: int
+    customer_sequence_number: int | None = None
+    unique_hash: str | None = None
+    reference_number: str | None = None
+
+    quote_date: date
+    valid_until: date | None = None
+
+    status: QuoteStatus
+    converted_invoice_id: uuid.UUID | None = None
+
+    currency: str
+    exchange_rate: Decimal
+
+    tax_mode: InvoiceTaxMode
+    amounts_include_vat: bool
+    vat_treatment_id: uuid.UUID
+    document_vat_rate_id: uuid.UUID | None = None
+
+    vat_treatment_snapshot: VatTreatmentSnapshot
+
+    discount_type: DiscountType
+    discount_value: Decimal
+    document_discount_amount: Decimal
+
+    subtotal_excl_vat: Decimal
+    line_discount_total: Decimal
+    taxable_amount: Decimal
+    vat_total: Decimal
+    total_incl_vat: Decimal
+
+    base_subtotal_excl_vat: Decimal
+    base_line_discount_total: Decimal
+    base_taxable_amount: Decimal
+    base_vat_total: Decimal
+    base_total_incl_vat: Decimal
+
+    notes: str | None = None
+    creator_id: uuid.UUID | None = None
+
+    lines: list[QuoteLineRead] = []
+    taxes: list[QuoteTaxRowRead] = []
+
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Quote list (step 2)
+# ---------------------------------------------------------------------------
+
+
+class QuoteListItem(BaseModel):
+    """Summary row in QuoteListResponse."""
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    customer_id: uuid.UUID
+    customer_name: str
+    quote_number: str
+    reference_number: str | None = None
+    quote_date: date
+    valid_until: date | None = None
+    status: QuoteStatus
+    converted_invoice_id: uuid.UUID | None = None
+    currency: str
+    total_incl_vat: Decimal
+    vat_treatment_snapshot: VatTreatmentSnapshot
+    created_at: datetime
+    updated_at: datetime
+
+
+class QuoteListResponse(BaseModel):
+    """Paginated quote list."""
+
+    items: list[QuoteListItem]
+    total: int
+
+
+# ---------------------------------------------------------------------------
+# Status transition (step 2)
+# ---------------------------------------------------------------------------
+
+
+class QuoteStatusWrite(BaseModel):
+    """Request body for ``POST /api/v1/quotes/{id}/status``."""
+
+    status: QuoteStatus
 
 
 # Re-export shared input types for consumers that import from schemas.quote
@@ -67,4 +258,12 @@ __all__ = [
     "InvoiceLineInput",
     "QuoteCalculationRead",
     "QuoteCalculationRequest",
+    "QuoteLineRead",
+    "QuoteLineReadTax",
+    "QuoteListItem",
+    "QuoteListResponse",
+    "QuoteRead",
+    "QuoteStatusWrite",
+    "QuoteTaxRowRead",
+    "QuoteWrite",
 ]
