@@ -523,7 +523,7 @@ function handleDeleteGroup(i: number) {
 
               <!-- Basic Info -->
               <n-card :title="t('estimates.basicSection')" style="margin-bottom: 16px">
-                <n-grid :cols="2" :x-gap="16" :y-gap="0">
+                <n-grid cols="1 600:2" :x-gap="16" :y-gap="0">
                   <n-gi>
                     <n-form-item :label="t('estimates.name')" required>
                       <n-input
@@ -546,7 +546,7 @@ function handleDeleteGroup(i: number) {
                       />
                     </n-form-item>
                   </n-gi>
-                  <n-gi :span="2">
+                  <n-gi span="1 600:2">
                     <n-form-item :label="t('estimates.notes')">
                       <n-input
                         v-model:value="notes"
@@ -567,8 +567,8 @@ function handleDeleteGroup(i: number) {
                   <n-divider v-if="i > 0" />
 
                   <!-- Row 1: product / name / group / remove -->
-                  <n-grid :cols="12" :x-gap="8" :y-gap="4">
-                    <n-gi :span="3">
+                  <n-grid cols="1 600:12" :x-gap="8" :y-gap="4">
+                    <n-gi span="1 600:3">
                       <n-form-item :label="t('estimates.product')" size="small">
                         <n-select
                           :value="line.product_id"
@@ -583,7 +583,7 @@ function handleDeleteGroup(i: number) {
                         />
                       </n-form-item>
                     </n-gi>
-                    <n-gi :span="4">
+                    <n-gi span="1 600:4">
                       <n-form-item :label="t('estimates.lineName')" size="small" required>
                         <n-input
                           v-model:value="line.name"
@@ -592,7 +592,7 @@ function handleDeleteGroup(i: number) {
                         />
                       </n-form-item>
                     </n-gi>
-                    <n-gi :span="3">
+                    <n-gi span="1 600:3">
                       <n-form-item :label="t('estimates.group')" size="small">
                         <n-select
                           v-model:value="line.group_ref"
@@ -603,7 +603,7 @@ function handleDeleteGroup(i: number) {
                         />
                       </n-form-item>
                     </n-gi>
-                    <n-gi :span="2" style="display:flex; align-items:flex-end; padding-bottom:4px">
+                    <n-gi span="1 600:2" style="display:flex; align-items:flex-end; padding-bottom:4px">
                       <n-button
                         v-if="lines.length > 1"
                         size="small"
@@ -617,7 +617,7 @@ function handleDeleteGroup(i: number) {
                     </n-gi>
 
                     <!-- Row 2: cost / qty / margin / unit -->
-                    <n-gi :span="3">
+                    <n-gi span="1 600:3">
                       <n-form-item :label="t('estimates.unitCost')" size="small">
                         <n-input-number
                           v-model:value="line.unit_cost_excl_vat"
@@ -628,7 +628,7 @@ function handleDeleteGroup(i: number) {
                         />
                       </n-form-item>
                     </n-gi>
-                    <n-gi :span="2">
+                    <n-gi span="1 600:2">
                       <n-form-item :label="t('estimates.quantity')" size="small">
                         <n-input-number
                           v-model:value="line.quantity"
@@ -639,7 +639,7 @@ function handleDeleteGroup(i: number) {
                         />
                       </n-form-item>
                     </n-gi>
-                    <n-gi :span="2">
+                    <n-gi span="1 600:2">
                       <n-form-item :label="t('estimates.marginRate')" size="small">
                         <n-input-number
                           v-model:value="line.margin_rate_pct"
@@ -651,7 +651,7 @@ function handleDeleteGroup(i: number) {
                         />
                       </n-form-item>
                     </n-gi>
-                    <n-gi :span="2">
+                    <n-gi span="1 600:2">
                       <n-form-item :label="t('estimates.unit')" size="small">
                         <n-input
                           v-model:value="line.unit_name"
@@ -663,7 +663,7 @@ function handleDeleteGroup(i: number) {
                     </n-gi>
 
                     <!-- Row 3: description (optional) -->
-                    <n-gi :span="12">
+                    <n-gi span="1 600:12">
                       <n-form-item :label="t('estimates.lineDescription')" size="small">
                         <n-input
                           v-model:value="line.description"
@@ -677,7 +677,7 @@ function handleDeleteGroup(i: number) {
                     </n-gi>
 
                     <!-- Row 4: calculated amounts (from preview) -->
-                    <n-gi :span="12">
+                    <n-gi span="1 600:12">
                       <div class="line-calc-row">
                         <template v-if="lineCalcMap.get(line._key)">
                           <span class="calc-item">
@@ -738,7 +738,7 @@ function handleDeleteGroup(i: number) {
                     </n-space>
                   </div>
 
-                  <n-grid :cols="2" :x-gap="16" :y-gap="0" style="margin-top: 8px">
+                  <n-grid cols="1 600:2" :x-gap="16" :y-gap="0" style="margin-top: 8px">
                     <n-gi>
                       <n-form-item :label="t('estimates.publicDescription')" size="small">
                         <n-input

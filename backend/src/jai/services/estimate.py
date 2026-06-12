@@ -469,15 +469,18 @@ async def list_estimates(
     count_stmt = select(func.count()).select_from(base.subquery())
     total: int = (await session.execute(count_stmt)).scalar_one()
 
-    # Sort column
-    sort_col = {
-        "name": Estimate.name,
-        "created_at": Estimate.created_at,
-        "updated_at": Estimate.updated_at,
-    }[sort_by]
+    # Sort: name ascending; timestamps descending (newest first)
+    order_expr = (
+        Estimate.name.asc()
+        if sort_by == "name"
+        else {
+            "created_at": Estimate.created_at,
+            "updated_at": Estimate.updated_at,
+        }[sort_by].desc()
+    )
 
     rows_stmt = (
-        base.order_by(sort_col)
+        base.order_by(order_expr)
         .limit(limit)
         .offset(offset)
     )
