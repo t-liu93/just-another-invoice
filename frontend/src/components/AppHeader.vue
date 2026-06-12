@@ -24,6 +24,7 @@ import {
   CubeOutline,
   DocumentTextOutline,
   ReceiptOutline,
+  CalculatorOutline,
 } from '@vicons/ionicons5'
 import { NIcon, type MenuOption } from 'naive-ui'
 
@@ -44,6 +45,7 @@ const navOptions = computed<MenuOption[]>(() => [
   { label: t('nav.products'), key: 'product-list', icon: renderIcon(CubeOutline) },
   { label: t('nav.invoices'), key: 'invoice-list', icon: renderIcon(DocumentTextOutline) },
   { label: t('nav.quotes'), key: 'quote-list', icon: renderIcon(ReceiptOutline) },
+  { label: t('nav.estimates'), key: 'estimate-list', icon: renderIcon(CalculatorOutline) },
 ])
 
 /** Highlight the active top-level section based on the current route name. */
@@ -53,6 +55,7 @@ const activeKey = computed<string | null>(() => {
   if (typeof name === 'string' && name.startsWith('product')) return 'product-list'
   if (typeof name === 'string' && name.startsWith('invoice')) return 'invoice-list'
   if (typeof name === 'string' && name.startsWith('quote')) return 'quote-list'
+  if (typeof name === 'string' && name.startsWith('estimate')) return 'estimate-list'
   if (name === 'dashboard') return 'dashboard'
   return null
 })
@@ -63,6 +66,7 @@ function handleNav(key: string) {
   else if (key === 'product-list') router.push('/products')
   else if (key === 'invoice-list') router.push('/invoices')
   else if (key === 'quote-list') router.push('/quotes')
+  else if (key === 'estimate-list') router.push('/estimates')
 }
 
 function toggleLocale() {

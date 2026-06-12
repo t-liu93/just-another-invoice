@@ -133,6 +133,24 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/estimates',
+    name: 'estimate-list',
+    component: () => import('../views/estimates/EstimateList.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/estimates/new',
+    name: 'estimate-new',
+    component: () => import('../views/estimates/EstimateEdit.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/estimates/:id/edit',
+    name: 'estimate-edit',
+    component: () => import('../views/estimates/EstimateEdit.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/dashboard',
   },
