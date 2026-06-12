@@ -1,12 +1,13 @@
-"""Estimate service – CRUD + costing calculation + snapshot (M6.5 step 2).
+"""Estimate service – CRUD + costing calculation + snapshot (M6.5 steps 2 & 3).
 
 Public API
 ----------
-- ``create_estimate``  – validate FKs, compute costing, persist 3 tables
-- ``update_estimate``  – replace sub-tables, recompute amounts
-- ``delete_estimate``  – DB cascade removes lines/groups
-- ``get_estimate``     – fetch by id + company_id (returns None if not found)
-- ``list_estimates``   – filtered/paginated list with customer name JOIN
+- ``create_estimate``             – validate FKs, compute costing, persist 3 tables
+- ``update_estimate``             – replace sub-tables, recompute amounts
+- ``delete_estimate``             – DB cascade removes lines/groups
+- ``get_estimate``                – fetch by id + company_id (returns None if not found)
+- ``list_estimates``              – filtered/paginated list with customer name JOIN
+- ``generate_quote_from_estimate`` – zero-leak estimate→quote projection (Step 3)
 
 Red-line compliance
 -------------------
@@ -15,18 +16,21 @@ Red-line compliance
 3. No manual cascade deletes – DB ON DELETE CASCADE handles sub-tables.
 8. Cost snapshot: unit_cost_excl_vat / margin_rate locked at write time;
    M4 catalogue changes do NOT back-fill historical estimates.
+Zero-leak (M6.5 Step 3): only group.public_description and group_sell_excl_vat
+enter the generated quote; no cost / margin / internal line data ever copied.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jai.models._enums import InvoiceTaxMode
 from jai.models.customer import Customer
 from jai.models.dictionary import Unit
 from jai.models.estimate import Estimate, EstimateGroup, EstimateLine
@@ -42,8 +46,12 @@ from jai.schemas.estimate import (
     EstimateRead,
     EstimateWrite,
 )
+from jai.schemas.invoice import DiscountInput, InvoiceLineInput
+from jai.schemas.quote import QuoteRead, QuoteWrite
+from jai.services.company import get_company as _get_company
 from jai.services.costing import compute_estimate
 from jai.services.money import quantize_money
+from jai.services.quote import create_quote as _create_quote
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -489,3 +497,123 @@ async def list_estimates(
         for row in rows
     ]
     return EstimateListResponse(items=items, total=total)
+
+
+async def generate_quote_from_estimate(
+    session: AsyncSession,
+    estimate_id: uuid.UUID,
+    company_id: uuid.UUID,
+    *,
+    creator_id: uuid.UUID | None = None,
+) -> QuoteRead | None:
+    """Generate a new DRAFT quote from an estimate (M6.5 Step 3).
+
+    Returns None if the estimate is not found or doesn't belong to this company.
+    Raises ValueError (→ 422) for precondition violations.
+
+    Zero-leak guarantee: only group.public_description and group_sell_excl_vat
+    enter the generated quote; no cost / margin / internal line data is copied.
+
+    Preconditions (all raise ValueError on failure):
+    - estimate.customer_id must be set.
+    - Every group that contains at least one line must have a vat_rate_id.
+    - At least one group must contain at least one line.
+    """
+    stmt = select(Estimate).where(
+        Estimate.id == estimate_id,
+        Estimate.company_id == company_id,
+    )
+    result = await session.execute(stmt)
+    estimate = result.scalar_one_or_none()
+    if estimate is None:
+        return None
+
+    # Precondition: customer must be set (create_quote needs it for VAT treatment)
+    if estimate.customer_id is None:
+        raise ValueError(
+            "Cannot generate a quote: estimate has no customer. "
+            "Associate a customer with the estimate first."
+        )
+
+    # Build group → lines mapping (groups/lines are selectin-loaded)
+    lines_by_group: dict[uuid.UUID, list[EstimateLine]] = {}
+    for line in estimate.lines:
+        if line.group_id is not None:
+            lines_by_group.setdefault(line.group_id, []).append(line)
+
+    # Groups sorted by sort_order, filtered to those that have at least one line
+    groups_with_lines = [
+        g
+        for g in sorted(estimate.groups, key=lambda g: g.sort_order)
+        if g.id in lines_by_group
+    ]
+
+    # Precondition: at least one group with lines
+    if not groups_with_lines:
+        raise ValueError(
+            "Cannot generate a quote: no grouped lines found. "
+            "Assign at least one line to a group before generating a quote."
+        )
+
+    # Precondition: every group with lines must have a VAT rate selected
+    for g in groups_with_lines:
+        if g.vat_rate_id is None:
+            raise ValueError(
+                f"Cannot generate a quote: group '{g.public_description}' "
+                "has lines but no VAT rate selected. "
+                "All groups with lines must have a VAT rate."
+            )
+
+    # Get company currency (needed by create_quote)
+    company = await _get_company(session)
+    if company is None:
+        raise ValueError("Company profile not found.")
+
+    # Capture values before create_quote commits (which expires ORM instances)
+    customer_id: uuid.UUID = estimate.customer_id
+
+    # Build quote lines – zero-leak: only public fields, no cost/margin/internals
+    quote_lines: list[InvoiceLineInput] = [
+        InvoiceLineInput(
+            product_id=None,
+            name=g.public_description,
+            description=None,
+            quantity=Decimal("1"),
+            unit_id=None,
+            unit_name=None,
+            unit_price=Decimal(str(g.group_sell_excl_vat)),
+            discount=DiscountInput(),
+            vat_rate_id=g.vat_rate_id,
+        )
+        for g in groups_with_lines
+    ]
+
+    quote_write = QuoteWrite(
+        customer_id=customer_id,
+        quote_date=date.today(),
+        valid_until=None,
+        tax_mode=InvoiceTaxMode.LINE,
+        amounts_include_vat=False,
+        vat_treatment_id=None,
+        discount=DiscountInput(),
+        lines=quote_lines,
+    )
+
+    # Delegate to quote service: allocates number, runs M5 pricing, commits
+    quote_read = await _create_quote(
+        session,
+        quote_write,
+        company_id=company_id,
+        company_currency=company.base_currency,
+        creator_id=creator_id,
+    )
+
+    # Write back generated_quote_id using DML UPDATE (ORM instances expired after commit)
+    await session.execute(
+        update(Estimate)
+        .where(Estimate.id == estimate_id, Estimate.company_id == company_id)
+        .values(generated_quote_id=quote_read.id)
+    )
+    await session.commit()
+
+    return quote_read

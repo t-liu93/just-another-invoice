@@ -1,12 +1,13 @@
-"""Estimate API routes – calculate + CRUD (M6.5 steps 1 & 2).
+"""Estimate API routes – calculate + CRUD + generate-quote (M6.5 steps 1–3).
 
 Endpoints:
-  POST   /api/v1/estimates/calculate  – costing preview (no persistence)
-  GET    /api/v1/estimates            – paginated list
-  POST   /api/v1/estimates            – create estimate + groups + lines
-  GET    /api/v1/estimates/{id}       – get by id
-  PUT    /api/v1/estimates/{id}       – update (replace sub-tables, recompute)
-  DELETE /api/v1/estimates/{id}       – delete (DB cascade)
+  POST   /api/v1/estimates/calculate          – costing preview (no persistence)
+  GET    /api/v1/estimates                    – paginated list
+  POST   /api/v1/estimates                    – create estimate + groups + lines
+  GET    /api/v1/estimates/{id}               – get by id
+  PUT    /api/v1/estimates/{id}               – update (replace sub-tables, recompute)
+  DELETE /api/v1/estimates/{id}               – delete (DB cascade)
+  POST   /api/v1/estimates/{id}/generate-quote – generate a new DRAFT quote (step 3)
 """
 
 from __future__ import annotations
@@ -30,10 +31,12 @@ from jai.schemas.estimate import (
     EstimateRead,
     EstimateWrite,
 )
+from jai.schemas.quote import QuoteRead
 from jai.services.costing import compute_estimate
 from jai.services.estimate import (
     create_estimate,
     delete_estimate,
+    generate_quote_from_estimate,
     get_estimate,
     list_estimates,
     update_estimate,
@@ -234,3 +237,39 @@ async def delete_estimate_endpoint(
     deleted = await delete_estimate(session, estimate_id=estimate_id, company_id=company_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estimate not found.")
+
+
+@router.post(
+    "/estimates/{estimate_id}/generate-quote",
+    response_model=QuoteRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_quote_endpoint(
+    estimate_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteRead:
+    """Generate a new DRAFT quote from the estimate (M6.5 step 3).
+
+    One public quote line per estimate group that contains at least one line.
+    Zero-leak: no cost / margin / internal estimate data enters the quote.
+    Can be called repeatedly; each call creates a fresh DRAFT quote and
+    updates estimate.generated_quote_id to the latest one.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        result = await generate_quote_from_estimate(
+            session,
+            estimate_id=estimate_id,
+            company_id=company_id,
+            creator_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estimate not found.")
+    return result

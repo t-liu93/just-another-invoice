@@ -1131,6 +1131,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/estimates/{estimate_id}/generate-quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Quote Endpoint
+         * @description Generate a new DRAFT quote from the estimate (M6.5 step 3).
+         *
+         *     One public quote line per estimate group that contains at least one line.
+         *     Zero-leak: no cost / margin / internal estimate data enters the quote.
+         *     Can be called repeatedly; each call creates a fresh DRAFT quote and
+         *     updates estimate.generated_quote_id to the latest one.
+         */
+        post: operations["generate_quote_endpoint_api_v1_estimates__estimate_id__generate_quote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -6847,6 +6872,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_quote_endpoint_api_v1_estimates__estimate_id__generate_quote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                estimate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteRead"];
+                };
             };
             /** @description Validation Error */
             422: {
