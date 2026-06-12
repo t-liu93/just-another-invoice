@@ -28,6 +28,11 @@ dist/
 # --- Data ---
 /data/
 
+# --- Agent local state ---
+/.agents/
+/.cloud/
+/.codex/
+
 # --- Editor / OS ---
 .DS_Store
 .idea/
