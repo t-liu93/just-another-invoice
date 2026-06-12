@@ -139,6 +139,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/payments',
+    name: 'payment-list',
+    component: () => import('../views/payments/PaymentList.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/estimates/new',
     name: 'estimate-new',
     component: () => import('../views/estimates/EstimateEdit.vue'),

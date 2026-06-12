@@ -12,7 +12,9 @@ import {
 import { AddOutline, TrashOutline, DocumentTextOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
+import InvoicePaymentPanel from '../../components/InvoicePaymentPanel.vue'
 import { useInvoicesStore } from '../../stores/invoices'
+import type { InvoicePaymentsResponse } from '../../stores/payments'
 import { get } from '../../api/http'
 import type { components } from '../../api/schema'
 
@@ -445,6 +447,26 @@ onMounted(async () => {
 
 const isReadOnly = computed(() => existingInvoice.value?.status !== 'DRAFT' && isEdit.value)
 
+// Show payment panel only when editing an existing invoice that is SENT or COMPLETED
+const showPaymentPanel = computed(() =>
+  isEdit.value &&
+  existingInvoice.value !== null &&
+  (existingInvoice.value.status === 'SENT' || existingInvoice.value.status === 'COMPLETED' || existingInvoice.value.status === 'DRAFT' || existingInvoice.value.status === 'CANCELLED'),
+)
+
+function handlePaymentsChanged(aggregate: InvoicePaymentsResponse) {
+  // Update the displayed invoice status and paid_status from the backend aggregate
+  // (the aggregate is authoritative – frontend does not locally compute these)
+  if (existingInvoice.value) {
+    existingInvoice.value = {
+      ...existingInvoice.value,
+      paid_status: aggregate.paid_status,
+      status: aggregate.status,
+      due_amount: aggregate.due_amount,
+    }
+  }
+}
+
 const fmtMoney = (v: string | number) => Number(v).toFixed(2)
 </script>
 
@@ -849,6 +871,14 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
               </n-card>
 
             </n-form>
+
+            <!-- Payment panel (only for existing SENT/COMPLETED/DRAFT/CANCELLED invoices – panel guards internally) -->
+            <InvoicePaymentPanel
+              v-if="showPaymentPanel && existingInvoice"
+              :invoice-id="existingInvoice.id"
+              :invoice-status="existingInvoice.status"
+              @payments-changed="handlePaymentsChanged"
+            />
 
             <!-- Action buttons -->
             <n-space justify="end" style="margin-bottom: 24px">
