@@ -102,7 +102,14 @@ class EstimateGroupInput(BaseModel):
         default=None,
         description="VAT rate for this group. Nullable (draft state).",
     )
-    sort_order: int = Field(default=0, ge=0)
+    sort_order: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Display / generation order. Omit (null) to fall back to the "
+            "input list index, so groups keep their submitted order."
+        ),
+    )
 
     @field_validator("ref", mode="before")
     @classmethod

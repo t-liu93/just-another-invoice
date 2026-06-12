@@ -1836,9 +1836,9 @@ export interface components {
             vat_rate_id?: string | null;
             /**
              * Sort Order
-             * @default 0
+             * @description Display / generation order. Omit (null) to fall back to the input list index, so groups keep their submitted order.
              */
-            sort_order?: number;
+            sort_order?: number | null;
         };
         /**
          * EstimateGroupRead

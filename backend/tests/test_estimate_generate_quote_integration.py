@@ -17,6 +17,8 @@ Covers:
 - M5 pricing totals correct: excl * 1.21 for 21% VAT
 - EU_B2B customer: zero effective VAT (reverse-charge treatment from M5)
 - Deleting estimate does not affect the already-generated quote (SET NULL FK)
+- Deterministic group ordering: omitted sort_order keeps submitted order;
+  duplicate sort_order resolves stably and matches the estimate read order
 """
 
 from __future__ import annotations
@@ -614,6 +616,105 @@ class TestGenerateQuotePricing:
 
         assert lines[1]["name"] == "Labor & Shipping"
         assert lines[1]["unit_price"] == labor_sell
+
+
+# ---------------------------------------------------------------------------
+# Deterministic group ordering
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestGenerateQuoteOrdering:
+
+    @staticmethod
+    def _three_group_payload(seed: dict, group_overrides: list[dict]) -> dict:
+        """Three groups (Alpha/Beta/Gamma), one line each, NL standard VAT.
+
+        ``group_overrides`` supplies the per-group fields to merge on top of the
+        ``ref`` / ``public_description`` / ``vat_rate_id`` defaults (e.g. to set
+        or omit ``sort_order``).
+        """
+        rate_id = seed["rates"]["NL standard (21%)"]["id"]
+        names = ["Alpha", "Beta", "Gamma"]
+        groups = []
+        lines = []
+        for i, (name, override) in enumerate(zip(names, group_overrides, strict=True)):
+            ref = f"G{i + 1}"
+            groups.append(
+                {
+                    "ref": ref,
+                    "public_description": name,
+                    "vat_rate_id": rate_id,
+                    **override,
+                }
+            )
+            lines.append(
+                {
+                    "name": f"{name} line (INTERNAL)",
+                    "unit_cost_excl_vat": "100.000",
+                    "quantity": "1",
+                    "margin_rate": "0",
+                    "group_ref": ref,
+                }
+            )
+        return {
+            "name": "Ordering Estimate",
+            "customer_id": seed["nl_customer"]["id"],
+            "groups": groups,
+            "lines": lines,
+        }
+
+    async def test_omitted_sort_order_preserves_input_order(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Omitting sort_order falls back to the input index → submitted order."""
+        await _full_auth(db_client)
+        seed = await _setup_company(db_client)
+
+        # No "sort_order" key on any group → input-index fallback (0, 1, 2).
+        payload = self._three_group_payload(seed, [{}, {}, {}])
+        create = await db_client.post("/api/v1/estimates", json=payload)
+        assert create.status_code == 201
+        est_id = create.json()["id"]
+
+        resp = await db_client.post(f"/api/v1/estimates/{est_id}/generate-quote")
+        assert resp.status_code == 201
+        names = [line["name"] for line in resp.json()["lines"]]
+        assert names == ["Alpha", "Beta", "Gamma"]
+
+    async def test_duplicate_sort_order_is_deterministic(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Identical sort_order resolves stably and matches the estimate read order."""
+        await _full_auth(db_client)
+        seed = await _setup_company(db_client)
+
+        # All three groups share sort_order=0 → id tiebreaker decides the order.
+        payload = self._three_group_payload(
+            seed,
+            [{"sort_order": 0}, {"sort_order": 0}, {"sort_order": 0}],
+        )
+        create = await db_client.post("/api/v1/estimates", json=payload)
+        assert create.status_code == 201
+        est_id = create.json()["id"]
+
+        # The estimate read path uses the same (sort_order, id) ordering.
+        est = await db_client.get(f"/api/v1/estimates/{est_id}")
+        assert est.status_code == 200
+        est_group_names = [g["public_description"] for g in est.json()["groups"]]
+
+        gen1 = await db_client.post(f"/api/v1/estimates/{est_id}/generate-quote")
+        assert gen1.status_code == 201
+        names1 = [line["name"] for line in gen1.json()["lines"]]
+
+        # Generation order matches the deterministic estimate read order.
+        assert names1 == est_group_names
+
+        # Regenerating yields the exact same order (no drift across calls).
+        gen2 = await db_client.post(f"/api/v1/estimates/{est_id}/generate-quote")
+        assert gen2.status_code == 201
+        names2 = [line["name"] for line in gen2.json()["lines"]]
+        assert names2 == names1
 
 
 # ---------------------------------------------------------------------------

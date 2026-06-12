@@ -541,10 +541,14 @@ async def generate_quote_from_estimate(
         if line.group_id is not None:
             lines_by_group.setdefault(line.group_id, []).append(line)
 
-    # Groups sorted by sort_order, filtered to those that have at least one line
+    # Groups sorted by a deterministic composite key, filtered to those that
+    # have at least one line.  ``sort_order`` alone is not unique (clients may
+    # repeat values, and omitted values fall back to the input index); the
+    # ``id`` tiebreaker guarantees a stable order regardless of the DB query
+    # plan, so the generated quote line order never drifts.
     groups_with_lines = [
         g
-        for g in sorted(estimate.groups, key=lambda g: g.sort_order)
+        for g in sorted(estimate.groups, key=lambda g: (g.sort_order, g.id))
         if g.id in lines_by_group
     ]
 

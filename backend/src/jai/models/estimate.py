@@ -80,7 +80,9 @@ class Estimate(Base):
         "EstimateGroup",
         cascade="all, delete-orphan",
         lazy="selectin",
-        order_by="EstimateGroup.sort_order",
+        # ``id`` tiebreaker keeps the order deterministic when ``sort_order``
+        # values collide (read path mirrors generate_quote_from_estimate).
+        order_by="EstimateGroup.sort_order, EstimateGroup.id",
     )
     lines: Mapped[list[EstimateLine]] = relationship(
         "EstimateLine",
