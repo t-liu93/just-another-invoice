@@ -20,11 +20,21 @@ All monetary arithmetic uses ``Decimal`` with ``quantize_money()`` (3 dp,
 Rounding: each line_total and margin_amount are quantised individually.
 Rolling totals are sums of already-quantised values (no re-quantisation).
 This matches the M5 pricing engine convention.
+
+Overflow guard
+--------------
+All amounts that are persisted to ``NUMERIC(18,3)`` columns are checked
+against ``_MONEY_MAX`` after calculation.  Inputs can individually satisfy
+the schema bounds yet produce computed values that exceed the DB column
+(e.g. unit_cost=99999999999.999 × quantity=10001 > 999999999999999.999).
+``decimal.InvalidOperation`` from ``quantize_money()`` (Python default
+context: 28 significant digits) is also surfaced as ``ValueError`` so both
+error kinds map to HTTP 422 at the API layer.
 """
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from jai.schemas.estimate import (
     EstimateCalculationRead,
@@ -33,6 +43,18 @@ from jai.schemas.estimate import (
     EstimateLineCalculationRead,
 )
 from jai.services.money import quantize_money
+
+# Upper bound for NUMERIC(18,3): 15 integer digits + 3 decimal places.
+_MONEY_MAX = Decimal("999999999999999.999")
+
+
+def _check_money(v: Decimal, label: str) -> None:
+    """Raise ValueError if *v* exceeds the DB NUMERIC(18,3) upper bound."""
+    if v > _MONEY_MAX:
+        raise ValueError(
+            f"Computed {label} ({v}) exceeds the maximum storable amount "
+            f"({_MONEY_MAX}).  Reduce quantity, unit cost, or margin rate."
+        )
 
 
 def compute_estimate(
@@ -52,7 +74,26 @@ def compute_estimate(
     Returns
     -------
     ``EstimateCalculationRead`` with all amounts quantised.
+
+    Raises
+    ------
+    ValueError
+        If any computed amount exceeds ``NUMERIC(18,3)`` or if arithmetic
+        precision is exhausted (``decimal.InvalidOperation``).
     """
+    try:
+        return _compute_estimate_inner(request, standard_vat_percent)
+    except InvalidOperation as exc:
+        raise ValueError(
+            f"Computed amount exceeds arithmetic precision: {exc}.  "
+            "Reduce quantity, unit cost, or margin rate."
+        ) from exc
+
+
+def _compute_estimate_inner(
+    request: EstimateCalculationRequest,
+    standard_vat_percent: Decimal | None,
+) -> EstimateCalculationRead:
     # Track group sell prices: ref -> accumulated sell
     group_sells: dict[str, Decimal] = {
         g.ref: Decimal("0.000") for g in request.groups
@@ -65,8 +106,13 @@ def compute_estimate(
 
     for i, line in enumerate(request.lines):
         line_total = quantize_money(line.unit_cost_excl_vat * line.quantity)
+        _check_money(line_total, "line_total")
+
         margin_amount = quantize_money(line_total * line.margin_rate)
+        _check_money(margin_amount, "margin_amount")
+
         line_sell = line_total + margin_amount
+        _check_money(line_sell, "line_sell_excl_vat")
 
         total_margin += margin_amount
         total_excl_vat += line_sell
@@ -74,6 +120,7 @@ def compute_estimate(
         # Add to group if group_ref matches a known group
         if line.group_ref is not None and line.group_ref in group_sells:
             group_sells[line.group_ref] += line_sell
+            _check_money(group_sells[line.group_ref], "group_sell_excl_vat")
 
         line_results.append(
             EstimateLineCalculationRead(
@@ -85,6 +132,9 @@ def compute_estimate(
             )
         )
 
+    _check_money(total_margin, "total_margin")
+    _check_money(total_excl_vat, "total_excl_vat")
+
     # Per-group calculation (preserve input order)
     group_results = [
         EstimateGroupCalculationRead(
@@ -94,7 +144,7 @@ def compute_estimate(
         for g in request.groups
     ]
 
-    # Indicative VAT (informational, not authoritative)
+    # Indicative VAT (informational, not authoritative; not persisted)
     total_incl_vat_indicative: Decimal | None = None
     indicative_vat_rate_percent: Decimal | None = None
     if standard_vat_percent is not None:

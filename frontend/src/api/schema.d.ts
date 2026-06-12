@@ -1079,6 +1079,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/estimates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Estimates Endpoint
+         * @description Return a paginated list of estimates for the current company.
+         */
+        get: operations["list_estimates_endpoint_api_v1_estimates_get"];
+        put?: never;
+        /**
+         * Create Estimate Endpoint
+         * @description Create a new estimate with groups and lines.
+         */
+        post: operations["create_estimate_endpoint_api_v1_estimates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/estimates/{estimate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Estimate Endpoint
+         * @description Return an estimate by ID (owner-only).
+         */
+        get: operations["get_estimate_endpoint_api_v1_estimates__estimate_id__get"];
+        /**
+         * Update Estimate Endpoint
+         * @description Update an estimate: replace lines/groups, recompute amounts.
+         */
+        put: operations["update_estimate_endpoint_api_v1_estimates__estimate_id__put"];
+        post?: never;
+        /**
+         * Delete Estimate Endpoint
+         * @description Delete an estimate and all its groups/lines.
+         */
+        delete: operations["delete_estimate_endpoint_api_v1_estimates__estimate_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -1764,6 +1816,29 @@ export interface components {
             sort_order?: number;
         };
         /**
+         * EstimateGroupRead
+         * @description Group read (includes customer-facing public_description + sell price).
+         */
+        EstimateGroupRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Public Description */
+            public_description: string;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Vat Rate Label */
+            vat_rate_label?: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent?: string | null;
+            /** Group Sell Excl Vat */
+            group_sell_excl_vat: string;
+        };
+        /**
          * EstimateLineCalculationRead
          * @description Per-line calculation result (internal, owner-only).
          */
@@ -1797,17 +1872,17 @@ export interface components {
             description?: string | null;
             /**
              * Unit Cost Excl Vat
-             * @description Cost per unit (excl. VAT). Must be >= 0.
+             * @description Cost per unit (excl. VAT). Must be in [0, 99999999999.999].
              */
             unit_cost_excl_vat: number | string;
             /**
              * Quantity
-             * @description Quantity. Must be > 0.
+             * @description Quantity. Must be in (0, 999999999999999.999].
              */
             quantity: number | string;
             /**
              * Margin Rate
-             * @description Markup-on-cost rate. Default 0 (labor/shipping/overhead).
+             * @description Markup-on-cost rate. Must be in [0, 99.9999].
              * @default 0
              */
             margin_rate?: number | string;
@@ -1820,6 +1895,151 @@ export interface components {
              * @description Client-side key linking to a group ref.
              */
             group_ref?: string | null;
+        };
+        /**
+         * EstimateLineRead
+         * @description Full internal line read (owner-only – includes cost/margin data).
+         */
+        EstimateLineRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Group Id */
+            group_id?: string | null;
+            /** Sort Order */
+            sort_order: number;
+            /** Product Id */
+            product_id?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /** Unit Cost Excl Vat */
+            unit_cost_excl_vat: string;
+            /** Quantity */
+            quantity: string;
+            /** Margin Rate */
+            margin_rate: string;
+            /** Line Total */
+            line_total: string;
+            /** Margin Amount */
+            margin_amount: string;
+            /** Line Sell Excl Vat */
+            line_sell_excl_vat: string;
+        };
+        /**
+         * EstimateListItem
+         * @description Compact estimate list row.
+         */
+        EstimateListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Customer Id */
+            customer_id?: string | null;
+            /** Customer Name */
+            customer_name?: string | null;
+            /** Total Excl Vat */
+            total_excl_vat: string;
+            /** Total Margin */
+            total_margin: string;
+            /** Generated Quote Id */
+            generated_quote_id?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * EstimateListResponse
+         * @description Paginated list of estimates.
+         */
+        EstimateListResponse: {
+            /** Items */
+            items: components["schemas"]["EstimateListItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * EstimateRead
+         * @description Full estimate read including all lines and groups.
+         */
+        EstimateRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Customer Id */
+            customer_id?: string | null;
+            /** Customer Name */
+            customer_name?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Total Margin */
+            total_margin: string;
+            /** Total Excl Vat */
+            total_excl_vat: string;
+            /** Total Incl Vat Indicative */
+            total_incl_vat_indicative?: string | null;
+            /** Indicative Vat Rate Percent */
+            indicative_vat_rate_percent?: string | null;
+            /** Generated Quote Id */
+            generated_quote_id?: string | null;
+            /** Generated Quote Number */
+            generated_quote_number?: string | null;
+            /** Lines */
+            lines: components["schemas"]["EstimateLineRead"][];
+            /** Groups */
+            groups: components["schemas"]["EstimateGroupRead"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * EstimateWrite
+         * @description Request body for ``POST`` / ``PUT /api/v1/estimates``.
+         */
+        EstimateWrite: {
+            /**
+             * Groups
+             * @default []
+             */
+            groups?: components["schemas"]["EstimateGroupInput"][];
+            /**
+             * Lines
+             * @default []
+             */
+            lines?: components["schemas"]["EstimateLineInput"][];
+            /**
+             * Name
+             * @description Internal estimate name.
+             */
+            name: string;
+            /** Customer Id */
+            customer_id?: string | null;
+            /** Notes */
+            notes?: string | null;
         };
         /**
          * ExpenseCategoryListResponse
@@ -6463,6 +6683,170 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EstimateCalculationRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_estimates_endpoint_api_v1_estimates_get: {
+        parameters: {
+            query?: {
+                /** @description Search by estimate name or customer name */
+                q?: string | null;
+                customer_id?: string | null;
+                limit?: number;
+                offset?: number;
+                sort_by?: "name" | "created_at" | "updated_at";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_estimate_endpoint_api_v1_estimates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_estimate_endpoint_api_v1_estimates__estimate_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                estimate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_estimate_endpoint_api_v1_estimates__estimate_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                estimate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_estimate_endpoint_api_v1_estimates__estimate_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                estimate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

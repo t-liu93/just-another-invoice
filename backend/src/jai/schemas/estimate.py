@@ -1,16 +1,29 @@
-"""Pydantic schemas for estimate / costing (M6.5 step 1).
+"""Pydantic schemas for estimate / costing (M6.5).
 
 Step 1 schemas (calculation preview):
   EstimateLineInput / EstimateGroupInput / EstimateCalculationRequest
   EstimateLineCalculationRead / EstimateGroupCalculationRead / EstimateCalculationRead
+
+Step 2 schemas (CRUD / persistence):
+  EstimateWrite / EstimateLineRead / EstimateGroupRead
+  EstimateRead / EstimateListItem / EstimateListResponse
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+# DB column upper bounds (match NUMERIC precision in models/estimate.py)
+# NUMERIC(14,3): 11 integer digits → max 99999999999.999
+_NUMERIC_14_3_MAX = Decimal("99999999999.999")
+# NUMERIC(6,4): 2 integer digits → max 99.9999
+_NUMERIC_6_4_MAX = Decimal("99.9999")
+# NUMERIC(18,3): 15 integer digits → max 999999999999999.999
+_NUMERIC_18_3_MAX = Decimal("999999999999999.999")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,16 +53,19 @@ class EstimateLineInput(BaseModel):
     description: str | None = None
     unit_cost_excl_vat: Decimal = Field(
         ge=0,
-        description="Cost per unit (excl. VAT). Must be >= 0.",
+        le=_NUMERIC_14_3_MAX,
+        description="Cost per unit (excl. VAT). Must be in [0, 99999999999.999].",
     )
     quantity: Decimal = Field(
         gt=0,
-        description="Quantity. Must be > 0.",
+        le=_NUMERIC_18_3_MAX,
+        description="Quantity. Must be in (0, 999999999999999.999].",
     )
     margin_rate: Decimal = Field(
         default=Decimal("0"),
         ge=0,
-        description="Markup-on-cost rate. Default 0 (labor/shipping/overhead).",
+        le=_NUMERIC_6_4_MAX,
+        description="Markup-on-cost rate. Must be in [0, 99.9999].",
     )
     unit_id: uuid.UUID | None = None
     unit_name: str | None = None
@@ -157,3 +173,92 @@ class EstimateCalculationRead(BaseModel):
     total_excl_vat: Decimal
     total_incl_vat_indicative: Decimal | None = None
     indicative_vat_rate_percent: Decimal | None = None
+
+
+# ---------------------------------------------------------------------------
+# CRUD write / read schemas (step 2)
+# ---------------------------------------------------------------------------
+
+
+class EstimateWrite(EstimateCalculationRequest):
+    """Request body for ``POST`` / ``PUT /api/v1/estimates``."""
+
+    name: str = Field(min_length=1, description="Internal estimate name.")
+    customer_id: uuid.UUID | None = None
+    notes: str | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, v: object) -> str:
+        return _strip_str(v)
+
+
+class EstimateLineRead(BaseModel):
+    """Full internal line read (owner-only – includes cost/margin data)."""
+
+    id: uuid.UUID
+    group_id: uuid.UUID | None = None
+    sort_order: int
+    product_id: uuid.UUID | None = None
+    name: str
+    description: str | None = None
+    unit_id: uuid.UUID | None = None
+    unit_name: str | None = None
+    unit_cost_excl_vat: Decimal
+    quantity: Decimal
+    margin_rate: Decimal
+    line_total: Decimal
+    margin_amount: Decimal
+    line_sell_excl_vat: Decimal
+
+
+class EstimateGroupRead(BaseModel):
+    """Group read (includes customer-facing public_description + sell price)."""
+
+    id: uuid.UUID
+    sort_order: int
+    public_description: str
+    vat_rate_id: uuid.UUID | None = None
+    vat_rate_label: str | None = None
+    vat_rate_percent: Decimal | None = None
+    group_sell_excl_vat: Decimal
+
+
+class EstimateRead(BaseModel):
+    """Full estimate read including all lines and groups."""
+
+    id: uuid.UUID
+    name: str
+    customer_id: uuid.UUID | None = None
+    customer_name: str | None = None
+    notes: str | None = None
+    total_margin: Decimal
+    total_excl_vat: Decimal
+    total_incl_vat_indicative: Decimal | None = None
+    indicative_vat_rate_percent: Decimal | None = None
+    generated_quote_id: uuid.UUID | None = None
+    generated_quote_number: str | None = None
+    lines: list[EstimateLineRead]
+    groups: list[EstimateGroupRead]
+    created_at: datetime
+    updated_at: datetime
+
+
+class EstimateListItem(BaseModel):
+    """Compact estimate list row."""
+
+    id: uuid.UUID
+    name: str
+    customer_id: uuid.UUID | None = None
+    customer_name: str | None = None
+    total_excl_vat: Decimal
+    total_margin: Decimal
+    generated_quote_id: uuid.UUID | None = None
+    updated_at: datetime
+
+
+class EstimateListResponse(BaseModel):
+    """Paginated list of estimates."""
+
+    items: list[EstimateListItem]
+    total: int
