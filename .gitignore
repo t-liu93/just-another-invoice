@@ -30,7 +30,7 @@ dist/
 
 # --- Agent local state ---
 /.agents/
-/.cloud/
+/.claude/
 /.codex/
 
 # --- Editor / OS ---
