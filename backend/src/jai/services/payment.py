@@ -9,6 +9,7 @@ Public API
 - ``get_payment``              – fetch a single payment by id + company_id (404 guard).
 - ``update_payment``           – edit a payment (amount/date/method/reference/note), recompute.
 - ``delete_payment``           – delete a payment and recompute the invoice state.
+- ``list_payments``            – global payments overview with filters/pagination/sort (step 3).
 
 Red-line compliance
 -------------------
@@ -22,17 +23,25 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.models._enums import InvoicePaidStatus, InvoiceStatus
+from jai.models.customer import Customer
 from jai.models.dictionary import PaymentMethod
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment
-from jai.schemas.payment import InvoicePaymentsResponse, PaymentInput, PaymentRead
+from jai.schemas.payment import (
+    InvoicePaymentsResponse,
+    PaymentInput,
+    PaymentListItem,
+    PaymentListResponse,
+    PaymentRead,
+)
 from jai.services.money import quantize_money
 
 # ---------------------------------------------------------------------------
@@ -497,3 +506,133 @@ async def delete_payment(
     remaining_payments = await _load_payments_for_invoice(session, inv.id)
 
     return _build_response(inv, remaining_payments, state)
+
+
+async def list_payments(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    q: str | None = None,
+    customer_id: uuid.UUID | None = None,
+    payment_method_id: uuid.UUID | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    sort_by: str = "payment_date",
+) -> PaymentListResponse:
+    """Return a paginated global payments list for the company.
+
+    Mirrors the filter/pagination/sort contract of ``services.invoice.list_invoices``.
+
+    Filters:
+    - q: ilike search against invoice_number and customer name (JOIN).
+    - customer_id: exact match on the parent invoice's customer.
+    - payment_method_id: exact match on payment.payment_method_id.
+    - date_from / date_to: inclusive range on payment_date (same boundary
+      convention as list_invoices: >= / <=).
+
+    Pagination:
+    - limit / offset with total count unaffected by pagination (full filtered count).
+
+    Sort:
+    - sort_by in {"payment_date", "created_at"}; default "payment_date".
+    - Primary sort DESC (newest first, mirrors invoice list); stable secondary
+      key: created_at DESC for "payment_date" sort, payment_date DESC for
+      "created_at" sort.
+
+    All results are scoped to company_id (red-line 2).
+    """
+    # Base query: JOIN invoice to get invoice_number + customer_id,
+    # then JOIN customer to get customer_name.
+    base = (
+        select(Payment)
+        .join(Invoice, Payment.invoice_id == Invoice.id)
+        .join(Customer, Invoice.customer_id == Customer.id)
+        .where(Payment.company_id == company_id)
+    )
+
+    # -- Filters ----------------------------------------------------------------
+    if q:
+        like = f"%{q}%"
+        base = base.where(
+            or_(
+                Invoice.invoice_number.ilike(like),
+                Customer.name.ilike(like),
+            )
+        )
+    if customer_id is not None:
+        base = base.where(Invoice.customer_id == customer_id)
+    if payment_method_id is not None:
+        base = base.where(Payment.payment_method_id == payment_method_id)
+    if date_from is not None:
+        base = base.where(Payment.payment_date >= date_from)
+    if date_to is not None:
+        base = base.where(Payment.payment_date <= date_to)
+
+    # -- Count (total, unaffected by pagination) --------------------------------
+    count_stmt = select(func.count()).select_from(base.subquery())
+    count_result = await session.execute(count_stmt)
+    total = count_result.scalar_one()
+
+    # -- Sort -------------------------------------------------------------------
+    # Mirror list_invoices: primary sort DESC, stable secondary key also DESC.
+    # payment_date and created_at have different column types (Date vs DateTime);
+    # use `object` annotations to satisfy mypy's strict cross-column assignment.
+    sort_primary: object
+    sort_secondary: object
+    if sort_by == "created_at":
+        sort_primary = Payment.created_at.desc()
+        sort_secondary = Payment.payment_date.desc()
+    else:
+        # Default: payment_date (newest first); stable secondary: created_at
+        sort_primary = Payment.payment_date.desc()
+        sort_secondary = Payment.created_at.desc()
+
+    data_stmt = base.order_by(sort_primary, sort_secondary).limit(limit).offset(offset)
+    data_result = await session.execute(data_stmt)
+    payments = list(data_result.scalars().all())
+
+    if not payments:
+        return PaymentListResponse(items=[], total=total)
+
+    # -- Batch-load invoice numbers + customer info ----------------------------
+    # Collect unique invoice_ids; load (invoice_number, customer_id) in one query.
+    invoice_ids = list({p.invoice_id for p in payments})
+    inv_stmt = select(
+        Invoice.id,
+        Invoice.invoice_number,
+        Invoice.customer_id,
+    ).where(Invoice.id.in_(invoice_ids))
+    inv_result = await session.execute(inv_stmt)
+    # Map: invoice_id → (invoice_number, customer_id)
+    inv_map: dict[uuid.UUID, tuple[str, uuid.UUID]] = {
+        row.id: (row.invoice_number, row.customer_id) for row in inv_result.all()
+    }
+
+    # Collect unique customer_ids; load names in one query.
+    customer_ids = list({cid for _, cid in inv_map.values()})
+    cust_stmt = select(Customer.id, Customer.name).where(Customer.id.in_(customer_ids))
+    cust_result = await session.execute(cust_stmt)
+    cust_map: dict[uuid.UUID, str] = {row.id: row.name for row in cust_result.all()}
+
+    # -- Assemble list items ---------------------------------------------------
+    items: list[PaymentListItem] = []
+    for p in payments:
+        inv_number, cust_id = inv_map.get(p.invoice_id, ("", uuid.UUID(int=0)))
+        cust_name = cust_map.get(cust_id, "")
+        items.append(
+            PaymentListItem(
+                id=p.id,
+                invoice_id=p.invoice_id,
+                invoice_number=inv_number,
+                customer_id=cust_id,
+                customer_name=cust_name,
+                payment_date=p.payment_date,
+                amount=Decimal(str(p.amount)),
+                payment_method_name=p.payment_method_name,
+                created_at=p.created_at,
+            )
+        )
+
+    return PaymentListResponse(items=items, total=total)

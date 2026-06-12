@@ -1180,6 +1180,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Payments Endpoint
+         * @description Return a paginated global payments list filtered by the given parameters.
+         */
+        get: operations["list_payments_endpoint_api_v1_payments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments/{payment_id}": {
         parameters: {
             query?: never;
@@ -2970,6 +2990,58 @@ export interface components {
             reference?: string | null;
             /** Note */
             note?: string | null;
+        };
+        /**
+         * PaymentListItem
+         * @description Minimal overview row for the global payments list (GET /api/v1/payments).
+         *
+         *     Only exposes summary fields – no internal base_*\/reference/note fields.
+         *     Minimal exposure principle: give the overview page what it needs, nothing more.
+         */
+        PaymentListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Invoice Id
+             * Format: uuid
+             */
+            invoice_id: string;
+            /** Invoice Number */
+            invoice_number: string;
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Customer Name */
+            customer_name: string;
+            /**
+             * Payment Date
+             * Format: date
+             */
+            payment_date: string;
+            /** Amount */
+            amount: string;
+            /** Payment Method Name */
+            payment_method_name?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * PaymentListResponse
+         * @description Paginated global payments list.
+         */
+        PaymentListResponse: {
+            /** Items */
+            items: components["schemas"]["PaymentListItem"][];
+            /** Total */
+            total: number;
         };
         /**
          * PaymentMethodListResponse
@@ -7131,6 +7203,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoicePaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_payments_endpoint_api_v1_payments_get: {
+        parameters: {
+            query?: {
+                /** @description Search invoice number or customer name. */
+                q?: string | null;
+                customer_id?: string | null;
+                payment_method_id?: string | null;
+                /** @description Inclusive lower bound on payment_date. */
+                date_from?: string | null;
+                /** @description Inclusive upper bound on payment_date. */
+                date_to?: string | null;
+                limit?: number;
+                offset?: number;
+                sort_by?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentListResponse"];
                 };
             };
             /** @description Validation Error */

@@ -1,8 +1,10 @@
-"""Pydantic schemas for payments (M7 step 1).
+"""Pydantic schemas for payments (M7 step 1 + step 3).
 
 PaymentInput        – request body for recording a payment (raw input only).
 PaymentRead         – full payment representation returned by read endpoints.
 InvoicePaymentsResponse – aggregate: invoice summary + list of its payments.
+PaymentListItem     – minimal overview row for the global payments list (step 3).
+PaymentListResponse – paginated global payments list (step 3).
 
 Schema layer never computes amounts (red-line 1).  All monetary fields are
 ``Decimal``.  Text fields are plain ``str`` (red-line 10).
@@ -84,3 +86,33 @@ class InvoicePaymentsResponse(BaseModel):
     paid_status: InvoicePaidStatus
     status: InvoiceStatus
     items: list[PaymentRead] = []
+
+
+# ---------------------------------------------------------------------------
+# Global payments overview (step 3)
+# ---------------------------------------------------------------------------
+
+
+class PaymentListItem(BaseModel):
+    """Minimal overview row for the global payments list (GET /api/v1/payments).
+
+    Only exposes summary fields – no internal base_*/reference/note fields.
+    Minimal exposure principle: give the overview page what it needs, nothing more.
+    """
+
+    id: uuid.UUID
+    invoice_id: uuid.UUID
+    invoice_number: str
+    customer_id: uuid.UUID
+    customer_name: str
+    payment_date: date
+    amount: Decimal
+    payment_method_name: str | None = None
+    created_at: datetime
+
+
+class PaymentListResponse(BaseModel):
+    """Paginated global payments list."""
+
+    items: list[PaymentListItem]
+    total: int
