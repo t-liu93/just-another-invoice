@@ -1,4 +1,4 @@
-"""Payment service – record, list, and read payments (M7 step 1).
+"""Payment service – record, list, read, update, and delete payments (M7).
 
 Public API
 ----------
@@ -7,6 +7,8 @@ Public API
 - ``record_payment``           – validate guards, persist payment, recompute + write-back.
 - ``list_invoice_payments``    – return InvoicePaymentsResponse for all payments on an invoice.
 - ``get_payment``              – fetch a single payment by id + company_id (404 guard).
+- ``update_payment``           – edit a payment (amount/date/method/reference/note), recompute.
+- ``delete_payment``           – delete a payment and recompute the invoice state.
 
 Red-line compliance
 -------------------
@@ -107,11 +109,17 @@ def recompute_payment_state(
     ):
         new_status = InvoiceStatus.SENT
 
+    # Normalise scale to 3 dp on all four totals.  Each per-payment amount is
+    # already quantised at input; their sum inherits that scale (≥ 1 payment).
+    # The only case that produces scale=0 is an empty list (Decimal("0")); this
+    # quantize call is a no-op for non-zero sums and restores "0.000" for the
+    # zero case – consistent with the NUMERIC(18,3) columns in invoice.py (D9:
+    # sum-level normalisation, never re-rounding individual payments).
     return PaymentState(
-        paid_total=paid_total,
-        base_paid_total=base_paid_total,
-        due_amount=due_amount,
-        base_due_amount=base_due_amount,
+        paid_total=quantize_money(paid_total),
+        base_paid_total=quantize_money(base_paid_total),
+        due_amount=quantize_money(due_amount),
+        base_due_amount=quantize_money(base_due_amount),
         paid_status=paid_status,
         new_status=new_status,
     )
@@ -343,3 +351,149 @@ async def get_payment(
     invoice_number = inv_result.scalar_one()
 
     return _payment_to_read(p, invoice_number)
+
+
+async def _load_payment(
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> Payment:
+    """Load a payment scoped to the company; raises LookupError (→ 404) if absent."""
+    stmt = select(Payment).where(
+        Payment.id == payment_id,
+        Payment.company_id == company_id,
+    )
+    result = await session.execute(stmt)
+    p = result.scalar_one_or_none()
+    if p is None:
+        raise LookupError("Payment not found.")
+    return p
+
+
+async def update_payment(
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    company_id: uuid.UUID,
+    body: PaymentInput,
+) -> InvoicePaymentsResponse:
+    """Edit a payment and recompute invoice payment state.
+
+    Guards:
+    - Cross-company payment → 404 (LookupError).
+    - D6 (超额守卫): paid_total after edit must not exceed total_incl_vat; 422.
+    - D9: amount is quantised with quantize_money() before write (same as record_payment).
+    - D8: if payment_method_id changes, snapshot payment_method_name again.
+    - Lifecycle rollback (D3): if edit reduces paid_total so invoice is no longer
+      fully paid, COMPLETED is rolled back to SENT.  DRAFT/CANCELLED are never touched.
+    """
+    p = await _load_payment(session, payment_id, company_id)
+    inv = await _load_invoice(session, p.invoice_id, company_id)
+
+    # Snapshot payment method name if method changed or provided (D8)
+    pm_name: str | None = p.payment_method_name  # default: keep existing snapshot
+    if body.payment_method_id is not None:
+        pm_stmt = select(PaymentMethod).where(
+            PaymentMethod.id == body.payment_method_id,
+            PaymentMethod.company_id == company_id,
+        )
+        pm_result = await session.execute(pm_stmt)
+        pm = pm_result.scalar_one_or_none()
+        if pm is None:
+            raise ValueError("Payment method not found or does not belong to this company.")
+        pm_name = pm.name
+    elif body.payment_method_id is None:
+        # Explicit null clears the method
+        pm_name = None
+
+    # D9: quantise input amount – same contract as record_payment
+    amt = quantize_money(body.amount)
+
+    # Apply field edits
+    p.payment_date = body.payment_date
+    p.amount = amt
+    p.base_amount = amt  # D2: exchange_rate = 1
+    p.payment_method_id = body.payment_method_id
+    p.payment_method_name = pm_name
+    p.reference = body.reference
+    p.note = body.note
+
+    await session.flush()  # write updated values before loading all payments
+
+    # Load all payments (including the edited one) to recompute
+    all_payments = await _load_payments_for_invoice(session, inv.id)
+
+    total_incl_vat = Decimal(str(inv.total_incl_vat))
+    base_total_incl_vat = Decimal(str(inv.base_total_incl_vat))
+
+    state = recompute_payment_state(
+        total_incl_vat,
+        base_total_incl_vat,
+        all_payments,  # type: ignore[arg-type]
+        InvoiceStatus(inv.status),
+    )
+
+    # D6: overpayment guard – after edit, paid_total must not exceed invoice total
+    if state.paid_total > total_incl_vat:
+        raise ValueError(
+            "欠款不足以容纳本次收款（修改后累计收款将超过发票含税合计）。"
+        )
+
+    # Write back computed fields to invoice
+    inv.due_amount = state.due_amount
+    inv.base_due_amount = state.base_due_amount
+    inv.paid_status = state.paid_status
+    inv.status = state.new_status
+
+    await session.commit()
+    await session.refresh(inv)
+    all_payments = await _load_payments_for_invoice(session, inv.id)
+
+    return _build_response(inv, all_payments, state)
+
+
+async def delete_payment(
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> InvoicePaymentsResponse:
+    """Delete a payment and recompute invoice payment state.
+
+    Returns the updated InvoicePaymentsResponse (200 with aggregate body,
+    not 204 – see M7 contract note: front-end gets the new due/paid_status/status
+    in a single response).
+
+    Guards:
+    - Cross-company payment → 404 (LookupError).
+    - Lifecycle rollback (D3): deletion may reduce paid_total below full-payment
+      threshold; COMPLETED is rolled back to SENT as needed.
+    """
+    p = await _load_payment(session, payment_id, company_id)
+    inv = await _load_invoice(session, p.invoice_id, company_id)
+
+    await session.delete(p)
+    await session.flush()  # remove the payment before recomputing
+
+    # Load remaining payments (deleted one is gone after flush)
+    remaining_payments = await _load_payments_for_invoice(session, inv.id)
+
+    total_incl_vat = Decimal(str(inv.total_incl_vat))
+    base_total_incl_vat = Decimal(str(inv.base_total_incl_vat))
+
+    state = recompute_payment_state(
+        total_incl_vat,
+        base_total_incl_vat,
+        remaining_payments,  # type: ignore[arg-type]
+        InvoiceStatus(inv.status),
+    )
+
+    # Write back computed fields to invoice
+    inv.due_amount = state.due_amount
+    inv.base_due_amount = state.base_due_amount
+    inv.paid_status = state.paid_status
+    inv.status = state.new_status
+
+    await session.commit()
+    await session.refresh(inv)
+    remaining_payments = await _load_payments_for_invoice(session, inv.id)
+
+    return _build_response(inv, remaining_payments, state)

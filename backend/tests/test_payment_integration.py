@@ -1,8 +1,8 @@
-"""Integration tests for M7 step 1 – Payment record / list / read.
+"""Integration tests for M7 step 1 & 2 – Payment record / list / read / edit / delete.
 
 Requires a running PostgreSQL instance (``pytest -m integration``).
 
-Coverage:
+Step 1 coverage:
 - Record payment → due_amount / paid_status / status written back correctly
 - Partial payment: PARTIALLY_PAID, status stays SENT
 - Full payment: PAID, status SENT → COMPLETED
@@ -18,6 +18,19 @@ Coverage:
 - Amount quantisation (D9 / F1): >3-dp input is rounded before DB write; POST
   response, GET-single, and LIST all return the quantised value consistently.
 - Quantise-to-full: 120.9996 rounds to 121.000 → invoice becomes PAID/COMPLETED.
+
+Step 2 coverage:
+- First partial + final payment → PAID / COMPLETED
+- Edit final payment smaller → PARTIALLY_PAID + COMPLETED→SENT (lifecycle rollback)
+- Edit that would cause overpayment → 422 (D6 guard in update path)
+- Cross-company edit (random UUID) → 404
+- Edit with >3-dp amount → quantisation consistency across response / GET / LIST
+- Edit to 120.9996 → quantises to 121.000 → PAID / COMPLETED (F1 guard in update path)
+- Delete one payment → due_amount increases + status rolls back to SENT
+- Delete all payments → UNPAID + status SENT
+- Delete final payment from COMPLETED invoice → UNPAID + status SENT
+- Cross-company delete (random UUID) → 404
+- Unauthenticated delete → 401
 """
 
 from __future__ import annotations
@@ -564,3 +577,330 @@ class TestAmountQuantisation:
             "Invoice must be COMPLETED after quantised amount covers the total "
             "(F1 status-stuck regression guard)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Step 2: Edit / Delete payments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestUpdatePayment:
+    """PUT /api/v1/payments/{id} – edit a payment and recompute invoice state."""
+
+    async def test_first_and_final_payment_reaches_paid_completed(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Record first partial payment then a final payment → PAID / COMPLETED."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        await _send_invoice(db_client, inv["id"])
+
+        # First (partial) payment
+        r1 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-01", "amount": "60.000"},
+        )
+        assert r1.status_code == 201
+        assert r1.json()["paid_status"] == "PARTIALLY_PAID"
+
+        # Final payment brings total to exactly 121
+        r2 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-12", "amount": "61.000"},
+        )
+        assert r2.status_code == 201
+        data = r2.json()
+        assert data["paid_status"] == "PAID"
+        assert data["status"] == "COMPLETED"
+        assert data["due_amount"] == "0.000"
+        assert data["paid_total"] == "121.000"
+
+    async def test_edit_final_payment_smaller_triggers_lifecycle_rollback(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Edit the final payment to a smaller amount → PARTIALLY_PAID + COMPLETED→SENT."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        await _send_invoice(db_client, inv["id"])
+
+        # Record two payments to reach PAID / COMPLETED
+        r1 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-01", "amount": "60.000"},
+        )
+        assert r1.status_code == 201
+        r2 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-12", "amount": "61.000"},
+        )
+        assert r2.status_code == 201
+        assert r2.json()["status"] == "COMPLETED"
+        final_payment_id = r2.json()["items"][-1]["id"]
+
+        # Edit the final payment to a smaller amount
+        put_resp = await db_client.put(
+            f"/api/v1/payments/{final_payment_id}",
+            json={"payment_date": "2026-06-12", "amount": "50.000"},
+        )
+        assert put_resp.status_code == 200, put_resp.text
+        data = put_resp.json()
+
+        assert data["paid_status"] == "PARTIALLY_PAID"
+        assert data["status"] == "SENT"  # COMPLETED rolled back to SENT (D3)
+        assert data["due_amount"] == "11.000"  # 121 - 60 - 50 = 11
+        assert data["paid_total"] == "110.000"
+        assert len(data["items"]) == 2
+
+    async def test_edit_overpayment_returns_422(self, db_client: AsyncClient) -> None:
+        """Edit that would make paid_total exceed total_incl_vat → 422 (D6)."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        await _send_invoice(db_client, inv["id"])
+
+        # Record two payments
+        r1 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-01", "amount": "60.000"},
+        )
+        assert r1.status_code == 201
+        r2 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-12", "amount": "40.000"},
+        )
+        assert r2.status_code == 201
+        payment2_id = r2.json()["items"][-1]["id"]
+
+        # Try to edit second payment to 100, making total 160 > 121
+        put_resp = await db_client.put(
+            f"/api/v1/payments/{payment2_id}",
+            json={"payment_date": "2026-06-12", "amount": "100.000"},
+        )
+        assert put_resp.status_code == 422
+
+    async def test_edit_cross_company_payment_404(self, db_client: AsyncClient) -> None:
+        """PUT /payments/{id} with a random UUID (cross-company) → 404.
+
+        company_id scoping in _load_payment means a payment from another company
+        or a random UUID is indistinguishable from not-found.
+        """
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        put_resp = await db_client.put(
+            f"/api/v1/payments/{uuid.uuid4()}",
+            json={"payment_date": "2026-06-12", "amount": "50.000"},
+        )
+        assert put_resp.status_code == 404
+
+    async def test_edit_quantisation_consistency(self, db_client: AsyncClient) -> None:
+        """Edit with >3-dp amount → response / re-read / list all show the quantised value.
+
+        33.3336 → quantised to 33.334 (same F1 guard as in record_payment).
+        """
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        await _send_invoice(db_client, inv["id"])
+
+        r1 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-01", "amount": "50.000"},
+        )
+        assert r1.status_code == 201
+        payment_id = r1.json()["items"][0]["id"]
+
+        # Edit with >3-dp amount
+        put_resp = await db_client.put(
+            f"/api/v1/payments/{payment_id}",
+            json={"payment_date": "2026-06-01", "amount": "33.3336"},
+        )
+        assert put_resp.status_code == 200, put_resp.text
+        quantised = "33.334"
+
+        # PUT response reflects quantised amount
+        assert put_resp.json()["items"][0]["amount"] == quantised
+        assert put_resp.json()["paid_total"] == quantised
+
+        # GET /payments/{id} returns the same quantised amount
+        get_resp = await db_client.get(f"/api/v1/payments/{payment_id}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["amount"] == quantised
+
+        # GET list also shows quantised
+        list_resp = await db_client.get(f"/api/v1/invoices/{inv['id']}/payments")
+        assert list_resp.status_code == 200
+        assert list_resp.json()["items"][0]["amount"] == quantised
+
+    async def test_edit_quantise_to_full_marks_invoice_completed(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Edit to 120.9996 on 121.000 invoice → quantised 121.000 → PAID/COMPLETED."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        await _send_invoice(db_client, inv["id"])
+
+        r1 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-01", "amount": "50.000"},
+        )
+        assert r1.status_code == 201
+        payment_id = r1.json()["items"][0]["id"]
+
+        # Edit to an amount that quantises exactly to the remaining due
+        put_resp = await db_client.put(
+            f"/api/v1/payments/{payment_id}",
+            json={"payment_date": "2026-06-01", "amount": "120.9996"},
+        )
+        assert put_resp.status_code == 200, put_resp.text
+        data = put_resp.json()
+
+        assert data["items"][0]["amount"] == "121.000"
+        assert data["paid_total"] == "121.000"
+        assert data["due_amount"] == "0.000"
+        assert data["paid_status"] == "PAID"
+        assert data["status"] == "COMPLETED"
+
+
+@pytest.mark.integration
+class TestDeletePayment:
+    """DELETE /api/v1/payments/{id} – delete a payment and recompute invoice state."""
+
+    async def test_delete_one_payment_raises_due_and_rolls_back_status(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Delete one of two payments → due_amount increases + status rolls back."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        await _send_invoice(db_client, inv["id"])
+
+        # Record two payments that reach PAID / COMPLETED
+        r1 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-01", "amount": "60.000"},
+        )
+        assert r1.status_code == 201
+        r2 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-12", "amount": "61.000"},
+        )
+        assert r2.status_code == 201
+        assert r2.json()["status"] == "COMPLETED"
+        payment2_id = r2.json()["items"][-1]["id"]
+
+        # Delete the second payment
+        del_resp = await db_client.delete(f"/api/v1/payments/{payment2_id}")
+        assert del_resp.status_code == 200, del_resp.text
+        data = del_resp.json()
+
+        assert data["paid_status"] == "PARTIALLY_PAID"
+        assert data["status"] == "SENT"  # COMPLETED rolled back to SENT (D3)
+        assert data["due_amount"] == "61.000"  # 121 - 60 = 61
+        assert data["paid_total"] == "60.000"
+        assert len(data["items"]) == 1
+
+    async def test_delete_all_payments_reaches_unpaid_sent(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Delete all payments → UNPAID, status returns to SENT."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        await _send_invoice(db_client, inv["id"])
+
+        # Record a single payment (partial)
+        r1 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-12", "amount": "50.000"},
+        )
+        assert r1.status_code == 201
+        payment_id = r1.json()["items"][0]["id"]
+        assert r1.json()["paid_status"] == "PARTIALLY_PAID"
+
+        # Delete the only payment
+        del_resp = await db_client.delete(f"/api/v1/payments/{payment_id}")
+        assert del_resp.status_code == 200, del_resp.text
+        data = del_resp.json()
+
+        assert data["paid_status"] == "UNPAID"
+        assert data["status"] == "SENT"
+        assert data["due_amount"] == "121.000"
+        assert data["paid_total"] == "0.000"
+        assert data["base_paid_total"] == "0.000"
+        assert data["items"] == []
+
+    async def test_delete_final_payment_after_completed(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Delete final payment from a COMPLETED invoice → UNPAID + status SENT."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        await _send_invoice(db_client, inv["id"])
+
+        # Record full payment → COMPLETED
+        r1 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-12", "amount": "121.000"},
+        )
+        assert r1.status_code == 201
+        assert r1.json()["status"] == "COMPLETED"
+        payment_id = r1.json()["items"][0]["id"]
+
+        # Delete it
+        del_resp = await db_client.delete(f"/api/v1/payments/{payment_id}")
+        assert del_resp.status_code == 200, del_resp.text
+        data = del_resp.json()
+
+        assert data["paid_status"] == "UNPAID"
+        assert data["status"] == "SENT"
+        assert data["due_amount"] == "121.000"
+        assert data["items"] == []
+
+    async def test_delete_cross_company_payment_404(self, db_client: AsyncClient) -> None:
+        """DELETE /payments/{id} with a random UUID → 404.
+
+        company_id scoping means a payment from another company or a random UUID
+        is indistinguishable from not-found.
+        """
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        del_resp = await db_client.delete(f"/api/v1/payments/{uuid.uuid4()}")
+        assert del_resp.status_code == 404
+
+    async def test_delete_owner_only_unauthenticated_401(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Unauthenticated DELETE → 401."""
+        del_resp = await db_client.delete(f"/api/v1/payments/{uuid.uuid4()}")
+        assert del_resp.status_code == 401

@@ -1192,9 +1192,20 @@ export interface paths {
          * @description Fetch a single payment by id (scoped to caller's company).
          */
         get: operations["get_payment_endpoint_api_v1_payments__payment_id__get"];
-        put?: never;
+        /**
+         * Update Payment Endpoint
+         * @description Edit a payment and return the updated invoice aggregate.
+         */
+        put: operations["update_payment_endpoint_api_v1_payments__payment_id__put"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete Payment Endpoint
+         * @description Delete a payment and return the updated invoice aggregate.
+         *
+         *     Returns 200 with the aggregate body (not 204) so the front-end gets the
+         *     new due_amount / paid_status / status in a single round-trip.
+         */
+        delete: operations["delete_payment_endpoint_api_v1_payments__payment_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -7151,6 +7162,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaymentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_payment_endpoint_api_v1_payments__payment_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoicePaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_payment_endpoint_api_v1_payments__payment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoicePaymentsResponse"];
                 };
             };
             /** @description Validation Error */

@@ -1,9 +1,11 @@
-"""Payment API routes – record, list, and read payments (M7 step 1).
+"""Payment API routes – record, list, read, edit, and delete payments (M7).
 
 Endpoints:
-  POST  /api/v1/invoices/{invoice_id}/payments  – record a payment → 201
-  GET   /api/v1/invoices/{invoice_id}/payments  – list payments for invoice → 200
-  GET   /api/v1/payments/{id}                   – get a single payment → 200
+  POST   /api/v1/invoices/{invoice_id}/payments  – record a payment → 201
+  GET    /api/v1/invoices/{invoice_id}/payments  – list payments for invoice → 200
+  GET    /api/v1/payments/{id}                   – get a single payment → 200
+  PUT    /api/v1/payments/{id}                   – edit a payment → 200
+  DELETE /api/v1/payments/{id}                   – delete a payment → 200 (aggregate body)
 """
 
 from __future__ import annotations
@@ -18,9 +20,11 @@ from jai.db import get_session
 from jai.models.user import User
 from jai.schemas.payment import InvoicePaymentsResponse, PaymentInput, PaymentRead
 from jai.services.payment import (
+    delete_payment,
     get_payment,
     list_invoice_payments,
     record_payment,
+    update_payment,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["payments"])
@@ -124,3 +128,56 @@ async def get_payment_endpoint(
             status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found."
         )
     return p
+
+
+# ---------------------------------------------------------------------------
+# Edit a payment (step 2)
+# ---------------------------------------------------------------------------
+
+
+@router.put("/payments/{payment_id}", response_model=InvoicePaymentsResponse)
+async def update_payment_endpoint(
+    payment_id: uuid.UUID,
+    body: PaymentInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoicePaymentsResponse:
+    """Edit a payment and return the updated invoice aggregate."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await update_payment(session, payment_id, company_id, body)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Delete a payment (step 2)
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/payments/{payment_id}", response_model=InvoicePaymentsResponse)
+async def delete_payment_endpoint(
+    payment_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoicePaymentsResponse:
+    """Delete a payment and return the updated invoice aggregate.
+
+    Returns 200 with the aggregate body (not 204) so the front-end gets the
+    new due_amount / paid_status / status in a single round-trip.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await delete_payment(session, payment_id, company_id)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
