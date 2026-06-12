@@ -53,8 +53,9 @@
 - **Definition of Done**（每步全过）：`ruff` + `mypy --strict` + `pytest` 绿；改了契约则重生成 `schema.d.ts` 且无漂移；前端能 `build`；**算钱/编号/汇率等逻辑必须有单测**；`docker build` 通过；不违反任何红线。
 
 ## 实现 / Review 简报
-- **实现简报**：每一轮 implementation 完成后（planning 不算），都要在 `review-notes/` 下用中文写实现简报，内容至少包括：(a) 本轮实现内容；(b) 自动化测试结果；(c) 人工 walkthrough 步骤。
-- **人工 walkthrough 默认启动方式**：默认用开发态 Compose（`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`）启动，不默认拆成分别手动启动前后端。
+- **实现简报（每步）**：每一轮 implementation 完成后（planning 不算），都要在 `review-notes/` 下用中文写实现简报，内容至少包括：(a) 本轮实现内容；(b) 自动化测试结果；(c) 人工 walkthrough 步骤。orchestrator 模式下命名 `review-notes/M<x>-step<n>-impl.md`。
+- **里程碑级实现报告（milestone 末）**：整个 milestone 全部步骤跑完后，额外出一份 `review-notes/M<x>-report.md` —— ① 内容详尽；② 面向作者可读；③ 含**完整的本 milestone 人工 walkthrough 步骤**（把各 `M<x>.md` 的「🟢 部署自测点」整合串讲）。这是作者人工 walkthrough 的输入。
+- **人工 walkthrough 时机**：自 M7 起**逐步不再人工走**（逐步门 = 自动化测试绿 + 盲审无 finding）；人工 walkthrough **收敛到 milestone 末一次**，作者对着上面的里程碑级报告走。**默认启动方式**：开发态 Compose（`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`），不默认拆成分别手动起前后端。
 - **Review 输入**：作者要求 review 时，优先读取作者指定的实现简报；如果未指定，自动读取 `review-notes/` 下最新的实现简报，再结合增量 diff 和相关设计文档审。
 - **Review 输出**：只有发现修改意见 / findings 时，才在 `review-notes/` 下用中文写 review 报告；如果没有修改意见，直接在聊天框说明即可，不额外落文件。
 
@@ -65,6 +66,7 @@
 
 ## 每轮开发的 commit 节奏（实现 / 返工 / 收尾）
 > 作者用这三个关键词驱动一个 feature 的提交节奏；**关键词本身即“明确要求 commit”的授权**（细化上面“只在作者明确要求时才 commit”的笼统说法，不冲突）。三步都遵守上面的「提交规范」（英文 Conventional Commits、严禁 AI 署名）。
+> **Orchestrator 模式下这三步按步自动发生**，且 autosquash 是**逐步**（每个原子步骤各压成一个 commit）而非逐 feature——见「Agent orchestration」节。
 
 1. **实现**：作者说“实现”时，做完即为该 feature 定好 Conventional Commits message 并 `git commit` 落一轮。
 2. **返工**：作者说“返工”时，**不新开独立 commit**，而是针对被返工的那个实现 commit 做 fixup：`git commit --fixup=<目标实现 commit 的 sha>`。
@@ -72,5 +74,38 @@
    - 命令：`GIT_SEQUENCE_EDITOR=: git rebase --autosquash <feature 起点的前一个 commit>`（本环境不支持交互式 `-i`，用 `GIT_SEQUENCE_EDITOR=:` 跑非交互 autosquash）。
    - autosquash 只把各 fixup 折叠回其目标实现 commit；若本 feature 产生了**多个**实现 commit，在同一次 rebase 里把它们也一并 squash，最终该 feature 只留一个 commit。
 
+## Agent orchestration（自 M7 起的实现执行模型）
+> 自 M7 起，里程碑的实现支持两种执行方式。**默认是人工模式**；只有作者**明确点名 orchestrator 模式 / 直接生成**时，才跑下面的全自动循环。设计文档（`docs/plan/milestones/M<x>.md`）已把每个原子步骤写成**自包含 + 带盲审要点**，两种方式都能挂。
+
+### 两种模式
+- **人工模式（默认）**：作者只让你实现某一步并输出实现简报 = 人工模式。**不自动 spawn 子 agent、不自动跑 review/fix 循环、不自动 commit**（commit 仍按「commit 节奏」的关键词授权）。**没有作者明确点名 orchestrator 模式，一律按此。**
+- **Orchestrator 模式（全自动）**：作者新开一个 Opus（Extra High Reasoning）对话，**你就是 orchestrator**，按下方循环自动驱动子 agent 跑完指定步骤 / 里程碑。**作者点名 orchestrator 模式本身 = 对本轮 commit（impl / fixup / per-step autosquash）的明确授权。**
+
+### 三类子 agent（模型默认值，提示词可覆盖）
+- **implementer / fixer**：同一类、逻辑一致；默认 **Sonnet + high reasoning**。
+- **reviewer**：默认 **Opus + extra high reasoning**。
+- 作者在提示词里显式指定别的模型 / reasoning 等级时，**以提示词为准**。
+
+### 逐步循环（orchestrator 模式 · 作者要求“一步一步实现”时）
+**做哪一步由 orchestrator 决定并逐步推进**（步骤 1 → 2 → …，一步一个 iteration）。每个原子步骤跑完整一轮再进下一步：
+
+1. **实现（implementer）**：spawn 一个干净 implementer，指令必须含：
+   - 只实现**当前指定这一步**，不自由发挥（不顺手做别的步骤 / 不夹带重构）。
+   - **测试完备**：Happy Flow + Corner Cases 都要覆盖。
+   - **不污染本机**：实现期间如需临时验证，临时文件用完清理干净，**不动本机生产环境**（DB / 容器 / 文件）。
+   - 完成后按「实现 / Review 简报」写**该步中文实现简报**。
+   - 落一个 **implementation commit**（= 该步 feature commit）。
+2. **盲审（reviewer）**：spawn 一个**全新** reviewer，**只给**：(a) 该 milestone 设计文档（`M<x>.md` + roadmap）；(b) 刚生成的实现简报；(c) 该步 diff。**不接触 implementer 的对话 / 思路**（黑盒盲审）。重点：① 是否**完全按设计文档**；② 有无**对设计文档的偏移**；③ 代码 **bug + 潜在风险**。
+   - 有 finding → 写一份**中文 review 简报**进 `review-notes/`（作者可能会看）。
+   - 无 finding → 该步结束。
+3. **返工（fixer）**：有 finding → spawn fixer，输入 = **设计文档 + 该份 review 简报**；改完落一个 **`--fixup` commit**（指向该步 implementation commit，见「commit 节奏」）。
+4. **复审**：返工后**再 spawn reviewer 复审**；只要还有**新 finding** 就继续返工 → 复审，直到**无 finding** 为止。**返工上限 = 5 轮**；满 5 轮仍有 finding，**停下来升级给作者人工介入**。
+5. **收口该步**：该步 impl + 所有 fixup 落定后，orchestrator 做**一次 per-step autosquash**，把该步 implementation commit + 它的 fixup 压成**该步单一 commit**（命令同「commit 节奏」，base = 该步实现 commit 的前一个 commit）。⇒ milestone 完成时**每步各留一个 commit**。
+6. **进下一步**：重复 1–5，直到该 milestone 全部步骤完成。
+
+### 里程碑收尾
+- 全部步骤跑完 → 出一份**里程碑级实现报告**（`review-notes/M<x>-report.md`，要求见「实现 / Review 简报」）。
+- 作者对着它**人工 walkthrough**；walkthrough 中的修改意见走**人工对话**修改（不再自动循环）。
+
 ## 维护本文件
-只在**根基**变化时才改本文件：技术栈、上面这些红线/命令/约定、或新增一个 agent 工具。**里程碑的推进不需要动它**——那只更新 `docs/plan/`。
+只在**根基**变化时才改本文件：技术栈、上面这些红线/命令/约定、执行模型（Agent orchestration）、或新增一个 agent 工具。**里程碑的推进不需要动它**——那只更新 `docs/plan/`。
