@@ -144,7 +144,11 @@ async def _load_invoice(
     invoice_id: uuid.UUID,
     company_id: uuid.UUID,
 ) -> Invoice:
-    """Load an invoice scoped to the company; raises ValueError (→ 404) if absent."""
+    """Load an invoice scoped to the company (red-line 2).
+
+    Raises ``LookupError`` (mapped to HTTP 404 by the router) if the invoice
+    does not exist or belongs to a different company.
+    """
     stmt = select(Invoice).where(
         Invoice.id == invoice_id,
         Invoice.company_id == company_id,
@@ -160,7 +164,11 @@ async def _load_payments_for_invoice(
     session: AsyncSession,
     invoice_id: uuid.UUID,
 ) -> list[Payment]:
-    """Load all payments for an invoice ordered by (payment_date, created_at)."""
+    """Load all payments for an invoice ordered by (payment_date ASC, created_at ASC).
+
+    The ascending order matches the ``items`` contract in ``InvoicePaymentsResponse``
+    (M7 §契约) so callers can pass the result directly to ``_build_response``.
+    """
     stmt = (
         select(Payment)
         .where(Payment.invoice_id == invoice_id)
@@ -367,7 +375,11 @@ async def _load_payment(
     payment_id: uuid.UUID,
     company_id: uuid.UUID,
 ) -> Payment:
-    """Load a payment scoped to the company; raises LookupError (→ 404) if absent."""
+    """Load a payment scoped to the company (red-line 2).
+
+    Raises ``LookupError`` (mapped to HTTP 404 by the router) if the payment
+    does not exist or belongs to a different company.
+    """
     stmt = select(Payment).where(
         Payment.id == payment_id,
         Payment.company_id == company_id,

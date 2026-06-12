@@ -873,7 +873,7 @@
     "needSentStatus": "Mark the invoice as Sent before recording payments.",
     "paidStatus": {
       "UNPAID": "Unpaid",
-      "PARTIALLY_PAID": "Partially Paid",
+      "PARTIALLY_PAID": "Partially paid",
       "PAID": "Paid"
     }
   },

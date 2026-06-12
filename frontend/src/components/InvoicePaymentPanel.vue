@@ -21,7 +21,7 @@ import {
   useMessage, useDialog,
   NCard, NSpace, NTag, NText, NButton, NForm, NFormItem,
   NInputNumber, NSelect, NInput, NDatePicker, NAlert, NSpin,
-  NDivider, NIcon,
+  NDivider, NIcon, NEmpty,
 } from 'naive-ui'
 import { AddOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
 import { usePaymentsStore } from '../stores/payments'
@@ -86,7 +86,7 @@ const paymentMethodOptions = computed(() =>
 
 const fmtMoney = (v: string | number) => Number(v).toFixed(2)
 
-function paidStatusType(status: string) {
+function paidStatusType(status: string): 'default' | 'warning' | 'success' {
   if (status === 'PAID') return 'success'
   if (status === 'PARTIALLY_PAID') return 'warning'
   return 'default'
@@ -318,7 +318,7 @@ function handleDelete(payment: PaymentRead) {
                   · {{ payment.note }}
                 </n-text>
               </div>
-              <n-space v-if="canRecord" size="small" :wrap-item="false">
+              <n-space v-if="canRecord" size="small" :wrap-item="false" class="payment-item-actions">
                 <n-button
                   size="small"
                   quaternary
@@ -347,9 +347,12 @@ function handleDelete(payment: PaymentRead) {
         </div>
       </div>
 
-      <n-text v-else-if="aggregate && (!aggregate.items || aggregate.items.length === 0)" depth="3" style="display: block; margin-bottom: 12px">
-        {{ t('payments.noPayments') }}
-      </n-text>
+      <n-empty
+        v-else-if="aggregate && (!aggregate.items || aggregate.items.length === 0)"
+        :description="t('payments.noPayments')"
+        style="padding: 12px 0 16px"
+        size="small"
+      />
 
       <!-- Record new payment form -->
       <template v-if="canRecord">
@@ -421,10 +424,11 @@ function handleDelete(payment: PaymentRead) {
 
 .payment-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   padding: 6px 0;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .payment-item-main {
@@ -433,5 +437,10 @@ function handleDelete(payment: PaymentRead) {
   flex-wrap: wrap;
   gap: 0;
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.payment-item-actions {
+  flex-shrink: 0;
 }
 </style>
