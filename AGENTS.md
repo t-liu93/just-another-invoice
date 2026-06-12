@@ -63,5 +63,14 @@
 - **严禁任何 AI/Claude 署名**：不加 `Co-Authored-By`、不加 “authored by Claude” 之类字样。
 - **只在作者明确要求时才 commit / push。**
 
+## 每轮开发的 commit 节奏（实现 / 返工 / 收尾）
+> 作者用这三个关键词驱动一个 feature 的提交节奏；**关键词本身即“明确要求 commit”的授权**（细化上面“只在作者明确要求时才 commit”的笼统说法，不冲突）。三步都遵守上面的「提交规范」（英文 Conventional Commits、严禁 AI 署名）。
+
+1. **实现**：作者说“实现”时，做完即为该 feature 定好 Conventional Commits message 并 `git commit` 落一轮。
+2. **返工**：作者说“返工”时，**不新开独立 commit**，而是针对被返工的那个实现 commit 做 fixup：`git commit --fixup=<目标实现 commit 的 sha>`。
+3. **收尾**：作者说该 feature “彻底结束 / 收尾”时，用 auto-squash 把这一串实现 commit + 所有 fixup commit 压成**一个** commit。
+   - 命令：`GIT_SEQUENCE_EDITOR=: git rebase --autosquash <feature 起点的前一个 commit>`（本环境不支持交互式 `-i`，用 `GIT_SEQUENCE_EDITOR=:` 跑非交互 autosquash）。
+   - autosquash 只把各 fixup 折叠回其目标实现 commit；若本 feature 产生了**多个**实现 commit，在同一次 rebase 里把它们也一并 squash，最终该 feature 只留一个 commit。
+
 ## 维护本文件
 只在**根基**变化时才改本文件：技术栈、上面这些红线/命令/约定、或新增一个 agent 工具。**里程碑的推进不需要动它**——那只更新 `docs/plan/`。
