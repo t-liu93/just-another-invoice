@@ -25,6 +25,7 @@ from jai.api.dictionary import router as dictionary_router
 from jai.api.estimates import router as estimates_router
 from jai.api.health import router as health_router
 from jai.api.invoices import router as invoices_router
+from jai.api.payments import router as payments_router
 from jai.api.products import router as products_router
 from jai.api.quotes import router as quotes_router
 from jai.api.settings import router as settings_router
@@ -153,6 +154,7 @@ def create_app() -> FastAPI:
     app.include_router(invoices_router)
     app.include_router(quotes_router)
     app.include_router(estimates_router)
+    app.include_router(payments_router)
     app.include_router(content_router)
 
     # -- Static files + SPA fallback (deployment mode) ----------------------

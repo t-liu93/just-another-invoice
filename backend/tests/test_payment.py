@@ -1,0 +1,290 @@
+"""Unit tests for the payment recomputation engine (M7 step 1).
+
+Tests ``services.payment.recompute_payment_state`` (pure function, no DB).
+All amounts are verified against hand-calculated values.
+
+Coverage:
+- UNPAID / PARTIALLY_PAID / PAID three-tier boundary
+- Fully-paid SENT invoice → COMPLETED lifecycle
+- paid_total == 0 → UNPAID
+- Multi-payment sum without double-rounding (D9)
+- due_amount is always >= 0 (overpayment guard is tested at service level)
+- DRAFT / CANCELLED are never touched by the engine
+- quantize_money input-quantisation contract (D9)
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from jai.models._enums import InvoicePaidStatus, InvoiceStatus
+from jai.services.money import quantize_money
+from jai.services.payment import recompute_payment_state
+
+# ---------------------------------------------------------------------------
+# Stub helper
+# ---------------------------------------------------------------------------
+
+
+class _P:
+    """Minimal payment stub for pure-function tests."""
+
+    def __init__(self, amount: str, base_amount: str | None = None) -> None:
+        self.amount = Decimal(amount)
+        self.base_amount = Decimal(base_amount or amount)
+
+
+# ---------------------------------------------------------------------------
+# UNPAID – no payments at all
+# ---------------------------------------------------------------------------
+
+
+def test_unpaid_no_payments() -> None:
+    state = recompute_payment_state(
+        Decimal("121.000"),
+        Decimal("121.000"),
+        [],
+        InvoiceStatus.SENT,
+    )
+    assert state.paid_status == InvoicePaidStatus.UNPAID
+    assert state.paid_total == Decimal("0")
+    assert state.due_amount == Decimal("121.000")
+    assert state.new_status == InvoiceStatus.SENT
+
+
+def test_unpaid_stays_draft_untouched() -> None:
+    """DRAFT lifecycle is never changed by the engine (D3)."""
+    state = recompute_payment_state(
+        Decimal("100.000"),
+        Decimal("100.000"),
+        [],
+        InvoiceStatus.DRAFT,
+    )
+    assert state.paid_status == InvoicePaidStatus.UNPAID
+    assert state.new_status == InvoiceStatus.DRAFT  # untouched
+
+
+# ---------------------------------------------------------------------------
+# PARTIALLY_PAID
+# ---------------------------------------------------------------------------
+
+
+def test_partially_paid_single_payment() -> None:
+    state = recompute_payment_state(
+        Decimal("121.000"),
+        Decimal("121.000"),
+        [_P("50.000")],
+        InvoiceStatus.SENT,
+    )
+    assert state.paid_status == InvoicePaidStatus.PARTIALLY_PAID
+    assert state.paid_total == Decimal("50.000")
+    assert state.due_amount == Decimal("71.000")
+    assert state.new_status == InvoiceStatus.SENT
+
+
+def test_partially_paid_does_not_change_completed_to_sent_when_paid() -> None:
+    """COMPLETED is only reversed if paid_status != PAID (partially paid case)."""
+    state = recompute_payment_state(
+        Decimal("100.000"),
+        Decimal("100.000"),
+        [_P("60.000")],
+        InvoiceStatus.COMPLETED,
+    )
+    assert state.paid_status == InvoicePaidStatus.PARTIALLY_PAID
+    assert state.new_status == InvoiceStatus.SENT  # retrograde: COMPLETED → SENT
+
+
+# ---------------------------------------------------------------------------
+# PAID
+# ---------------------------------------------------------------------------
+
+
+def test_paid_single_payment_exact() -> None:
+    state = recompute_payment_state(
+        Decimal("121.000"),
+        Decimal("121.000"),
+        [_P("121.000")],
+        InvoiceStatus.SENT,
+    )
+    assert state.paid_status == InvoicePaidStatus.PAID
+    assert state.due_amount == Decimal("0")
+    assert state.new_status == InvoiceStatus.COMPLETED  # SENT → COMPLETED
+
+
+def test_paid_multi_payment_sums_to_exact() -> None:
+    state = recompute_payment_state(
+        Decimal("121.000"),
+        Decimal("121.000"),
+        [_P("60.000"), _P("61.000")],
+        InvoiceStatus.SENT,
+    )
+    assert state.paid_status == InvoicePaidStatus.PAID
+    assert state.paid_total == Decimal("121.000")
+    assert state.due_amount == Decimal("0")
+    assert state.new_status == InvoiceStatus.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# No double-rounding (D9)
+# ---------------------------------------------------------------------------
+
+
+def test_no_double_rounding_three_payments() -> None:
+    """Three payments that individually round to 3 dp should not be re-rounded.
+
+    Each payment of 33.333 rounds to 33.333.
+    Σ = 33.333 + 33.333 + 33.333 = 99.999 (not 100.000 – that would require
+    double-rounding).  Due amount = 100.000 − 99.999 = 0.001.
+    """
+    state = recompute_payment_state(
+        Decimal("100.000"),
+        Decimal("100.000"),
+        [_P("33.333"), _P("33.333"), _P("33.333")],
+        InvoiceStatus.SENT,
+    )
+    assert state.paid_total == Decimal("99.999")
+    assert state.due_amount == Decimal("0.001")
+    assert state.paid_status == InvoicePaidStatus.PARTIALLY_PAID
+    # Not PAID because due_amount != 0 (this is correct D9 behaviour)
+
+
+def test_no_double_rounding_two_payments() -> None:
+    """0.333 + 0.334 = 0.667 – no intermediate rounding of the sum."""
+    state = recompute_payment_state(
+        Decimal("1.000"),
+        Decimal("1.000"),
+        [_P("0.333"), _P("0.334")],
+        InvoiceStatus.SENT,
+    )
+    assert state.paid_total == Decimal("0.667")
+    assert state.due_amount == Decimal("0.333")
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: CANCELLED is never touched
+# ---------------------------------------------------------------------------
+
+
+def test_cancelled_never_touched() -> None:
+    """CANCELLED lifecycle is never changed even with payments (shouldn't happen
+    in practice due to D7 guards, but engine itself must not touch it)."""
+    state = recompute_payment_state(
+        Decimal("100.000"),
+        Decimal("100.000"),
+        [_P("100.000")],
+        InvoiceStatus.CANCELLED,
+    )
+    assert state.paid_status == InvoicePaidStatus.PAID
+    assert state.new_status == InvoiceStatus.CANCELLED  # untouched
+
+
+# ---------------------------------------------------------------------------
+# due_amount is always >= 0 (overpayment would be caught by the service guard)
+# ---------------------------------------------------------------------------
+
+
+def test_due_amount_is_zero_not_negative_on_exact_pay() -> None:
+    state = recompute_payment_state(
+        Decimal("50.000"),
+        Decimal("50.000"),
+        [_P("50.000")],
+        InvoiceStatus.SENT,
+    )
+    assert state.due_amount == Decimal("0")
+    assert state.due_amount >= Decimal("0")
+
+
+def test_base_amounts_mirror_amounts_d2() -> None:
+    """In D2 (single base currency), base_amount == amount for each payment."""
+    state = recompute_payment_state(
+        Decimal("200.000"),
+        Decimal("200.000"),
+        [_P("100.000", "100.000"), _P("50.000", "50.000")],
+        InvoiceStatus.SENT,
+    )
+    assert state.paid_total == state.base_paid_total
+    assert state.due_amount == state.base_due_amount
+
+
+# ---------------------------------------------------------------------------
+# COMPLETED → SENT retrograde when partially paid
+# ---------------------------------------------------------------------------
+
+
+def test_completed_reverts_to_sent_when_underpaid() -> None:
+    """A COMPLETED invoice becomes SENT again when not fully paid."""
+    state = recompute_payment_state(
+        Decimal("100.000"),
+        Decimal("100.000"),
+        [_P("90.000")],
+        InvoiceStatus.COMPLETED,
+    )
+    assert state.paid_status == InvoicePaidStatus.PARTIALLY_PAID
+    assert state.new_status == InvoiceStatus.SENT
+
+
+def test_completed_stays_completed_when_fully_paid() -> None:
+    """COMPLETED stays COMPLETED when already fully paid (idempotent)."""
+    state = recompute_payment_state(
+        Decimal("100.000"),
+        Decimal("100.000"),
+        [_P("100.000")],
+        InvoiceStatus.COMPLETED,
+    )
+    assert state.paid_status == InvoicePaidStatus.PAID
+    assert state.new_status == InvoiceStatus.COMPLETED
+
+
+def test_completed_reverts_to_sent_when_unpaid() -> None:
+    """COMPLETED with zero payments reverts to SENT (edge case)."""
+    state = recompute_payment_state(
+        Decimal("100.000"),
+        Decimal("100.000"),
+        [],
+        InvoiceStatus.COMPLETED,
+    )
+    assert state.paid_status == InvoicePaidStatus.UNPAID
+    assert state.new_status == InvoiceStatus.SENT
+
+
+# ---------------------------------------------------------------------------
+# quantize_money input contract (D9)
+# ---------------------------------------------------------------------------
+
+
+def test_quantize_money_more_than_3dp_rounds_half_up() -> None:
+    """quantize_money must round >3-dp inputs using ROUND_HALF_UP (D9).
+
+    This verifies the input-quantisation contract used in record_payment:
+    the amount stored in DB (NUMERIC 18,3) must equal quantize_money(raw_input).
+    """
+    assert quantize_money(Decimal("33.3336")) == Decimal("33.334")
+    assert quantize_money(Decimal("33.3334")) == Decimal("33.333")
+    assert quantize_money(Decimal("120.9996")) == Decimal("121.000")
+    assert quantize_money(Decimal("120.9994")) == Decimal("120.999")
+
+
+def test_quantize_money_already_3dp_is_identity() -> None:
+    """A value already at 3 dp must be returned unchanged."""
+    assert quantize_money(Decimal("50.000")) == Decimal("50.000")
+    assert quantize_money(Decimal("121.000")) == Decimal("121.000")
+
+
+def test_recompute_with_quantised_amount_detects_full_payment() -> None:
+    """Simulate the F1 boundary: raw input 120.9996 → quantised 121.000.
+
+    The engine must see PAID / due=0 when handed the quantised value, proving
+    that pre-quantisation in record_payment prevents the status-stuck bug.
+    """
+    raw = Decimal("120.9996")
+    amt = quantize_money(raw)  # → 121.000
+
+    state = recompute_payment_state(
+        Decimal("121.000"),
+        Decimal("121.000"),
+        [_P(str(amt))],
+        InvoiceStatus.SENT,
+    )
+    assert state.paid_status == InvoicePaidStatus.PAID
+    assert state.due_amount == Decimal("0")
+    assert state.new_status == InvoiceStatus.COMPLETED

@@ -1156,6 +1156,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/{invoice_id}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Invoice Payments Endpoint
+         * @description Return all payments for an invoice plus current payment state.
+         */
+        get: operations["list_invoice_payments_endpoint_api_v1_invoices__invoice_id__payments_get"];
+        put?: never;
+        /**
+         * Record Payment Endpoint
+         * @description Record one payment for an invoice and return the updated aggregate.
+         */
+        post: operations["record_payment_endpoint_api_v1_invoices__invoice_id__payments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{payment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Payment Endpoint
+         * @description Fetch a single payment by id (scoped to caller's company).
+         */
+        get: operations["get_payment_endpoint_api_v1_payments__payment_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -2531,6 +2575,41 @@ export interface components {
          */
         InvoicePaidStatus: "UNPAID" | "PARTIALLY_PAID" | "PAID";
         /**
+         * InvoicePaymentsResponse
+         * @description Aggregate: invoice payment state + ordered list of payment records.
+         *
+         *     Returned by POST/GET /api/v1/invoices/{id}/payments.
+         *     ``items`` is ordered by (payment_date ASC, created_at ASC).
+         */
+        InvoicePaymentsResponse: {
+            /**
+             * Invoice Id
+             * Format: uuid
+             */
+            invoice_id: string;
+            /** Invoice Number */
+            invoice_number: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Base Total Incl Vat */
+            base_total_incl_vat: string;
+            /** Paid Total */
+            paid_total: string;
+            /** Base Paid Total */
+            base_paid_total: string;
+            /** Due Amount */
+            due_amount: string;
+            /** Base Due Amount */
+            base_due_amount: string;
+            paid_status: components["schemas"]["InvoicePaidStatus"];
+            status: components["schemas"]["InvoiceStatus"];
+            /**
+             * Items
+             * @default []
+             */
+            items?: components["schemas"]["PaymentRead"][];
+        };
+        /**
          * InvoiceRead
          * @description Full invoice representation returned by CRUD endpoints.
          */
@@ -2856,6 +2935,32 @@ export interface components {
             body: string;
         };
         /**
+         * PaymentInput
+         * @description Request body for POST /api/v1/invoices/{id}/payments.
+         *
+         *     Only collects raw user input – amount, date, optional method, reference,
+         *     note.  base_amount / currency / exchange_rate are derived by the service
+         *     (D2: single base currency).
+         */
+        PaymentInput: {
+            /**
+             * Payment Date
+             * Format: date
+             */
+            payment_date: string;
+            /**
+             * Amount
+             * @description Payment amount – must be > 0.
+             */
+            amount: number | string;
+            /** Payment Method Id */
+            payment_method_id?: string | null;
+            /** Reference */
+            reference?: string | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
          * PaymentMethodListResponse
          * @description List envelope for GET /api/v1/payment-methods.
          */
@@ -2900,6 +3005,53 @@ export interface components {
              * @default true
              */
             active?: boolean;
+        };
+        /**
+         * PaymentRead
+         * @description Full payment record as returned by read endpoints.
+         */
+        PaymentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Invoice Id
+             * Format: uuid
+             */
+            invoice_id: string;
+            /** Invoice Number */
+            invoice_number: string;
+            /**
+             * Payment Date
+             * Format: date
+             */
+            payment_date: string;
+            /** Amount */
+            amount: string;
+            /** Base Amount */
+            base_amount: string;
+            /** Currency */
+            currency: string;
+            /** Payment Method Id */
+            payment_method_id?: string | null;
+            /** Payment Method Name */
+            payment_method_name?: string | null;
+            /** Reference */
+            reference?: string | null;
+            /** Note */
+            note?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * ProductCategoryListResponse
@@ -6902,6 +7054,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_invoice_payments_endpoint_api_v1_invoices__invoice_id__payments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoicePaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_payment_endpoint_api_v1_invoices__invoice_id__payments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoicePaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_payment_endpoint_api_v1_payments__payment_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRead"];
                 };
             };
             /** @description Validation Error */
