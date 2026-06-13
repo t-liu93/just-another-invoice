@@ -11,6 +11,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 from jai.services.money import (
+    MINOR_QUANT,
+    MINOR_UNIT,
     MONEY_QUANT,
     MONEY_ROUNDING,
     MONEY_SCALE,
@@ -18,6 +20,7 @@ from jai.services.money import (
     is_money_zero,
     mul_money,
     quantize_money,
+    quantize_to_minor_unit,
     sub_money,
 )
 
@@ -210,3 +213,107 @@ class TestConstants:
         from decimal import ROUND_HALF_UP
 
         assert MONEY_ROUNDING == ROUND_HALF_UP
+
+
+# ============================================================================
+# quantize_to_minor_unit – currency minor-unit rounding (M7.5 step 1)
+# ============================================================================
+
+
+class TestQuantizeToMinorUnit:
+    """Tests for ``quantize_to_minor_unit()`` (M7.5 step 1).
+
+    ``quantize_to_minor_unit`` is the **document-level / client-facing** final
+    rounding step (default: EUR = 2 decimal places / cents).  It is distinct
+    from ``quantize_money`` which is the 3-decimal intermediate rounding used
+    throughout the pricing pipeline.
+    """
+
+    # -- Half-cent boundary (key correctness requirement) --------------------
+
+    def test_half_cent_rounds_up(self) -> None:
+        """1.005 → 1.01: the half-cent rounds up (ROUND_HALF_UP)."""
+        assert quantize_to_minor_unit(Decimal("1.005")) == Decimal("1.01")
+
+    def test_just_below_half_cent_rounds_down(self) -> None:
+        """1.004 → 1.00: below half-cent rounds toward zero."""
+        assert quantize_to_minor_unit(Decimal("1.004")) == Decimal("1.00")
+
+    # -- Negative numbers ----------------------------------------------------
+
+    def test_negative_half_cent_rounds_away_from_zero(self) -> None:
+        """-1.005 → -1.01: ROUND_HALF_UP rounds away from zero (same as quantize_money)."""
+        assert quantize_to_minor_unit(Decimal("-1.005")) == Decimal("-1.01")
+
+    def test_negative_below_half_cent_rounds_toward_zero(self) -> None:
+        """-1.004 → -1.00: below half-cent, rounds toward zero."""
+        assert quantize_to_minor_unit(Decimal("-1.004")) == Decimal("-1.00")
+
+    # -- minor_unit=0 degenerate case (JPY-like) -----------------------------
+
+    def test_minor_unit_0_rounds_half_up(self) -> None:
+        """1.5 → 2 when minor_unit=0 (integer currencies, e.g. JPY)."""
+        assert quantize_to_minor_unit(Decimal("1.5"), minor_unit=0) == Decimal("2")
+
+    def test_minor_unit_0_rounds_down(self) -> None:
+        """2.4 → 2 when minor_unit=0."""
+        assert quantize_to_minor_unit(Decimal("2.4"), minor_unit=0) == Decimal("2")
+
+    def test_minor_unit_0_negative_rounds_away_from_zero(self) -> None:
+        """-1.5 → -2 when minor_unit=0 (ROUND_HALF_UP away from zero)."""
+        assert quantize_to_minor_unit(Decimal("-1.5"), minor_unit=0) == Decimal("-2")
+
+    # -- minor_unit=2 standard cases -----------------------------------------
+
+    def test_pi_truncated_to_cents(self) -> None:
+        """3.14159… → 3.14."""
+        assert quantize_to_minor_unit(Decimal("3.14159")) == Decimal("3.14")
+
+    def test_zero_gets_cent_scale(self) -> None:
+        """0 → 0.00 (scale is preserved)."""
+        assert quantize_to_minor_unit(Decimal("0")) == Decimal("0.00")
+
+    # -- Idempotency ---------------------------------------------------------
+
+    def test_idempotent_on_cent_value(self) -> None:
+        """Applying quantize_to_minor_unit to an already-rounded value is a no-op."""
+        assert quantize_to_minor_unit(Decimal("12.34")) == Decimal("12.34")
+
+    def test_idempotent_on_round_cent(self) -> None:
+        """100.00 stays 100.00."""
+        assert quantize_to_minor_unit(Decimal("100.00")) == Decimal("100.00")
+
+    # -- Function-level behaviour note (NOT the milestone target) ------------
+
+    def test_three_digit_total_rounds_to_cents(self) -> None:
+        """3865.166 → 3865.17 at the function level (ROUND_HALF_UP on 3rd decimal).
+
+        NOTE: This asserts the raw function behaviour only.  The actual
+        milestone target for F2026-009 is ``total = 3865.16`` because that
+        result comes from the *line-level* pricing engine (step 2/3), where
+        each line's net × rate is first rounded to cents before summing.
+        The ``3865.17`` here would only arise from a direct 3-decimal input
+        rounded straight to 2 — a code path the milestone explicitly avoids.
+        """
+        assert quantize_to_minor_unit(Decimal("3865.166")) == Decimal("3865.17")
+
+
+# ============================================================================
+# MINOR_UNIT / MINOR_QUANT constants (M7.5 step 1)
+# ============================================================================
+
+
+class TestMinorUnitConstants:
+    """Verify the EUR minor-unit constants introduced in M7.5 step 1."""
+
+    def test_minor_unit_is_2(self) -> None:
+        """EUR has 2 decimal places (cents)."""
+        assert MINOR_UNIT == 2
+
+    def test_minor_quant_is_one_cent(self) -> None:
+        """MINOR_QUANT matches the 2-decimal quantizer."""
+        assert MINOR_QUANT == Decimal("0.01")
+
+    def test_minor_quant_consistent_with_minor_unit(self) -> None:
+        """MINOR_QUANT == 10^-MINOR_UNIT."""
+        assert MINOR_QUANT == Decimal(10) ** -MINOR_UNIT
