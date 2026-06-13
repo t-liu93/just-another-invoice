@@ -1,19 +1,20 @@
-"""Expense ORM model (M8 step 1).
+"""RecurringExpense ORM model (M8 step 3).
 
 Design:
-- Expense is a standalone business document rooted on company_id (red-line 2).
-  company_id FK RESTRICT prevents orphaned expenses.
+- RecurringExpense is a template rooted on company_id (red-line 2).
+  company_id FK RESTRICT prevents orphaned templates.
 - category_id FK SET NULL: deleting the category keeps the category_name
-  snapshot intact (D12).
+  snapshot intact (same pattern as Expense, D12).
 - vat_treatment_id / vat_rate_id FK RESTRICT: snapshot fields capture the
-  values at creation time so deleting dictionary entries is blocked while
-  referenced (code/label/effect for treatment; percent/label for rate).
-- creator_id FK SET NULL: deleting the user preserves the expense.
-- All money columns are NUMERIC(18,3) – same scale as quantize_money().
-- exchange_rate is NUMERIC(18,8); v1 always 1 (single base currency, D10).
+  values at creation time (D7).
+- creator_id FK SET NULL: deleting the user preserves the template.
+- All money columns are NUMERIC(18,3) – same scale as Expense (D11).
 - Text columns use ``Text`` (red-line 10).
-- recurring_expense_id is NOT added in step 1; it will be added as an
-  additive column + FK in step 3 when the recurring_expense table is built.
+- On delete of a RecurringExpense the generated Expense rows are NOT deleted;
+  their ``recurring_expense_id`` column is SET NULL so they remain as
+  independent accounting records (D3).
+- ``recurring_expense_id`` on the ``expense`` table is added as an additive
+  column in migration 0020 (step 3).
 """
 
 from __future__ import annotations
@@ -26,8 +27,8 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
-    String,
     Text,
     func,
     text,
@@ -36,20 +37,20 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from jai.db import Base
+from jai.models._enums import RecurringFrequency
 
 # ---------------------------------------------------------------------------
-# Money column type alias – matches invoice.py / payment.py convention
+# Money column type alias – matches expense.py / invoice.py convention
 # ---------------------------------------------------------------------------
 
 _MONEY = Numeric(18, 3)
 _RATE = Numeric(6, 3)
-_FX = Numeric(18, 8)
 
 
-class Expense(Base):
-    """Single expense record (purchase / cost entry)."""
+class RecurringExpense(Base):
+    """Recurring expense template that generates draft expenses on a schedule."""
 
-    __tablename__ = "expense"
+    __tablename__ = "recurring_expense"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -63,15 +64,16 @@ class Expense(Base):
         index=True,
     )
 
-    # -- Date -----------------------------------------------------------------
-    expense_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    # -- Human-readable template name (red-line 10) ---------------------------
+    name: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Display name for the recurring expense template."
+    )
 
     # -- Category (FK SET NULL + name snapshot, D12) --------------------------
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("expense_category.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
     category_name: Mapped[str | None] = mapped_column(
         Text,
@@ -79,7 +81,7 @@ class Expense(Base):
         comment="Snapshot of category name; preserved after category deletion.",
     )
 
-    # -- Supplier (v1: free-text, D12) ----------------------------------------
+    # -- Supplier (v1: free-text) -----------------------------------------------
     supplier_name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # -- VAT treatment (FK RESTRICT + snapshot, D7) ---------------------------
@@ -87,7 +89,7 @@ class Expense(Base):
         UUID(as_uuid=True),
         ForeignKey("vat_treatment.id", ondelete="RESTRICT"),
         nullable=True,
-        comment="FK RESTRICT: cannot delete treatment while expense references it.",
+        comment="FK RESTRICT: cannot delete treatment while template references it.",
     )
     vat_treatment_code: Mapped[str] = mapped_column(
         Text, nullable=False, comment="Snapshot: preserved after treatment update."
@@ -100,7 +102,7 @@ class Expense(Base):
         UUID(as_uuid=True),
         ForeignKey("vat_rate.id", ondelete="RESTRICT"),
         nullable=True,
-        comment="FK RESTRICT: cannot delete rate while expense references it.",
+        comment="FK RESTRICT: cannot delete rate while template references it.",
     )
     vat_rate_percent: Mapped[object] = mapped_column(
         _RATE,
@@ -111,7 +113,7 @@ class Expense(Base):
         Text, nullable=False, comment="Snapshot of vat_rate.label."
     )
 
-    # -- Amounts (D8: net + vat are both authoritative inputs; D11: NUMERIC(18,3)) --
+    # -- Template amounts (D11: NUMERIC(18,3), quantised to minor unit) -------
     net_amount: Mapped[object] = mapped_column(_MONEY, nullable=False)
     vat_amount: Mapped[object] = mapped_column(_MONEY, nullable=False)
     gross_amount: Mapped[object] = mapped_column(
@@ -123,62 +125,62 @@ class Expense(Base):
     # -- Deductibility (D9) ---------------------------------------------------
     deductible: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
-    # -- Currency (D10: single base currency, FX columns reserved for future) --
-    currency: Mapped[str] = mapped_column(
-        String(3),
-        nullable=False,
-        comment="ISO 4217; v1 always equals company.base_currency.",
-    )
-    exchange_rate: Mapped[object] = mapped_column(
-        _FX,
-        nullable=False,
-        server_default=text("1"),
-        comment="Always 1 in v1 (single base currency).",
-    )
-    base_net_amount: Mapped[object] = mapped_column(
-        _MONEY,
-        nullable=False,
-        comment="Base-currency net; equals net_amount while exchange_rate = 1.",
-    )
-    base_vat_amount: Mapped[object] = mapped_column(
-        _MONEY,
-        nullable=False,
-        comment="Base-currency VAT; equals vat_amount while exchange_rate = 1.",
-    )
-    base_gross_amount: Mapped[object] = mapped_column(
-        _MONEY,
-        nullable=False,
-        comment="Base-currency gross; equals gross_amount while exchange_rate = 1.",
-    )
-
-    # -- Reference / notes (text, red-line 10) --------------------------------
-    reference: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Ticket / invoice reference number from supplier."
-    )
+    # -- Notes (text, red-line 10) --------------------------------------------
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # -- Draft flag (D3: recurring expenses generate as draft) ----------------
-    is_draft: Mapped[bool] = mapped_column(
-        Boolean,
+    # -- Schedule configuration -----------------------------------------------
+    frequency: Mapped[str] = mapped_column(
+        Text,
         nullable=False,
-        server_default=text("false"),
-        comment="True for auto-generated recurring-expense drafts (step 3).",
+        comment="RecurringFrequency: MONTHLY | QUARTERLY | YEARLY.",
+    )
+    start_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        comment="Date from which the first occurrence is scheduled.",
+    )
+    end_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+        comment="Optional hard stop date; no occurrences generated after this.",
+    )
+    max_occurrences: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Optional cap on total generated occurrences.",
     )
 
-    # -- Recurring expense link (step 3: additive column) ---------------------
-    # Added in migration 0020.  FK SET NULL: deleting the template does NOT
-    # cascade-delete the generated expense rows – they are independent records.
-    recurring_expense_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("recurring_expense.id", ondelete="SET NULL"),
+    # -- Generation tracking --------------------------------------------------
+    occurrences_generated: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment="Total occurrences generated so far.",
+    )
+    next_run_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True,
+        comment="Date of the next scheduled generation (inclusive).",
+    )
+    last_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
+        comment="Timestamp of the last successful generation run.",
+    )
+
+    # -- Active flag ----------------------------------------------------------
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
         comment=(
-            "FK back to the recurring_expense template that generated this expense. "
-            "SET NULL on template deletion: generated expenses remain as independent records."
+            "False when paused by user or when max_occurrences / end_date is reached. "
+            "Inactive templates are skipped by the scheduler."
         ),
     )
 
-    # -- Creator (nullable FK: preserve expense if user is deleted) -----------
+    # -- Creator (nullable FK: preserve template if user is deleted) ----------
     creator_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("user.id", ondelete="SET NULL"),
@@ -192,3 +194,7 @@ class Expense(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    def frequency_enum(self) -> RecurringFrequency:
+        """Return the frequency as a typed enum value."""
+        return RecurringFrequency(self.frequency)

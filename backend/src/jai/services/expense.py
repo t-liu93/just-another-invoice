@@ -246,6 +246,7 @@ def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
         reference=exp.reference,
         note=exp.note,
         is_draft=exp.is_draft,
+        recurring_expense_id=getattr(exp, "recurring_expense_id", None),
         attachment_count=attachment_count,
         created_at=exp.created_at,
         updated_at=exp.updated_at,

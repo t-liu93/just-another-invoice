@@ -106,3 +106,14 @@ class DocumentTemplateScope(enum.StrEnum):
     QUOTE = "QUOTE"
     INVOICE = "INVOICE"
     BOTH = "BOTH"
+
+
+class RecurringFrequency(enum.StrEnum):
+    """How often a recurring expense template fires.
+
+    Used by ``models.recurring_expense.RecurringExpense.frequency``.
+    """
+
+    MONTHLY = "MONTHLY"
+    QUARTERLY = "QUARTERLY"
+    YEARLY = "YEARLY"

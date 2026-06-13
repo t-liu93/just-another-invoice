@@ -1287,6 +1287,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recurring-expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recurring Expenses Endpoint
+         * @description Return a paginated list of recurring expense templates.
+         */
+        get: operations["list_recurring_expenses_endpoint_api_v1_recurring_expenses_get"];
+        put?: never;
+        /**
+         * Create Recurring Expense Endpoint
+         * @description Create a new recurring expense template.
+         */
+        post: operations["create_recurring_expense_endpoint_api_v1_recurring_expenses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recurring-expenses/{recurring_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recurring Expense Endpoint
+         * @description Fetch a single recurring expense template by id.
+         */
+        get: operations["get_recurring_expense_endpoint_api_v1_recurring_expenses__recurring_id__get"];
+        /**
+         * Update Recurring Expense Endpoint
+         * @description Update a recurring expense template.
+         *
+         *     Set ``active: false`` to pause; ``active: true`` to resume.
+         */
+        put: operations["update_recurring_expense_endpoint_api_v1_recurring_expenses__recurring_id__put"];
+        post?: never;
+        /**
+         * Delete Recurring Expense Endpoint
+         * @description Delete a recurring expense template.
+         *
+         *     Generated expenses are retained as independent accounting records;
+         *     their ``recurring_expense_id`` is set to NULL by the DB FK constraint.
+         */
+        delete: operations["delete_recurring_expense_endpoint_api_v1_recurring_expenses__recurring_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recurring-expenses/{recurring_id}/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Now Endpoint
+         * @description Manually trigger due generation for a single recurring expense template.
+         *
+         *     Semantics are identical to the scheduled job (idempotent, same cursor-advance
+         *     logic) but scoped to this specific template.  Useful for walkthroughs and
+         *     back-filling missed runs.
+         */
+        post: operations["run_now_endpoint_api_v1_recurring_expenses__recurring_id__run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/{expense_id}/attachments": {
         parameters: {
             query?: never;
@@ -2536,6 +2617,8 @@ export interface components {
             note?: string | null;
             /** Is Draft */
             is_draft: boolean;
+            /** Recurring Expense Id */
+            recurring_expense_id?: string | null;
             /**
              * Attachment Count
              * @default 0
@@ -4237,6 +4320,163 @@ export interface components {
             lines: components["schemas"]["InvoiceLineInput"][];
         };
         /**
+         * RecurringExpenseInput
+         * @description Request body for POST/PUT /api/v1/recurring-expenses.
+         *
+         *     Only collects raw user input.  Computed fields (gross, snapshots,
+         *     next_run_date, occurrences_generated) are derived by the service (red-line 1).
+         */
+        RecurringExpenseInput: {
+            /**
+             * Name
+             * @description Human-readable name for this recurring template.
+             */
+            name: string;
+            /**
+             * Category Id
+             * Format: uuid
+             */
+            category_id: string;
+            /** Supplier Name */
+            supplier_name?: string | null;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /**
+             * Net Amount
+             * @description Net (excl. VAT) amount ≥ 0.
+             */
+            net_amount: number | string;
+            /**
+             * Vat Amount
+             * @description VAT amount ≥ 0.
+             */
+            vat_amount: number | string;
+            /**
+             * Deductible
+             * @description Whether expenses generated from this template are VAT-deductible. Defaults to category.default_deductible, then True.
+             */
+            deductible?: boolean | null;
+            /** Note */
+            note?: string | null;
+            /**
+             * Frequency
+             * @description One of: MONTHLY, QUARTERLY, YEARLY.
+             */
+            frequency: string;
+            /**
+             * Start Date
+             * Format: date
+             * @description Date from which the first occurrence is scheduled.
+             */
+            start_date: string;
+            /** End Date */
+            end_date?: string | null;
+            /**
+             * Max Occurrences
+             * @description Optional cap on total generated occurrences.
+             */
+            max_occurrences?: number | null;
+            /**
+             * Active
+             * @description Whether the template is active.
+             * @default true
+             */
+            active?: boolean;
+        };
+        /**
+         * RecurringExpenseListResponse
+         * @description Paginated recurring expenses list.
+         */
+        RecurringExpenseListResponse: {
+            /** Items */
+            items: components["schemas"]["RecurringExpenseRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * RecurringExpenseRead
+         * @description Full recurring expense template as returned by read endpoints.
+         */
+        RecurringExpenseRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Category Id */
+            category_id?: string | null;
+            /** Category Name */
+            category_name?: string | null;
+            /** Supplier Name */
+            supplier_name?: string | null;
+            /** Vat Treatment Id */
+            vat_treatment_id?: string | null;
+            /** Vat Treatment Code */
+            vat_treatment_code: string;
+            /** Vat Treatment Label */
+            vat_treatment_label: string;
+            /** Vat Treatment Effect */
+            vat_treatment_effect: string;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Deductible */
+            deductible: boolean;
+            /** Note */
+            note?: string | null;
+            /** Frequency */
+            frequency: string;
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /** End Date */
+            end_date?: string | null;
+            /** Max Occurrences */
+            max_occurrences?: number | null;
+            /** Occurrences Generated */
+            occurrences_generated: number;
+            /**
+             * Next Run Date
+             * Format: date
+             */
+            next_run_date: string;
+            /** Last Generated At */
+            last_generated_at?: string | null;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
          * RegisterRequest
          * @description Body for ``POST /auth/register`` – only the fields a client may set.
          *
@@ -4262,6 +4502,23 @@ export interface components {
             token: string;
             /** Password */
             password: string;
+        };
+        /**
+         * RunNowResponse
+         * @description Response for POST /api/v1/recurring-expenses/{id}/run-now.
+         */
+        RunNowResponse: {
+            /**
+             * Generated
+             * @description Number of draft expenses created in this run (0 = already up-to-date).
+             */
+            generated: number;
+            /**
+             * Next Run Date
+             * Format: date
+             * @description The next_run_date on the template after the run.
+             */
+            next_run_date: string;
         };
         /**
          * SmtpSettingsRead
@@ -7870,6 +8127,199 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recurring_expenses_endpoint_api_v1_recurring_expenses_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by active flag. */
+                active?: boolean | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringExpenseListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_recurring_expense_endpoint_api_v1_recurring_expenses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecurringExpenseInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_recurring_expense_endpoint_api_v1_recurring_expenses__recurring_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recurring_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_recurring_expense_endpoint_api_v1_recurring_expenses__recurring_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recurring_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecurringExpenseInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_recurring_expense_endpoint_api_v1_recurring_expenses__recurring_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recurring_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_now_endpoint_api_v1_recurring_expenses__recurring_id__run_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recurring_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunNowResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

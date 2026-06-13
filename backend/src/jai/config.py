@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     # Hour (0–23 UTC) at which the daily quote-expiry job fires.
     scheduler_expire_quotes_hour: int = 1
+    # Hour (0–23 UTC) at which the daily recurring-expense generation job fires.
+    # Deliberately offset from quote-expiry (1:00) to avoid contention.
+    scheduler_recurring_expenses_hour: int = 2
 
     # -- Storage (M8 step 2) ------------------------------------------------
     # Root directory for local file storage (receipts, future PDF attachments).

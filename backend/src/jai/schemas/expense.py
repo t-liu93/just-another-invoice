@@ -109,6 +109,9 @@ class ExpenseRead(BaseModel):
     # Draft flag (D3)
     is_draft: bool
 
+    # Recurring expense backlink (step 3: FK → recurring_expense.id, SET NULL on delete)
+    recurring_expense_id: uuid.UUID | None = None
+
     # Attachment count (populated by service; step 2 will use real counts)
     attachment_count: int = 0
 

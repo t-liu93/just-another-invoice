@@ -30,6 +30,7 @@ from jai.api.invoices import router as invoices_router
 from jai.api.payments import router as payments_router
 from jai.api.products import router as products_router
 from jai.api.quotes import router as quotes_router
+from jai.api.recurring_expenses import router as recurring_expenses_router
 from jai.api.settings import router as settings_router
 from jai.api.vat import router as vat_router
 from jai.auth.secret import resolve_auth_secret
@@ -58,6 +59,24 @@ async def _expire_quotes_job() -> None:
         except Exception:
             await session.rollback()
             logger.exception("APScheduler: error in expire_quotes job")
+
+
+async def _generate_recurring_expenses_job() -> None:
+    """Daily job: generate due recurring expense drafts across all companies."""
+    from jai.services.recurring_expense import (  # local import avoids cycle
+        generate_due_recurring_expenses_all,
+    )
+
+    session_maker = get_session_maker()
+    async with session_maker() as session:
+        try:
+            count = await generate_due_recurring_expenses_all(session)
+            if count > 0:
+                await session.commit()
+            logger.info("APScheduler: generated %d recurring expense draft(s)", count)
+        except Exception:
+            await session.rollback()
+            logger.exception("APScheduler: error in generate_recurring_expenses job")
 
 # index.html is the SPA entry point: it is NOT content-hashed, so it must never
 # be served from the browser cache without revalidation — otherwise a cached
@@ -100,10 +119,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             hour=settings.scheduler_expire_quotes_hour,
             minute=0,
         )
+        scheduler.add_job(
+            _generate_recurring_expenses_job,
+            "cron",
+            hour=settings.scheduler_recurring_expenses_hour,
+            minute=0,
+        )
         scheduler.start()
         logger.info(
-            "APScheduler started; expire_quotes runs daily at %02d:00 UTC",
+            "APScheduler started; expire_quotes at %02d:00 UTC, "
+            "generate_recurring_expenses at %02d:00 UTC",
             settings.scheduler_expire_quotes_hour,
+            settings.scheduler_recurring_expenses_hour,
         )
 
     yield
@@ -158,6 +185,7 @@ def create_app() -> FastAPI:
     app.include_router(estimates_router)
     app.include_router(payments_router)
     app.include_router(expenses_router)
+    app.include_router(recurring_expenses_router)
     app.include_router(attachments_router)
     app.include_router(content_router)
 
