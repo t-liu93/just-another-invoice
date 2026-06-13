@@ -174,7 +174,7 @@ const columns = computed(() => [
   {
     title: '',
     key: 'actions',
-    width: 100,
+    width: 140,
     align: 'center' as const,
     render(row: PaymentListItem) {
       return h(

@@ -242,7 +242,8 @@ async def record_payment(
     # D7: Pre-condition guard – invoice must have been sent
     if inv.status not in (InvoiceStatus.SENT, InvoiceStatus.COMPLETED):
         raise ValueError(
-            "请先发出发票再登记收款（发票必须处于 SENT 或 COMPLETED 状态）。"
+            "Invoice must be sent before recording a payment "
+            "(its status must be SENT or COMPLETED)."
         )
 
     # Snapshot payment method name (D8)
@@ -301,7 +302,8 @@ async def record_payment(
 
     if state.paid_total > total_incl_vat:
         raise ValueError(
-            "欠款不足以容纳本次收款（录入后累计收款将超过发票含税合计）。"
+            "Payment exceeds the outstanding amount "
+            "(cumulative payments would exceed the invoice total)."
         )
 
     # Write back computed fields to invoice
@@ -456,7 +458,8 @@ async def update_payment(
     # D6: overpayment guard – after edit, paid_total must not exceed invoice total
     if state.paid_total > total_incl_vat:
         raise ValueError(
-            "欠款不足以容纳本次收款（修改后累计收款将超过发票含税合计）。"
+            "Payment exceeds the outstanding amount "
+            "(cumulative payments would exceed the invoice total after this edit)."
         )
 
     # Write back computed fields to invoice
