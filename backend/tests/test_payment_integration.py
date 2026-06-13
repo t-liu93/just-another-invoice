@@ -1353,3 +1353,214 @@ class TestListPayments:
         data = resp.json()
         assert data["total"] == 1
         assert data["items"][0]["customer_name"] == "AlphaCustomer"
+
+
+# ---------------------------------------------------------------------------
+# M7.5 Step 3 – F2026-009 收满闭环回归
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestF2026009FullyCollectable:
+    """Regression guard for the F2026-009 "永远收不满" bug (M7.5).
+
+    Root cause: M5 pricing engine only quantised document-level totals to 3
+    decimal places (e.g. 3865.166).  The UI displayed toFixed(2) → 3865.17,
+    but:
+      - paying 3865.17 triggered the overpayment guard (3865.170 > 3865.166)
+      - paying 3865.16 left a residual of 0.006 (displayed as 0.01)
+      - paying that 0.01 again triggered the overpayment guard
+
+    Fix (M7.5 step 2): pricing engine now quantises every line-level amount to
+    the currency minor unit (EUR = 2 dp, "cent") *before* summing.  With line-
+    level rounding:
+      net  = quantize_to_minor_unit(3194.352 × 1)   = 3194.35
+      VAT  = quantize_to_minor_unit(3194.35 × 0.21) = 670.81
+      total = 3194.35 + 670.81                       = 3865.16
+
+    After the fix, total_incl_vat is a cent-exact value, so a single payment
+    of 3865.16 brings due_amount to exactly 0 without any residual — the
+    payment service requires **zero changes** (``recompute_payment_state``
+    uses ``due = total - paid`` with no secondary rounding; when total is
+    already a cent value the equality ``due == 0`` is naturally satisfied).
+    """
+
+    async def test_f2026_009_invoice_total_is_cent_exact(
+        self, db_client: AsyncClient
+    ) -> None:
+        """F2026-009 shape: single line unit_price=3194.352, qty=1, 21% VAT,
+        amounts_include_vat=False.
+
+        Hand-calc (M7.5 D1 · line-level to minor unit):
+          net  = quantize_to_minor_unit(3194.352 × 1)   = 3194.35
+          VAT  = quantize_to_minor_unit(3194.35 × 0.21) = 670.81
+          total = 3194.35 + 670.81                       = 3865.16
+
+        Assert that total_incl_vat is 3865.16 (not the historic 3865.166),
+        taxable/subtotal is 3194.35, and vat is 670.81.
+        """
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+        treatment_nl = seeds["treatments"]["NL_DOMESTIC"]["id"]
+
+        resp = await db_client.post(
+            "/api/v1/invoices",
+            json={
+                "customer_id": customer_id,
+                "invoice_date": "2026-06-09",
+                "tax_mode": "LINE",
+                "amounts_include_vat": False,
+                "lines": [
+                    {
+                        "name": "Solar panels",
+                        "quantity": "1",
+                        "unit_price": "3194.352",
+                        "vat_rate_id": rate_21,
+                        "vat_treatment_id": treatment_nl,
+                    }
+                ],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        inv = resp.json()
+
+        # API serialises NUMERIC(18,3) → always 3 dp; "3865.160" == Decimal("3865.16")
+        assert inv["total_incl_vat"] == "3865.160", (
+            f"Expected cent-exact total 3865.160, got {inv['total_incl_vat']!r}. "
+            "Historic bug would produce 3865.166 (3-dp, third digit non-zero)."
+        )
+        assert inv["taxable_amount"] == "3194.350", (
+            f"Expected net 3194.350, got {inv['taxable_amount']!r}"
+        )
+        assert inv["vat_total"] == "670.810", (
+            f"Expected VAT 670.810, got {inv['vat_total']!r}"
+        )
+
+    async def test_f2026_009_fully_collectable_to_cent(
+        self, db_client: AsyncClient
+    ) -> None:
+        """F2026-009 full end-to-end: create → SENT → pay 3865.16 → PAID/COMPLETED/due=0.
+
+        This is the primary regression test for M7.5: verifies that after line-
+        level quantisation to the cent the payment layer (zero changes to
+        payment.py) naturally achieves due == 0 when paying the exact cent
+        amount displayed to the customer, with no sub-cent residual.
+
+        Historic bug: the same invoice with 3-dp total (3865.166) could never
+        be marked PAID — paying 3865.16 left due=0.006, paying 3865.17 triggered
+        the overpayment guard (422).  The fix is entirely in the pricing engine;
+        payment.recompute_payment_state requires zero code changes.
+        """
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+        treatment_nl = seeds["treatments"]["NL_DOMESTIC"]["id"]
+
+        # --- create invoice (F2026-009 shape) ---
+        create_resp = await db_client.post(
+            "/api/v1/invoices",
+            json={
+                "customer_id": customer_id,
+                "invoice_date": "2026-06-09",
+                "tax_mode": "LINE",
+                "amounts_include_vat": False,
+                "lines": [
+                    {
+                        "name": "Solar panels",
+                        "quantity": "1",
+                        "unit_price": "3194.352",
+                        "vat_rate_id": rate_21,
+                        "vat_treatment_id": treatment_nl,
+                    }
+                ],
+            },
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        inv = create_resp.json()
+        invoice_id = inv["id"]
+
+        # confirm cent-exact total before proceeding (API serialises as 3-dp string)
+        assert inv["total_incl_vat"] == "3865.160", (
+            f"Precondition: total must be cent-exact 3865.160, got {inv['total_incl_vat']!r}"
+        )
+
+        # --- mark SENT ---
+        sent_resp = await _send_invoice(db_client, invoice_id)
+        assert sent_resp["status"] == "SENT"
+
+        # --- record one payment of exactly 3865.16 (cent-exact) ---
+        pay_resp = await db_client.post(
+            f"/api/v1/invoices/{invoice_id}/payments",
+            json={"payment_date": "2026-06-13", "amount": "3865.16"},
+        )
+        assert pay_resp.status_code == 201, pay_resp.text
+        data = pay_resp.json()
+
+        # Core assertions: the invoice is fully collected with zero residual
+        assert data["due_amount"] == "0.000", (
+            f"Expected due_amount == 0.000, got {data['due_amount']!r}. "
+            "Historic bug: due would be 0.006 (sub-cent residual) because "
+            "total was stored as 3-dp 3865.166."
+        )
+        assert data["paid_status"] == "PAID", (
+            f"Expected PAID, got {data['paid_status']!r}"
+        )
+        assert data["status"] == "COMPLETED", (
+            f"Expected COMPLETED (SENT→COMPLETED lifecycle), got {data['status']!r}"
+        )
+        assert data["paid_total"] == "3865.160", (
+            f"Expected paid_total 3865.160, got {data['paid_total']!r}"
+        )
+
+    async def test_f2026_009_overpayment_still_blocked(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Paying 3865.17 (one cent over the cent-exact total 3865.16) → 422.
+
+        After M7.5, the total is 3865.16 (exact cent).  Attempting to pay
+        3865.17 must be blocked by the overpayment guard, confirming that the
+        guard remains intact and the total is truly 3865.16 (not 3865.166 where
+        3865.17 would have been blocked for a different reason — exceeding a
+        3-dp value).
+        """
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+        treatment_nl = seeds["treatments"]["NL_DOMESTIC"]["id"]
+
+        create_resp = await db_client.post(
+            "/api/v1/invoices",
+            json={
+                "customer_id": customer_id,
+                "invoice_date": "2026-06-09",
+                "tax_mode": "LINE",
+                "amounts_include_vat": False,
+                "lines": [
+                    {
+                        "name": "Solar panels",
+                        "quantity": "1",
+                        "unit_price": "3194.352",
+                        "vat_rate_id": rate_21,
+                        "vat_treatment_id": treatment_nl,
+                    }
+                ],
+            },
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        invoice_id = create_resp.json()["id"]
+
+        await _send_invoice(db_client, invoice_id)
+
+        # paying one cent over the total → overpayment guard must fire
+        pay_resp = await db_client.post(
+            f"/api/v1/invoices/{invoice_id}/payments",
+            json={"payment_date": "2026-06-13", "amount": "3865.17"},
+        )
+        assert pay_resp.status_code == 422, (
+            f"Expected 422 (overpayment guard), got {pay_resp.status_code}. "
+            "Paying 3865.17 on a 3865.16 invoice must be rejected."
+        )
