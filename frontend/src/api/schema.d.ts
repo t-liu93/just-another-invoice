@@ -1287,6 +1287,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/{expense_id}/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Attachments Endpoint
+         * @description Return all attachments for an expense.
+         */
+        get: operations["list_attachments_endpoint_api_v1_expenses__expense_id__attachments_get"];
+        put?: never;
+        /**
+         * Upload Attachment Endpoint
+         * @description Upload a receipt file and attach it to the expense.
+         *
+         *     Accepts ``multipart/form-data`` with a single ``file`` field.
+         *
+         *     Validation (red-line 7):
+         *     - MIME type must be image/png, image/jpeg, image/webp, or application/pdf.
+         *     - File size must not exceed ``config.max_receipt_bytes`` (default 10 MB).
+         *     - Magic bytes must match the declared Content-Type.
+         *
+         *     The original client filename is stored for display only; the storage path
+         *     is derived solely from UUIDs + whitelisted extension.
+         *     ``storage_key`` and disk paths are never returned in the response.
+         */
+        post: operations["upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/attachments/{attachment_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Attachment Content Endpoint
+         * @description Serve the raw file bytes for an attachment inline.
+         *
+         *     Returns:
+         *     - ``Content-Type``: the stored MIME type (e.g. ``image/png``,
+         *       ``application/pdf``).
+         *     - ``Content-Disposition: inline`` – instructs the browser to render the
+         *       file in-page rather than trigger a download.
+         *     - No ``storage_key`` or disk path in the response body.
+         *
+         *     Cross-company access → 404.
+         */
+        get: operations["get_attachment_content_endpoint_api_v1_attachments__attachment_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Attachment Endpoint
+         * @description Delete an attachment: DB row + disk file.
+         *
+         *     Disk deletion failures are logged but do NOT fail this request.
+         */
+        delete: operations["delete_attachment_endpoint_api_v1_attachments__attachment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -1499,6 +1585,11 @@ export interface components {
             /** Country Code */
             country_code?: string | null;
             type: components["schemas"]["AddressType"];
+        };
+        /** Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post */
+        Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post: {
+            /** File */
+            file: string;
         };
         /** Body_upload_logo_api_v1_company_logo_put */
         Body_upload_logo_api_v1_company_logo_put: {
@@ -2196,6 +2287,44 @@ export interface components {
             customer_id?: string | null;
             /** Notes */
             notes?: string | null;
+        };
+        /**
+         * ExpenseAttachmentListResponse
+         * @description List of attachments for a single expense.
+         */
+        ExpenseAttachmentListResponse: {
+            /** Items */
+            items: components["schemas"]["ExpenseAttachmentRead"][];
+        };
+        /**
+         * ExpenseAttachmentRead
+         * @description Single attachment as returned by the API.
+         *
+         *     ``storage_key`` and disk paths are intentionally absent (red-line 7 /
+         *     M8 D2): clients must not know where files are stored on disk.
+         */
+        ExpenseAttachmentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Expense Id
+             * Format: uuid
+             */
+            expense_id: string;
+            /** Filename */
+            filename?: string | null;
+            /** Mime Type */
+            mime_type: string;
+            /** Byte Size */
+            byte_size: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * ExpenseCategoryListResponse
@@ -7730,6 +7859,132 @@ export interface operations {
             header?: never;
             path: {
                 expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_attachments_endpoint_api_v1_expenses__expense_id__attachments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseAttachmentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseAttachmentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_attachment_content_endpoint_api_v1_attachments__attachment_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_attachment_endpoint_api_v1_attachments__attachment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attachment_id: string;
             };
             cookie?: never;
         };

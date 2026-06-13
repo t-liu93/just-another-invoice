@@ -1,12 +1,15 @@
-"""Pydantic schemas for expense (M8 step 1).
+"""Pydantic schemas for expense (M8 steps 1 + 2).
 
-ExpenseInput        – request body (raw user input only; no gross/base_*/snapshots).
-ExpenseRead         – full expense as returned by read endpoints.
-ExpenseListItem     – minimal overview row for the expenses list.
-ExpenseListResponse – paginated expenses list.
+ExpenseInput               – request body (raw user input only; no gross/base_*/snapshots).
+ExpenseRead                – full expense as returned by read endpoints.
+ExpenseListItem            – minimal overview row for the expenses list.
+ExpenseListResponse        – paginated expenses list.
+ExpenseAttachmentRead      – single attachment record (no storage_key / disk path exposed).
+ExpenseAttachmentListResponse – list of attachments for one expense.
 
 Schema layer never computes amounts (red-line 1).  All monetary fields are
 ``Decimal``.  Text fields use plain ``str`` (red-line 10).
+``storage_key`` and disk paths are intentionally absent from all read schemas.
 """
 
 from __future__ import annotations
@@ -144,3 +147,29 @@ class ExpenseListResponse(BaseModel):
 
     items: list[ExpenseListItem]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Attachment read schemas (step 2)
+# ---------------------------------------------------------------------------
+
+
+class ExpenseAttachmentRead(BaseModel):
+    """Single attachment as returned by the API.
+
+    ``storage_key`` and disk paths are intentionally absent (red-line 7 /
+    M8 D2): clients must not know where files are stored on disk.
+    """
+
+    id: uuid.UUID
+    expense_id: uuid.UUID
+    filename: str | None = None
+    mime_type: str
+    byte_size: int
+    created_at: datetime
+
+
+class ExpenseAttachmentListResponse(BaseModel):
+    """List of attachments for a single expense."""
+
+    items: list[ExpenseAttachmentRead]

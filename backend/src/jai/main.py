@@ -16,6 +16,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 import jai.config as _cfg
+from jai.api.attachments import router as attachments_router
 from jai.api.auth import router as auth_router
 from jai.api.auth import users_router
 from jai.api.company import router as company_router
@@ -157,6 +158,7 @@ def create_app() -> FastAPI:
     app.include_router(estimates_router)
     app.include_router(payments_router)
     app.include_router(expenses_router)
+    app.include_router(attachments_router)
     app.include_router(content_router)
 
     # -- Static files + SPA fallback (deployment mode) ----------------------

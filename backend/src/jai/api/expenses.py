@@ -31,6 +31,7 @@ from jai.services.expense import (
     list_expenses,
     update_expense,
 )
+from jai.services.storage import get_storage
 
 router = APIRouter(prefix="/api/v1", tags=["expenses"])
 
@@ -195,8 +196,9 @@ async def delete_expense_endpoint(
     """Delete an expense (cascade removes attachments; step 2 cleans disk files)."""
     _owner_only(user)
     company_id = _require_company_id(user)
+    storage = get_storage()
     try:
-        await delete_expense(session, expense_id, company_id)
+        await delete_expense(session, expense_id, company_id, storage=storage)
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)

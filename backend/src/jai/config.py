@@ -94,6 +94,14 @@ class Settings(BaseSettings):
     # Hour (0–23 UTC) at which the daily quote-expiry job fires.
     scheduler_expire_quotes_hour: int = 1
 
+    # -- Storage (M8 step 2) ------------------------------------------------
+    # Root directory for local file storage (receipts, future PDF attachments).
+    # Dev default: ./var/storage (relative to CWD where uvicorn is launched).
+    # Production/container default: /data/storage (separate volume).
+    storage_root: str = "./var/storage"
+    # Maximum allowed size for receipt uploads (bytes). Default: 10 MB.
+    max_receipt_bytes: int = 10 * 1024 * 1024
+
     # -- SMTP env fallback (step 4) -----------------------------------------
     # These are used as fallback when no SMTP settings exist in the DB.
     smtp_host: str = ""

@@ -1,12 +1,17 @@
-"""Expense service – create, list, read, update, and delete expenses (M8 step 1).
+"""Expense service – CRUD, list, and attachment management (M8 steps 1 + 2).
 
 Public API
 ----------
-- ``create_expense``    – validate guards, compute amounts/snapshots, persist.
-- ``list_expenses``     – filtered/paginated/sorted list for the company.
-- ``get_expense``       – fetch by id + company_id (404 guard).
-- ``update_expense``    – recompute amounts/snapshots and write back.
-- ``delete_expense``    – delete the expense (DB cascade removes attachments in step 2).
+- ``create_expense``        – validate guards, compute amounts/snapshots, persist.
+- ``list_expenses``         – filtered/paginated/sorted list for the company.
+- ``get_expense``           – fetch by id + company_id (404 guard).
+- ``update_expense``        – recompute amounts/snapshots and write back.
+- ``delete_expense``        – delete the expense; service deletes attachment disk
+                              files before DB delete (D12); DB CASCADE removes rows.
+- ``add_attachment``        – validate + save receipt file to storage + persist metadata.
+- ``list_attachments``      – return all attachments for an expense (company-scoped).
+- ``get_attachment_content``– load attachment content from storage for inline serving.
+- ``delete_attachment``     – delete attachment DB row + disk file.
 
 Red-line compliance
 -------------------
@@ -14,12 +19,15 @@ Red-line compliance
    the service.  Schema layer never computes amounts.
 2. company_id is always injected by the service; front-end never provides it.
 3. No manual cascade deletes – DB ON DELETE CASCADE handles sub-tables.
-   (Attachment disk-file cleanup is wired in step 2.)
+   Disk-file cleanup for attachments is explicit here (D12).
 5. vat_treatment.side == PURCHASE guard – sales-side treatments are rejected.
+7. Receipt storage uses only controlled filenames (UUID + whitelisted ext);
+   client filename is stored for display only, never used in disk paths.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -31,14 +39,24 @@ from jai.models._enums import VatTreatmentSide
 from jai.models.company import Company
 from jai.models.dictionary import ExpenseCategory
 from jai.models.expense import Expense
+from jai.models.expense_attachment import ExpenseAttachment
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.expense import (
+    ExpenseAttachmentListResponse,
+    ExpenseAttachmentRead,
     ExpenseInput,
     ExpenseListItem,
     ExpenseListResponse,
     ExpenseRead,
 )
 from jai.services.money import quantize_to_minor_unit
+from jai.services.storage import (
+    MIME_TO_EXT,
+    Storage,
+    validate_receipt,
+)
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Pure computation helpers (independently unit-testable, no DB)
@@ -326,7 +344,20 @@ async def create_expense(
     session.add(exp)
     await session.commit()
     await session.refresh(exp)
-    return _expense_to_read(exp)
+    # New expense: no attachments yet
+    return _expense_to_read(exp, attachment_count=0)
+
+
+async def _count_attachments(
+    session: AsyncSession,
+    expense_id: uuid.UUID,
+) -> int:
+    """Return the number of attachments for a given expense."""
+    stmt = select(func.count(ExpenseAttachment.id)).where(
+        ExpenseAttachment.expense_id == expense_id
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one()
 
 
 async def get_expense(
@@ -339,7 +370,8 @@ async def get_expense(
     Raises ``LookupError`` (→ HTTP 404) if not found or cross-company.
     """
     exp = await _load_expense(session, expense_id, company_id)
-    return _expense_to_read(exp)
+    count = await _count_attachments(session, expense_id)
+    return _expense_to_read(exp, count)
 
 
 async def update_expense(
@@ -361,20 +393,48 @@ async def update_expense(
     await _apply_body(session, exp, body, company_id)
     await session.commit()
     await session.refresh(exp)
-    return _expense_to_read(exp)
+    count = await _count_attachments(session, expense_id)
+    return _expense_to_read(exp, count)
 
 
 async def delete_expense(
     session: AsyncSession,
     expense_id: uuid.UUID,
     company_id: uuid.UUID,
+    storage: Storage | None = None,
 ) -> None:
     """Delete an expense.
 
-    DB ON DELETE CASCADE removes expense_attachment rows (red-line 3).
-    Disk-file cleanup for attachments is wired in step 2.
+    Before deleting the DB row the service fetches all attachment ``storage_key``
+    values for this expense and deletes the corresponding disk files via
+    ``storage.delete()`` (D12).  Disk deletion failures are logged but do NOT
+    abort the DB transaction – orphan files can be cleaned up later, but DB
+    consistency takes priority.
+
+    DB ON DELETE CASCADE then removes the ``expense_attachment`` metadata rows
+    (red-line 3).
     """
     exp = await _load_expense(session, expense_id, company_id)
+
+    # -- Collect attachment storage keys for disk cleanup (D12) ----------------
+    if storage is not None:
+        att_stmt = select(ExpenseAttachment.storage_key).where(
+            ExpenseAttachment.expense_id == expense_id,
+            ExpenseAttachment.company_id == company_id,
+        )
+        att_result = await session.execute(att_stmt)
+        keys = list(att_result.scalars().all())
+        for key in keys:
+            try:
+                storage.delete(key)
+            except Exception:
+                logger.exception(
+                    "delete_expense: failed to delete disk file for key %r "
+                    "(expense_id=%s); continuing with DB delete",
+                    key,
+                    expense_id,
+                )
+
     await session.delete(exp)
     await session.commit()
 
@@ -465,6 +525,18 @@ async def list_expenses(
     data_result = await session.execute(data_stmt)
     expenses = list(data_result.scalars().all())
 
+    # -- Fetch attachment counts for all returned expense IDs ------------------
+    expense_ids = [exp.id for exp in expenses]
+    attachment_counts: dict[uuid.UUID, int] = {}
+    if expense_ids:
+        count_att_stmt = (
+            select(ExpenseAttachment.expense_id, func.count(ExpenseAttachment.id))
+            .where(ExpenseAttachment.expense_id.in_(expense_ids))
+            .group_by(ExpenseAttachment.expense_id)
+        )
+        count_att_result = await session.execute(count_att_stmt)
+        attachment_counts = {row[0]: row[1] for row in count_att_result.all()}
+
     items: list[ExpenseListItem] = [
         ExpenseListItem(
             id=exp.id,
@@ -476,9 +548,197 @@ async def list_expenses(
             gross_amount=Decimal(str(exp.gross_amount)),
             deductible=exp.deductible,
             is_draft=exp.is_draft,
-            attachment_count=0,  # step 2 will populate this
+            attachment_count=attachment_counts.get(exp.id, 0),
         )
         for exp in expenses
     ]
 
     return ExpenseListResponse(items=items, total=total)
+
+
+# ---------------------------------------------------------------------------
+# Attachment service functions (step 2)
+# ---------------------------------------------------------------------------
+
+
+async def _load_attachment(
+    session: AsyncSession,
+    attachment_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> ExpenseAttachment:
+    """Load an attachment scoped to the company.
+
+    Raises ``LookupError`` (→ HTTP 404) if the attachment does not exist or
+    belongs to a different company.
+    """
+    stmt = select(ExpenseAttachment).where(
+        ExpenseAttachment.id == attachment_id,
+        ExpenseAttachment.company_id == company_id,
+    )
+    result = await session.execute(stmt)
+    att = result.scalar_one_or_none()
+    if att is None:
+        raise LookupError("Attachment not found.")
+    return att
+
+
+def _attachment_to_read(att: ExpenseAttachment) -> ExpenseAttachmentRead:
+    """Convert ORM ExpenseAttachment to the read schema.
+
+    ``storage_key`` is intentionally excluded from the schema (red-line 7 / D2).
+    """
+    return ExpenseAttachmentRead(
+        id=att.id,
+        expense_id=att.expense_id,
+        filename=att.filename,
+        mime_type=att.mime_type,
+        byte_size=att.byte_size,
+        created_at=att.created_at,
+    )
+
+
+async def add_attachment(
+    session: AsyncSession,
+    expense_id: uuid.UUID,
+    company_id: uuid.UUID,
+    content: bytes,
+    mime_type: str,
+    filename: str | None,
+    creator_id: uuid.UUID | None,
+    storage: Storage,
+    max_receipt_bytes: int,
+) -> ExpenseAttachmentRead:
+    """Validate + save a receipt file and persist its metadata.
+
+    Guards (red-line 7 / M8 D2):
+    - MIME type must be in the receipt whitelist.
+    - File size must not exceed ``max_receipt_bytes``.
+    - Magic bytes must match the declared MIME type.
+    - The storage key is constructed from UUIDs + whitelisted extension;
+      the client-supplied ``filename`` is stored for display only.
+
+    Raises
+    ------
+    LookupError
+        If ``expense_id`` does not exist or belongs to a different company.
+    ReceiptValidationError
+        If the file fails MIME / size / magic-byte validation.
+    """
+    # Guard: expense must belong to this company
+    _ = await _load_expense(session, expense_id, company_id)
+
+    # Strip MIME type parameters (e.g. "image/png; charset=binary" → "image/png")
+    clean_mime = mime_type.split(";")[0].strip().lower()
+
+    # Validate content (raises ReceiptValidationError on failure)
+    validate_receipt(content, clean_mime, max_receipt_bytes)
+
+    # Build a controlled storage key from UUIDs + whitelisted extension (red-line 7)
+    attachment_id = uuid.uuid4()
+    ext = MIME_TO_EXT[clean_mime]
+    relative_key = f"{company_id}/{expense_id}/{attachment_id}.{ext}"
+    namespace = "receipts"
+
+    # Persist to disk first; if this fails the metadata row is not created
+    storage_key = storage.save(namespace, relative_key, content, clean_mime)
+
+    # Persist metadata row
+    att = ExpenseAttachment()
+    att.id = attachment_id
+    att.company_id = company_id
+    att.expense_id = expense_id
+    att.storage_key = storage_key
+    att.filename = filename
+    att.mime_type = clean_mime
+    att.byte_size = len(content)
+    att.creator_id = creator_id
+
+    session.add(att)
+    await session.commit()
+    await session.refresh(att)
+    return _attachment_to_read(att)
+
+
+async def list_attachments(
+    session: AsyncSession,
+    expense_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> ExpenseAttachmentListResponse:
+    """Return all attachments for an expense (company-scoped).
+
+    Raises
+    ------
+    LookupError
+        If ``expense_id`` does not exist or belongs to a different company.
+    """
+    # Guard: expense must belong to this company
+    _ = await _load_expense(session, expense_id, company_id)
+
+    stmt = (
+        select(ExpenseAttachment)
+        .where(
+            ExpenseAttachment.expense_id == expense_id,
+            ExpenseAttachment.company_id == company_id,
+        )
+        .order_by(ExpenseAttachment.created_at.asc())
+    )
+    result = await session.execute(stmt)
+    attachments = list(result.scalars().all())
+    return ExpenseAttachmentListResponse(items=[_attachment_to_read(a) for a in attachments])
+
+
+async def get_attachment_content(
+    session: AsyncSession,
+    attachment_id: uuid.UUID,
+    company_id: uuid.UUID,
+    storage: Storage,
+) -> tuple[bytes, str]:
+    """Return (content_bytes, mime_type) for an attachment.
+
+    The caller is expected to stream the bytes with ``Content-Disposition: inline``
+    and ``Content-Type`` set to the returned MIME type.
+
+    Raises
+    ------
+    LookupError
+        If the attachment does not exist or belongs to a different company.
+    FileNotFoundError
+        If the disk file is missing (storage inconsistency).
+    """
+    att = await _load_attachment(session, attachment_id, company_id)
+    content = storage.open(att.storage_key)
+    return content, att.mime_type
+
+
+async def delete_attachment(
+    session: AsyncSession,
+    attachment_id: uuid.UUID,
+    company_id: uuid.UUID,
+    storage: Storage,
+) -> None:
+    """Delete an attachment: disk file first, then DB row.
+
+    Disk deletion failures are logged but do NOT abort the DB transaction
+    (orphan files can be cleaned up later; DB consistency takes priority).
+
+    Raises
+    ------
+    LookupError
+        If the attachment does not exist or belongs to a different company.
+    """
+    att = await _load_attachment(session, attachment_id, company_id)
+    key = att.storage_key
+
+    # Delete disk file (best-effort; failures logged but not raised)
+    try:
+        storage.delete(key)
+    except Exception:
+        logger.exception(
+            "delete_attachment: failed to delete disk file for key %r "
+            "(attachment_id=%s); continuing with DB delete",
+            key,
+            attachment_id,
+        )
+
+    await session.delete(att)
+    await session.commit()
