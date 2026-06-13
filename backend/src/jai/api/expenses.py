@@ -33,11 +33,14 @@ from jai.db import get_session
 from jai.models.user import User
 from jai.schemas.expense import (
     ExpenseAIPrefill,
+    ExpenseCalculateRequest,
+    ExpenseCalculateResult,
     ExpenseInput,
     ExpenseListResponse,
     ExpenseRead,
 )
 from jai.services.expense import (
+    calculate_expense_preview,
     create_expense,
     delete_expense,
     get_expense,
@@ -51,6 +54,7 @@ class _AiExtractRequest(BaseModel):
     """Request body for POST /expenses/ai-extract."""
 
     attachment_id: uuid.UUID
+    language: str | None = None  # UI locale ("en"/"zh"); explanatory fields follow it
 
 router = APIRouter(prefix="/api/v1", tags=["expenses"])
 
@@ -106,6 +110,43 @@ async def create_expense_endpoint(
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
+# Calculate VAT preview – registered BEFORE /expenses/{expense_id} to avoid
+# the parameterised route swallowing the literal path "/expenses/calculate".
+# ---------------------------------------------------------------------------
+
+
+@router.post("/expenses/calculate", response_model=ExpenseCalculateResult)
+async def calculate_expense_endpoint(
+    body: ExpenseCalculateRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ExpenseCalculateResult:
+    """Preview VAT and gross derived from net × VAT rate (not persisted).
+
+    Designed for the expense editor: the frontend calls this when the user
+    selects a VAT rate (immediately) or changes the net amount (debounced),
+    and uses the returned ``vat_amount`` / ``gross_amount`` to populate the
+    form without touching the DB.
+
+    Error responses:
+    - ``404`` – ``vat_rate_id`` not found or belongs to a different company.
+    - ``422`` – ``net_amount < 0`` or malformed request body.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await calculate_expense_preview(session, company_id, body)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
 # AI extract (step 4) – registered BEFORE /expenses/{expense_id} to avoid
 # the parameterised route swallowing the literal path "/expenses/ai-extract".
 # ---------------------------------------------------------------------------
@@ -139,6 +180,7 @@ async def ai_extract_endpoint(
             session,
             company_id,
             body.attachment_id,
+            language=body.language,
         )
     except LookupError as exc:
         raise HTTPException(

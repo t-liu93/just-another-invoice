@@ -6,6 +6,8 @@ ExpenseListItem            – minimal overview row for the expenses list.
 ExpenseListResponse        – paginated expenses list.
 ExpenseAttachmentRead      – single attachment record (no storage_key / disk path exposed).
 ExpenseAttachmentListResponse – list of attachments for one expense.
+ExpenseCalculateRequest    – request body for POST /expenses/calculate (preview endpoint).
+ExpenseCalculateResult     – result of the VAT preview calculation (not persisted).
 
 Schema layer never computes amounts (red-line 1).  All monetary fields are
 ``Decimal``.  Text fields use plain ``str`` (red-line 10).
@@ -183,6 +185,43 @@ class ExpenseAttachmentListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Calculate preview schemas (VAT auto-compute, not persisted)
+# ---------------------------------------------------------------------------
+
+
+class ExpenseCalculateRequest(BaseModel):
+    """Request body for POST /expenses/calculate.
+
+    The preview endpoint derives VAT and gross from ``net_amount`` and the
+    selected ``vat_rate_id``.  It does **not** persist any data.
+
+    Both ``net_amount`` and ``vat_rate_id`` are required.  The VAT rate must
+    belong to the caller's company (scoped server-side).
+    """
+
+    net_amount: Decimal = Field(ge=0, description="Net (excl. VAT) amount ≥ 0.")
+    vat_rate_id: uuid.UUID
+
+
+class ExpenseCalculateResult(BaseModel):
+    """Result of a VAT preview calculation.
+
+    Returned by POST /expenses/calculate; never persisted.  All amounts are
+    quantised to the currency's minor unit (EUR = 2 dp) by the service.
+    """
+
+    net_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+    vat_rate_percent: Decimal
+
+
+# ---------------------------------------------------------------------------
+# AI pre-fill response (step 4)
+# ---------------------------------------------------------------------------
+
+
 class ExpenseAIPrefill(BaseModel):
     """Fields pre-filled by the AI receipt extraction pipeline (D5).
 
@@ -211,3 +250,4 @@ class ExpenseAIPrefill(BaseModel):
     suggested_category_id: uuid.UUID | None = None
     raw_model_note: str | None = None
     confidence: str | None = None
+    summary: str | None = None

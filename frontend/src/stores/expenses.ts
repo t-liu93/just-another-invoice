@@ -160,8 +160,8 @@ export const useExpensesStore = defineStore('expenses', () => {
   }
 
   // AI extraction
-  async function aiExtract(attachmentId: string): Promise<ExpenseAIPrefill> {
-    return await post<ExpenseAIPrefill>('/api/v1/expenses/ai-extract', { attachment_id: attachmentId })
+  async function aiExtract(attachmentId: string, language?: string): Promise<ExpenseAIPrefill> {
+    return await post<ExpenseAIPrefill>('/api/v1/expenses/ai-extract', { attachment_id: attachmentId, language })
   }
 
   return {

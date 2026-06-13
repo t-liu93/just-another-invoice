@@ -286,10 +286,12 @@ class AiSettings(BaseModel):
     Stored with key ``SETTING_KEY_AI`` (``"ai"``).  Mirrors the SMTP settings
     pattern: plain-text JSONB, read-desensitised, env fallback (D1).
 
-    ``receipt_prompt`` is the user-editable extraction instruction.  When empty
-    the service falls back to the built-in ``DEFAULT_RECEIPT_PROMPT`` constant.
+    ``receipt_prompt`` is an **optional additive instruction** that is appended
+    after the built-in ``DEFAULT_RECEIPT_PROMPT``; leaving it empty means only
+    the default is used.  Users can use this field to refine or extend the
+    extraction without losing the built-in Dutch BTW context (D15).
     The system always appends the fixed ``_OUTPUT_CONTRACT`` footer so that the
-    JSON output schema cannot be accidentally broken by a custom prompt (D15).
+    JSON output schema cannot be accidentally broken by extra instructions.
 
     ``api_key`` is stored in plain text (same approach as SMTP ``password``).
     It is **never** returned in any API response; only ``api_key_set: bool``

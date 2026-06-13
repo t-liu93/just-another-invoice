@@ -38,6 +38,19 @@ services:
       # Public-facing URL used to build absolute links in emails (e.g. password
       # reset).  Must be set to the real domain in production.
       BASE_URL: ${BASE_URL:-http://localhost:8000}
+      # Receipt/attachment storage root — points at the bind-mounted host
+      # folder declared under `volumes` below.
+      STORAGE_ROOT: /data/storage
+    # Run as a non-root host user (default uid:gid 1000:1000) so files written
+    # into the bind-mounted storage folder are owned by you on the host —
+    # convenient for backups.  IMPORTANT: pre-create the host folder owned by
+    # this uid BEFORE `up`, otherwise Docker auto-creates it as root and
+    # receipt uploads fail with EACCES.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      # Bind-mount a host folder for receipts/attachments.  Override the host
+      # path via STORAGE_DIR in .env (default ./data/storage next to this file).
+      - ${STORAGE_DIR:-./data/storage}:/data/storage
     ports:
       - "127.0.0.1:${APP_HOST_PORT:-8000}:8000"
     healthcheck:

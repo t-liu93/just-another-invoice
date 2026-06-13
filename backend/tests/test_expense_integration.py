@@ -1,4 +1,4 @@
-"""Integration tests for M8 step 1 – Expense CRUD + list + guards.
+"""Integration tests for M8 step 1 – Expense CRUD + list + guards + calculate.
 
 Requires a running PostgreSQL instance (``pytest -m integration``).
 
@@ -16,6 +16,7 @@ Coverage:
 - Negative net or vat → 422 (schema validation)
 - Full CRUD: create → read → update → delete
 - PUT confirms draft (is_draft True → False); idempotent on already-confirmed expense
+- POST /expenses/calculate: VAT preview (not persisted), happy path + guards
 """
 
 from __future__ import annotations
@@ -1016,3 +1017,102 @@ class TestPutConfirmsDraft:
         )
         assert put_resp.status_code == 200, put_resp.text
         assert put_resp.json()["is_draft"] is False, "is_draft must stay False (idempotent)"
+
+
+# ---------------------------------------------------------------------------
+# POST /expenses/calculate – VAT preview endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestExpenseCalculate:
+    """POST /expenses/calculate – VAT and gross preview (not persisted)."""
+
+    async def test_happy_path_21_percent(self, db_client: AsyncClient) -> None:
+        """100.00 × 21% → vat=21.00, gross=121.00; vat_rate_percent returned."""
+        from decimal import Decimal
+
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        rate = seeds["rates"]["NL standard (21%)"]
+
+        resp = await db_client.post(
+            "/api/v1/expenses/calculate",
+            json={"net_amount": "100.00", "vat_rate_id": rate["id"]},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert Decimal(data["net_amount"]) == Decimal("100.00")
+        assert Decimal(data["vat_amount"]) == Decimal("21.00")
+        assert Decimal(data["gross_amount"]) == Decimal("121.00")
+        assert Decimal(data["vat_rate_percent"]) == pytest.approx(
+            Decimal("21"), abs=Decimal("0.01")
+        )
+
+    def _setup_and_get_rate_id_sync(self) -> None:
+        """Helper placeholder – actual setup uses async helpers above."""
+
+    async def test_happy_path_9_percent(self, db_client: AsyncClient) -> None:
+        """50.00 × 9% → vat=4.50, gross=54.50."""
+        from decimal import Decimal
+
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        rate = seeds["rates"]["NL reduced (9%)"]
+
+        resp = await db_client.post(
+            "/api/v1/expenses/calculate",
+            json={"net_amount": "50.00", "vat_rate_id": rate["id"]},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert Decimal(data["vat_amount"]) == Decimal("4.50")
+        assert Decimal(data["gross_amount"]) == Decimal("54.50")
+
+    async def test_net_zero_returns_all_zeros(self, db_client: AsyncClient) -> None:
+        """Zero net → vat 0, gross 0."""
+        from decimal import Decimal
+
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        rate = seeds["rates"]["NL standard (21%)"]
+
+        resp = await db_client.post(
+            "/api/v1/expenses/calculate",
+            json={"net_amount": "0", "vat_rate_id": rate["id"]},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert Decimal(data["net_amount"]) == Decimal("0.00")
+        assert Decimal(data["vat_amount"]) == Decimal("0.00")
+        assert Decimal(data["gross_amount"]) == Decimal("0.00")
+
+    async def test_cross_company_vat_rate_returns_404(self, db_client: AsyncClient) -> None:
+        """vat_rate_id from another company (or random UUID) → 404."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/expenses/calculate",
+            json={"net_amount": "100.00", "vat_rate_id": str(uuid.uuid4())},
+        )
+        assert resp.status_code == 404
+
+    async def test_unauthenticated_returns_401(self, db_client: AsyncClient) -> None:
+        """Unauthenticated request → 401 (owner-only guard)."""
+        import httpx
+        from httpx import ASGITransport
+
+        from jai.main import app
+
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        rate = seeds["rates"]["NL standard (21%)"]
+
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as anon:
+            resp = await anon.post(
+                "/api/v1/expenses/calculate",
+                json={"net_amount": "100.00", "vat_rate_id": rate["id"]},
+            )
+        assert resp.status_code == 401

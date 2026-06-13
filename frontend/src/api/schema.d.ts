@@ -1314,6 +1314,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calculate Expense Endpoint
+         * @description Preview VAT and gross derived from net × VAT rate (not persisted).
+         *
+         *     Designed for the expense editor: the frontend calls this when the user
+         *     selects a VAT rate (immediately) or changes the net amount (debounced),
+         *     and uses the returned ``vat_amount`` / ``gross_amount`` to populate the
+         *     form without touching the DB.
+         *
+         *     Error responses:
+         *     - ``404`` – ``vat_rate_id`` not found or belongs to a different company.
+         *     - ``422`` – ``net_amount < 0`` or malformed request body.
+         */
+        post: operations["calculate_expense_endpoint_api_v1_expenses_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/ai-extract": {
         parameters: {
             query?: never;
@@ -2571,6 +2600,8 @@ export interface components {
             raw_model_note?: string | null;
             /** Confidence */
             confidence?: string | null;
+            /** Summary */
+            summary?: string | null;
         };
         /**
          * ExpenseAttachmentListResponse
@@ -2609,6 +2640,45 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * ExpenseCalculateRequest
+         * @description Request body for POST /expenses/calculate.
+         *
+         *     The preview endpoint derives VAT and gross from ``net_amount`` and the
+         *     selected ``vat_rate_id``.  It does **not** persist any data.
+         *
+         *     Both ``net_amount`` and ``vat_rate_id`` are required.  The VAT rate must
+         *     belong to the caller's company (scoped server-side).
+         */
+        ExpenseCalculateRequest: {
+            /**
+             * Net Amount
+             * @description Net (excl. VAT) amount ≥ 0.
+             */
+            net_amount: number | string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+        };
+        /**
+         * ExpenseCalculateResult
+         * @description Result of a VAT preview calculation.
+         *
+         *     Returned by POST /expenses/calculate; never persisted.  All amounts are
+         *     quantised to the currency's minor unit (EUR = 2 dp) by the service.
+         */
+        ExpenseCalculateResult: {
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
         };
         /**
          * ExpenseCategoryListResponse
@@ -5103,6 +5173,8 @@ export interface components {
              * Format: uuid
              */
             attachment_id: string;
+            /** Language */
+            language?: string | null;
         };
     };
     responses: never;
@@ -8331,6 +8403,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_expense_endpoint_api_v1_expenses_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseCalculateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCalculateResult"];
                 };
             };
             /** @description Validation Error */

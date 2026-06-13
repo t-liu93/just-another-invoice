@@ -24,13 +24,20 @@ Security
 
 Prompt design (D15)
 -------------------
-The effective prompt sent to the model is:
+The effective prompt sent to the model is built by concatenating (in order):
 
-    (settings.receipt_prompt or DEFAULT_RECEIPT_PROMPT) + _OUTPUT_CONTRACT
+    DEFAULT_RECEIPT_PROMPT
+    + (optional) AiSettings.receipt_prompt   ← appended, never replaces default
+    + date_context                           ← runtime injection
+    + _language_context(language)            ← runtime injection (UI locale)
+    + _OUTPUT_CONTRACT                       ← always last
 
-Users can override the extraction instruction via ``AiSettings.receipt_prompt``.
+``AiSettings.receipt_prompt`` is an **additive** override: it is appended after
+the default extraction instruction so that users can refine or extend the
+prompt without losing the built-in Dutch BTW context.  Leaving it empty results
+in the default behaviour only.
 The ``_OUTPUT_CONTRACT`` footer (which defines the JSON output schema) is
-**always appended by the service** and cannot be altered by the user.  This
+**always appended last by the service** and cannot be altered by the user.  This
 guarantees that the JSON parser can always handle the model's output regardless
 of prompt customisation.
 """
@@ -66,23 +73,27 @@ logger = logging.getLogger("jai.ai")
 # ---------------------------------------------------------------------------
 # Probe image (built-in minimal PNG, used for connectivity/multimodal testing)
 # ---------------------------------------------------------------------------
-# This 1×1 white pixel PNG is embedded as literal bytes so that the test probe
-# never needs to read from disk and never exposes user receipt data (D14).
-# Generated via: struct/zlib Python stdlib (no Pillow dependency for this).
+# This 64×64 RGB PNG is embedded as static bytes so that the test probe never
+# needs to read from disk and never exposes user receipt data (D14).
+# Many vision gateways reject images smaller than ~8×8 pixels (xAI enforces an
+# 8×8 minimum); the original 1×1 probe was returned as HTTP 400 by such
+# providers, which was mistakenly interpreted as "model does not support
+# multimodal input".  This 64×64 image (black border + diagonal lines, not a
+# solid colour) passes the size checks of all tested providers.
+# Generated offline; embedded as hex so the runtime has NO Pillow dependency.
 _PROBE_PNG_BYTES: bytes = bytes.fromhex(
-    "89504e470d0a1a0a"  # PNG signature
-    "0000000d49484452"  # IHDR length + type
-    "00000001"          # width = 1
-    "00000001"          # height = 1
-    "0802000000"        # bit depth=8, color type=2 (RGB), compression/filter/interlace
-    "907753de"          # IHDR CRC
-    "0000000c"          # IDAT length
-    "49444154"          # IDAT type
-    "789c63f8ffff3f00"  # zlib-compressed pixel data (white RGB)
-    "05fe02fe"          # rest of compressed data
-    "0def46b8"          # IDAT CRC
-    "0000000049454e44"  # IEND length + type
-    "ae426082"          # IEND CRC
+    "89504e470d0a1a0a0000000d4948445200000040000000400802000000250be6"
+    "890000012f4944415478dad5dacb8e83301044517cffff9f338b4851260f62ec"
+    "7e54b101dbdd251f40ac380ef363dc4fb7dbcd72f76370dffd18c3f409f07802"
+    "a6061e57a6069e078e065ec67606dea7bc0c7c9c3532f06dc1c5c0c99a8581f3"
+    "657d033f2bc40dcc14291b98ac9335305faa69e052b5a081ab0d6a06167aa40c"
+    "acb5e91858ee1431b0d3ac6060b3bfddc07e44af819094460351415d0602b35a"
+    "0cc4c6d51b084f2c3690115a692029b7cc405e748d81d4f40203d97728db40c1"
+    "6b9a6aa0e65b91672802e419ea004986524086a11a106e6800c41a7a00818636"
+    "4094a11310626806ec1bfa019b0609c08e4105b06c1002ac19b4000b0639c055"
+    "8322e0924114306fd0054c1aa401330675c04f8301e0dce0013831d800be199c"
+    "001f0d668077831fe0c5600938ccfff7fe77fc013e7fba7ca70f55d000000000"
+    "49454e44ae426082"
 )
 
 # ---------------------------------------------------------------------------
@@ -103,25 +114,52 @@ DEFAULT_RECEIPT_PROMPT: str = (
     "- suggested_category_name: a short expense category (e.g. 'Office supplies', "
     "'Travel', 'Software', 'Utilities', 'Meals', 'Professional services')\n"
     "- confidence: your overall confidence level: 'high', 'medium', or 'low'\n"
-    "- raw_model_note: any caveat or uncertainty about the extraction\n\n"
+    "- raw_model_note: any caveat or uncertainty about the extraction\n"
+    "- summary: a brief one-line description of what was purchased / what this expense is for "
+    "(e.g. 'Lunch meeting with client', 'A4 printer paper', 'Train ticket Amsterdam-Rotterdam')\n\n"
     "Return ONLY a JSON object. Omit keys you cannot determine with reasonable "
     "confidence."
 )
 
-# This footer is ALWAYS appended to the effective prompt (after the user's
-# custom instruction or the default above).  It pins the output format so
-# the JSON parser can always handle the model's reply regardless of what the
-# user writes in their custom prompt.
+# This footer is ALWAYS appended last to the effective prompt (after
+# DEFAULT_RECEIPT_PROMPT, any additive receipt_prompt, date_context, and
+# _language_context).  It pins the output format so the JSON parser can always
+# handle the model's reply regardless of what the user writes as extra
+# instructions.
 _OUTPUT_CONTRACT: str = (
     "\n\n---\nIMPORTANT: Reply with EXACTLY one JSON object using these keys "
     "(omit any key you cannot determine):\n"
     '{"expense_date": "YYYY-MM-DD", "supplier_name": "...", '
     '"net_amount": 0.00, "vat_amount": 0.00, "vat_rate_percent": 21, '
     '"suggested_category_name": "...", "confidence": "high|medium|low", '
-    '"raw_model_note": "..."}\n'
+    '"raw_model_note": "...", "summary": "..."}\n'
     "Do NOT wrap in markdown code fences. Do NOT include any text outside the "
     "JSON object."
 )
+
+
+def _language_context(language: str | None) -> str:
+    """Return a runtime prompt block that steers explanatory-field language.
+
+    - ``summary`` and ``raw_model_note`` follow the UI locale (``language``).
+    - Supplier names, product/item names, and brand names are kept verbatim.
+    - ``suggested_category_name`` stays in English (it is matched against a
+      fixed category list; translating it would break the matching logic).
+    """
+    lang_name = (
+        "Simplified Chinese (简体中文)"
+        if (language or "").lower().startswith("zh")
+        else "English"
+    )
+    return (
+        "\n\nLANGUAGE OF EXPLANATORY TEXT:\n"
+        f"- Write the explanatory fields `summary` and `raw_model_note` in {lang_name}.\n"
+        "- Do NOT translate proper nouns: keep supplier names, product/item names and "
+        "brand names exactly as printed on the document.\n"
+        "- Keep `suggested_category_name` in English (it is matched against a fixed "
+        "category list, not shown as prose)."
+    )
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models for httpx request / response (mypy-friendly, D6)
@@ -487,6 +525,7 @@ def _parse_model_output(raw_text: str) -> dict[str, Any]:
         "suggested_category_name",
         "confidence",
         "raw_model_note",
+        "summary",
     }
     return {k: v for k, v in data.items() if k in allowed_keys}
 
@@ -531,6 +570,7 @@ async def extract_from_attachment(
     company_id: uuid.UUID,
     attachment_id: uuid.UUID,
     client: httpx.AsyncClient | None = None,
+    language: str | None = None,
 ) -> ExpenseAIPrefill:
     """Run AI receipt extraction on an already-uploaded attachment.
 
@@ -596,7 +636,19 @@ async def extract_from_attachment(
     image_list = _attachment_to_images(attachment.mime_type, raw_bytes)
 
     # 5. Build prompt and call model
-    prompt_text = (ai_cfg.receipt_prompt or DEFAULT_RECEIPT_PROMPT) + _OUTPUT_CONTRACT
+    date_context = (
+        f"\n\nFor reference, today's date is {date.today().isoformat()}. "
+        "A receipt date ON OR BEFORE today is normal — do NOT flag it as future. "
+        "Only a date strictly AFTER today is unusual and may be flagged."
+    )
+    extra = (ai_cfg.receipt_prompt or "").strip()
+    prompt_text = (
+        DEFAULT_RECEIPT_PROMPT
+        + (("\n\n" + extra) if extra else "")
+        + date_context
+        + _language_context(language)
+        + _OUTPUT_CONTRACT
+    )
 
     mime_hint = attachment.mime_type.split(";")[0].strip().lower()
     messages = _build_messages(image_list, prompt_text, mime_hint=mime_hint)
@@ -656,6 +708,7 @@ async def extract_from_attachment(
         suggested_category_id=cat_id,
         raw_model_note=str(parsed["raw_model_note"]) if parsed.get("raw_model_note") else None,
         confidence=str(parsed["confidence"]) if parsed.get("confidence") else None,
+        summary=str(parsed["summary"]) if parsed.get("summary") else None,
     )
 
 
@@ -748,14 +801,16 @@ async def test_ai_config(
                 multimodal=False,
                 detail=f"Model not found (HTTP 404): {err_msg or cfg.model!r}",
             )
-        # 400 might mean the model doesn't support image inputs
+        # 400 might mean the model doesn't support image inputs, but could also
+        # indicate other provider-side rejections (e.g. image too small).
+        # Report the provider's own message verbatim so the user can diagnose.
         if status_code == 400:
             return AiTestResult(
                 ok=True,
                 multimodal=False,
                 detail=(
-                    f"Endpoint reachable but rejected the image request "
-                    f"(HTTP 400 – model may not support multimodal input): {err_msg}"
+                    f"Endpoint returned HTTP 400 — the model may have rejected the "
+                    f"request (see provider message): {err_msg}"
                 ),
             )
         return AiTestResult(

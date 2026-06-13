@@ -44,6 +44,8 @@ from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.expense import (
     ExpenseAttachmentListResponse,
     ExpenseAttachmentRead,
+    ExpenseCalculateRequest,
+    ExpenseCalculateResult,
     ExpenseInput,
     ExpenseListItem,
     ExpenseListResponse,
@@ -89,6 +91,47 @@ def compute_expense_amounts(
     """
     net_q = quantize_to_minor_unit(net)
     vat_q = quantize_to_minor_unit(vat)
+    gross_q = quantize_to_minor_unit(net_q + vat_q)
+    return net_q, vat_q, gross_q
+
+
+def compute_expense_vat_from_rate(
+    net: Decimal,
+    vat_rate_percent: Decimal,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Derive (net_q, vat_q, gross_q) from net × rate%, quantised to minor unit.
+
+    Mirrors ``compute_expense_amounts``' rounding strategy: quantise *net*
+    first, derive VAT from the quantised net, then gross = net_q + vat_q
+    quantised once more.
+
+    This is a **pure function** (no DB access) designed to be independently
+    unit-testable.  The companion service function
+    ``calculate_expense_preview`` loads the rate from the DB and calls this.
+
+    Parameters
+    ----------
+    net:
+        Raw net amount (excl. VAT).  Will be quantised to 2 dp as the first
+        step.
+    vat_rate_percent:
+        The VAT rate as a percentage value, e.g. ``Decimal("21")`` for 21%.
+
+    Returns
+    -------
+    (net_q, vat_q, gross_q)
+        All three quantised to 2 decimal places (ROUND_HALF_UP).
+
+    Examples
+    --------
+    >>> from decimal import Decimal
+    >>> compute_expense_vat_from_rate(Decimal("100"), Decimal("21"))
+    (Decimal('100.00'), Decimal('21.00'), Decimal('121.00'))
+    >>> compute_expense_vat_from_rate(Decimal("0"), Decimal("21"))
+    (Decimal('0.00'), Decimal('0.00'), Decimal('0.00'))
+    """
+    net_q = quantize_to_minor_unit(net)
+    vat_q = quantize_to_minor_unit(net_q * vat_rate_percent / Decimal("100"))
     gross_q = quantize_to_minor_unit(net_q + vat_q)
     return net_q, vat_q, gross_q
 
@@ -555,6 +598,47 @@ async def list_expenses(
     ]
 
     return ExpenseListResponse(items=items, total=total)
+
+
+async def calculate_expense_preview(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    request: ExpenseCalculateRequest,
+) -> ExpenseCalculateResult:
+    """Return a VAT preview (net, vat, gross) without persisting anything.
+
+    Loads the VAT rate from the DB (company-scoped), then delegates to the
+    pure function ``compute_expense_vat_from_rate``.
+
+    Parameters
+    ----------
+    session:
+        Async SQLAlchemy session.
+    company_id:
+        The caller's company id (red-line 2: rate must belong to this company).
+    request:
+        ``ExpenseCalculateRequest`` carrying ``net_amount`` and ``vat_rate_id``.
+
+    Returns
+    -------
+    ExpenseCalculateResult
+        Quantised (net, vat, gross) plus the rate percent for display.
+
+    Raises
+    ------
+    LookupError
+        If ``vat_rate_id`` does not exist or belongs to a different company
+        (caller maps this to HTTP 404).
+    """
+    rate = await _load_vat_rate(session, request.vat_rate_id, company_id)
+    percent = Decimal(str(rate.percent))
+    net_q, vat_q, gross_q = compute_expense_vat_from_rate(request.net_amount, percent)
+    return ExpenseCalculateResult(
+        net_amount=net_q,
+        vat_amount=vat_q,
+        gross_amount=gross_q,
+        vat_rate_percent=percent,
+    )
 
 
 # ---------------------------------------------------------------------------

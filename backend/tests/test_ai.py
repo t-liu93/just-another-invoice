@@ -3,8 +3,8 @@
 All HTTP calls are mocked via respx; **no real network requests are made**.
 
 Coverage:
-- DEFAULT_RECEIPT_PROMPT + _OUTPUT_CONTRACT always appended
-- Custom receipt_prompt replaces default but _OUTPUT_CONTRACT still appended
+- DEFAULT_RECEIPT_PROMPT always included; receipt_prompt is ADDITIVE (appended)
+- _language_context: language="zh" → Simplified Chinese; "en"/None → English
 - _attachment_to_images: image/* passthrough, PDF rasterisation (pypdfium2 real)
 - _attachment_to_images: max_pages limit obeyed
 - _attachment_to_images: unsupported MIME raises ValueError
@@ -54,6 +54,7 @@ from jai.services.ai import (
     _PROBE_PNG_BYTES,
     DEFAULT_RECEIPT_PROMPT,
     _attachment_to_images,
+    _language_context,
     _parse_model_output,
     _safe_date,
     _safe_decimal,
@@ -69,22 +70,8 @@ from jai.services.ai import (
 
 
 def _make_minimal_png() -> bytes:
-    """Identical to the probe PNG used in services/ai.py."""
-    return bytes.fromhex(
-        "89504e470d0a1a0a"
-        "0000000d49484452"
-        "00000001"
-        "00000001"
-        "0802000000"
-        "907753de"
-        "0000000c"
-        "49444154"
-        "789c63f8ffff3f00"
-        "05fe02fe"
-        "0def46b8"
-        "0000000049454e44"
-        "ae426082"
-    )
+    """Return the same probe PNG used in services/ai.py (single source of truth)."""
+    return _PROBE_PNG_BYTES
 
 
 def _make_minimal_jpeg() -> bytes:
@@ -153,17 +140,122 @@ def test_output_contract_not_empty() -> None:
 
 
 def test_output_contract_in_default_prompt_combination() -> None:
-    """_OUTPUT_CONTRACT is always appended to DEFAULT_RECEIPT_PROMPT."""
-    effective = DEFAULT_RECEIPT_PROMPT + _OUTPUT_CONTRACT
+    """_OUTPUT_CONTRACT is always last; DEFAULT_RECEIPT_PROMPT is always first."""
+    from datetime import date as _date
+
+    date_context = (
+        f"\n\nFor reference, today's date is {_date.today().isoformat()}. "
+        "A receipt date ON OR BEFORE today is normal — do NOT flag it as future. "
+        "Only a date strictly AFTER today is unusual and may be flagged."
+    )
+    # No extra receipt_prompt: default → date_context → language_context → contract
+    effective = (
+        DEFAULT_RECEIPT_PROMPT
+        + date_context
+        + _language_context(None)
+        + _OUTPUT_CONTRACT
+    )
     assert effective.endswith(_OUTPUT_CONTRACT)
+    assert effective.startswith(DEFAULT_RECEIPT_PROMPT)
+    assert _date.today().isoformat() in effective
+
+
+def test_custom_prompt_is_additive_appended_after_default() -> None:
+    """receipt_prompt is APPENDED after DEFAULT; default is never replaced."""
+    from datetime import date as _date
+
+    extra = "Pay special attention to the line items on this receipt."
+    date_context = (
+        f"\n\nFor reference, today's date is {_date.today().isoformat()}. "
+        "A receipt date ON OR BEFORE today is normal — do NOT flag it as future. "
+        "Only a date strictly AFTER today is unusual and may be flagged."
+    )
+    effective = (
+        DEFAULT_RECEIPT_PROMPT
+        + "\n\n"
+        + extra
+        + date_context
+        + _language_context(None)
+        + _OUTPUT_CONTRACT
+    )
+    # Default must appear BEFORE the extra instruction
+    assert effective.startswith(DEFAULT_RECEIPT_PROMPT)
     assert DEFAULT_RECEIPT_PROMPT in effective
-
-
-def test_custom_prompt_also_gets_output_contract() -> None:
-    custom = "Extract all fields from this receipt."
-    effective = custom + _OUTPUT_CONTRACT
-    assert effective.startswith(custom)
+    assert extra in effective
+    assert effective.index(DEFAULT_RECEIPT_PROMPT) < effective.index(extra)
     assert effective.endswith(_OUTPUT_CONTRACT)
+
+
+def test_empty_extra_prompt_no_double_newline() -> None:
+    """When receipt_prompt is empty/blank, no extra newlines are inserted."""
+    from datetime import date as _date
+
+    date_context = (
+        f"\n\nFor reference, today's date is {_date.today().isoformat()}. "
+        "A receipt date ON OR BEFORE today is normal — do NOT flag it as future. "
+        "Only a date strictly AFTER today is unusual and may be flagged."
+    )
+    extra = ""  # empty → should not add "\n\n" in the middle
+    effective = (
+        DEFAULT_RECEIPT_PROMPT
+        + (("\n\n" + extra) if extra else "")
+        + date_context
+        + _language_context(None)
+        + _OUTPUT_CONTRACT
+    )
+    # Prompt transitions cleanly from DEFAULT to date_context
+    assert DEFAULT_RECEIPT_PROMPT + date_context in effective
+
+
+# ---------------------------------------------------------------------------
+# _language_context tests
+# ---------------------------------------------------------------------------
+
+
+def test_language_context_zh() -> None:
+    """language='zh' → Simplified Chinese; proper-noun and category guards present."""
+    ctx = _language_context("zh")
+    assert "Simplified Chinese" in ctx
+    assert "简体中文" in ctx
+    assert "suggested_category_name" in ctx
+    assert "English" in ctx  # category stays English
+    assert "proper nouns" in ctx or "supplier names" in ctx
+
+
+def test_language_context_zh_tw_prefix() -> None:
+    """language='zh-TW' still starts with 'zh' → maps to Simplified Chinese block."""
+    ctx = _language_context("zh-TW")
+    assert "Simplified Chinese" in ctx
+
+
+def test_language_context_en() -> None:
+    """language='en' → English explanatory fields."""
+    ctx = _language_context("en")
+    assert "English" in ctx
+    assert "Simplified Chinese" not in ctx
+
+
+def test_language_context_none_defaults_to_english() -> None:
+    """language=None → English (safe default)."""
+    ctx = _language_context(None)
+    assert "English" in ctx
+    assert "Simplified Chinese" not in ctx
+
+
+def test_language_context_category_always_english() -> None:
+    """Regardless of language, suggested_category_name stays English."""
+    for lang in ("zh", "en", None, "fr"):
+        ctx = _language_context(lang)
+        assert "suggested_category_name" in ctx
+        assert "English" in ctx
+
+
+def test_language_context_no_translate_proper_nouns() -> None:
+    """Both zh and en contexts carry the do-not-translate guard for proper nouns."""
+    for lang in ("zh", "en", None):
+        ctx = _language_context(lang)
+        # The guard phrase appears in both variants
+        assert "supplier names" in ctx
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +264,22 @@ def test_custom_prompt_also_gets_output_contract() -> None:
 
 
 def test_probe_png_has_valid_signature() -> None:
+    """Regression guard: probe image must be PNG and at least 8×8 pixels.
+
+    The original 1×1 probe was rejected by vision gateways (e.g. xAI enforces
+    an 8×8 minimum) with HTTP 400, which was mis-classified as "model does not
+    support multimodal input".  This test prevents that regression.
+    """
+    import struct
+
     assert _PROBE_PNG_BYTES[:8] == b"\x89PNG\r\n\x1a\n"
     assert len(_PROBE_PNG_BYTES) > 30
+    # IHDR is always the first chunk; width/height are at bytes 16–23 (big-endian)
+    width, height = struct.unpack(">II", _PROBE_PNG_BYTES[16:24])
+    assert width >= 8, f"Probe PNG width {width} is too small (must be ≥ 8)"
+    assert height >= 8, f"Probe PNG height {height} is too small (must be ≥ 8)"
+    # The current probe is 64×64
+    assert width == 64 and height == 64, f"Expected 64×64 probe, got {width}×{height}"
 
 
 # ---------------------------------------------------------------------------
@@ -835,6 +941,102 @@ async def test_extract_from_attachment_happy_path_png() -> None:
 
 
 @pytest.mark.asyncio
+async def test_extract_from_attachment_language_zh_in_prompt() -> None:
+    """language='zh' → sent prompt contains Simplified Chinese context + category guard."""
+    user_content = await _run_extract_capture_prompt(language="zh", base_url="http://fake-zh")
+    assert "Simplified Chinese" in user_content or "简体中文" in user_content
+    assert "suggested_category_name" in user_content
+    # DEFAULT_RECEIPT_PROMPT always present
+    assert "BTW" in user_content or "VAT" in user_content
+
+
+async def _run_extract_capture_prompt(
+    language: str | None,
+    extra_receipt_prompt: str = "",
+    base_url: str = "http://fake-ai2",
+) -> str:
+    """Helper: run extract_from_attachment with a minimal PNG and return the prompt text."""
+    import uuid as _uuid
+
+    from jai.services.ai import extract_from_attachment
+
+    session = AsyncMock()
+    company_id = _uuid.uuid4()
+    att_id = _uuid.uuid4()
+
+    png_bytes = _make_minimal_png()
+    fake_att = _make_fake_attachment(
+        str(att_id), mime_type="image/png", company_id=str(company_id)
+    )
+    att_result = MagicMock(scalar_one_or_none=lambda: fake_att)
+    cat_result = MagicMock(scalar_one_or_none=lambda: None)
+    session.execute = AsyncMock(side_effect=[att_result, cat_result])
+
+    cfg = AiSettings(
+        enabled=True, api_key="sk", model="m", base_url=base_url,
+        receipt_prompt=extra_receipt_prompt,
+    )
+    fake_storage = MagicMock()
+    fake_storage.open.return_value = png_bytes
+
+    fake_response = {"choices": [{"message": {"content": '{"confidence": "low"}'}}]}
+    captured: list[str] = []
+
+    def capture_request(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        body = _json.loads(request.content)
+        messages = body.get("messages", [])
+        for m in messages:
+            if m.get("role") == "user":
+                content = m["content"]
+                if isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            captured.append(part.get("text", ""))
+                else:
+                    captured.append(str(content))
+        return httpx.Response(200, json=fake_response)
+
+    with patch("jai.services.ai._get_ai_config", new=AsyncMock(return_value=cfg)):
+        with patch("jai.services.ai.get_storage", return_value=fake_storage):
+            with respx.mock(base_url=base_url) as mock:
+                mock.post("/chat/completions").mock(side_effect=capture_request)
+                async with httpx.AsyncClient() as client:
+                    await extract_from_attachment(
+                        session, company_id, att_id, client=client, language=language
+                    )
+    return " ".join(captured)
+
+
+@pytest.mark.asyncio
+async def test_extract_from_attachment_language_en_in_prompt() -> None:
+    """language='en' or None → prompt contains English context, not Simplified Chinese."""
+    for lang in ("en", None):
+        user_content = await _run_extract_capture_prompt(language=lang, base_url="http://fake-en")
+        assert "Simplified Chinese" not in user_content
+        assert "English" in user_content
+
+
+@pytest.mark.asyncio
+async def test_extract_from_attachment_additive_receipt_prompt() -> None:
+    """Non-empty receipt_prompt is APPENDED after DEFAULT; DEFAULT always present."""
+    extra_instruction = "EXTRA_INSTRUCTION_MARKER_XYZ"
+    user_content = await _run_extract_capture_prompt(
+        language=None,
+        extra_receipt_prompt=extra_instruction,
+        base_url="http://fake-ai3",
+    )
+
+    # Both DEFAULT and extra instruction must be present
+    assert "BTW" in user_content or "VAT" in user_content  # DEFAULT marker
+    assert extra_instruction in user_content
+    # DEFAULT appears BEFORE the extra instruction
+    default_idx = user_content.find("BTW") if "BTW" in user_content else user_content.find("VAT")
+    extra_idx = user_content.find(extra_instruction)
+    assert default_idx < extra_idx
+
+
+@pytest.mark.asyncio
 async def test_extract_from_attachment_code_fenced_response() -> None:
     """Model wraps JSON in code fence → still parsed correctly."""
     import uuid
@@ -1179,7 +1381,7 @@ async def test_extract_from_attachment_pdf_max_pages_limits_image_parts() -> Non
 
 @pytest.mark.asyncio
 async def test_extract_from_attachment_custom_prompt_with_output_contract() -> None:
-    """Custom receipt_prompt is used + _OUTPUT_CONTRACT is always appended."""
+    """receipt_prompt is APPENDED after DEFAULT (additive); _OUTPUT_CONTRACT always last."""
     import json as _json
     import uuid
 
@@ -1228,11 +1430,18 @@ async def test_extract_from_attachment_custom_prompt_with_output_contract() -> N
     assert user_text_parts
     sent_text = user_text_parts[0]
 
-    # Custom prompt used (not DEFAULT)
+    # Both DEFAULT and extra prompt must appear (additive, not replacement)
+    assert DEFAULT_RECEIPT_PROMPT in sent_text
     assert custom_prompt in sent_text
-    assert DEFAULT_RECEIPT_PROMPT not in sent_text
-    # Output contract still appended
+    # DEFAULT appears BEFORE the extra instruction
+    assert sent_text.index(DEFAULT_RECEIPT_PROMPT) < sent_text.index(custom_prompt)
+    # Output contract still appended last
     assert _OUTPUT_CONTRACT in sent_text
+    assert sent_text.endswith(_OUTPUT_CONTRACT)
+    # Date context injected
+    from datetime import date as _date
+    assert _date.today().isoformat() in sent_text
+    assert "today's date is" in sent_text
 
 
 @pytest.mark.asyncio
@@ -1285,6 +1494,10 @@ async def test_extract_from_attachment_default_prompt_with_output_contract() -> 
     sent_text = user_text_parts[0]
     assert DEFAULT_RECEIPT_PROMPT in sent_text
     assert _OUTPUT_CONTRACT in sent_text
+    # Date context injected between default prompt and contract
+    from datetime import date as _date
+    assert _date.today().isoformat() in sent_text
+    assert "today's date is" in sent_text
 
 
 # ---------------------------------------------------------------------------
@@ -1570,3 +1783,189 @@ async def test_extraction_request_contains_response_format_on_success() -> None:
     assert "response_format" in body
     assert body["response_format"] == {"type": "json_object"}
     assert prefill.supplier_name == "OKShop"
+
+
+# ---------------------------------------------------------------------------
+# Summary field – parsing and prefill (Task B)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_extract_summary_present() -> None:
+    """Model returns a summary → prefill.summary equals that value."""
+    import uuid
+
+    from jai.services.ai import extract_from_attachment
+
+    session = AsyncMock()
+    company_id = uuid.uuid4()
+    att_id = uuid.uuid4()
+
+    png_bytes = _make_minimal_png()
+    fake_att = _make_fake_attachment(
+        str(att_id), mime_type="image/png", company_id=str(company_id)
+    )
+    att_result = MagicMock(scalar_one_or_none=lambda: fake_att)
+    cat_result = MagicMock(scalar_one_or_none=lambda: None)
+    session.execute = AsyncMock(side_effect=[att_result, cat_result])
+
+    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    fake_storage = MagicMock()
+    fake_storage.open.return_value = png_bytes
+
+    model_json = (
+        '{"supplier_name": "Office Depot", "net_amount": 45.00, '
+        '"summary": "A4 printer paper, 5 reams"}'
+    )
+    fake_response = {"choices": [{"message": {"content": model_json}}]}
+
+    with patch("jai.services.ai._get_ai_config", new=AsyncMock(return_value=cfg)):
+        with patch("jai.services.ai.get_storage", return_value=fake_storage):
+            with respx.mock(base_url="http://fake") as mock:
+                mock.post("/chat/completions").mock(
+                    return_value=httpx.Response(200, json=fake_response)
+                )
+                async with httpx.AsyncClient() as client:
+                    prefill = await extract_from_attachment(
+                        session, company_id, att_id, client=client
+                    )
+
+    assert prefill.summary == "A4 printer paper, 5 reams"
+    assert prefill.supplier_name == "Office Depot"
+
+
+@pytest.mark.asyncio
+async def test_extract_summary_absent() -> None:
+    """Model omits summary → prefill.summary is None."""
+    import uuid
+
+    from jai.services.ai import extract_from_attachment
+
+    session = AsyncMock()
+    company_id = uuid.uuid4()
+    att_id = uuid.uuid4()
+
+    png_bytes = _make_minimal_png()
+    fake_att = _make_fake_attachment(
+        str(att_id), mime_type="image/png", company_id=str(company_id)
+    )
+    att_result = MagicMock(scalar_one_or_none=lambda: fake_att)
+    cat_result = MagicMock(scalar_one_or_none=lambda: None)
+    session.execute = AsyncMock(side_effect=[att_result, cat_result])
+
+    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    fake_storage = MagicMock()
+    fake_storage.open.return_value = png_bytes
+
+    model_json = '{"supplier_name": "No Summary Shop", "net_amount": 10.00}'
+    fake_response = {"choices": [{"message": {"content": model_json}}]}
+
+    with patch("jai.services.ai._get_ai_config", new=AsyncMock(return_value=cfg)):
+        with patch("jai.services.ai.get_storage", return_value=fake_storage):
+            with respx.mock(base_url="http://fake") as mock:
+                mock.post("/chat/completions").mock(
+                    return_value=httpx.Response(200, json=fake_response)
+                )
+                async with httpx.AsyncClient() as client:
+                    prefill = await extract_from_attachment(
+                        session, company_id, att_id, client=client
+                    )
+
+    assert prefill.summary is None
+
+
+@pytest.mark.asyncio
+async def test_extract_summary_falsy_value() -> None:
+    """Model returns summary as empty string (falsy) → prefill.summary is None."""
+    import uuid
+
+    from jai.services.ai import extract_from_attachment
+
+    session = AsyncMock()
+    company_id = uuid.uuid4()
+    att_id = uuid.uuid4()
+
+    png_bytes = _make_minimal_png()
+    fake_att = _make_fake_attachment(
+        str(att_id), mime_type="image/png", company_id=str(company_id)
+    )
+    att_result = MagicMock(scalar_one_or_none=lambda: fake_att)
+    cat_result = MagicMock(scalar_one_or_none=lambda: None)
+    session.execute = AsyncMock(side_effect=[att_result, cat_result])
+
+    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    fake_storage = MagicMock()
+    fake_storage.open.return_value = png_bytes
+
+    # Model returns empty string for summary (falsy) → should be None
+    model_json = '{"supplier_name": "Falsy Corp", "summary": ""}'
+    fake_response = {"choices": [{"message": {"content": model_json}}]}
+
+    with patch("jai.services.ai._get_ai_config", new=AsyncMock(return_value=cfg)):
+        with patch("jai.services.ai.get_storage", return_value=fake_storage):
+            with respx.mock(base_url="http://fake") as mock:
+                mock.post("/chat/completions").mock(
+                    return_value=httpx.Response(200, json=fake_response)
+                )
+                async with httpx.AsyncClient() as client:
+                    prefill = await extract_from_attachment(
+                        session, company_id, att_id, client=client
+                    )
+
+    assert prefill.summary is None
+
+
+# ---------------------------------------------------------------------------
+# Date context in prompt – today's date always injected (Task A)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_extract_prompt_contains_today_date() -> None:
+    """The prompt sent to the model always contains today's date."""
+    import json as _json
+    import uuid
+    from datetime import date as _date
+
+    from jai.services.ai import extract_from_attachment
+
+    session = AsyncMock()
+    company_id = uuid.uuid4()
+    att_id = uuid.uuid4()
+
+    fake_att = _make_fake_attachment(
+        str(att_id), mime_type="image/png", company_id=str(company_id)
+    )
+    att_result = MagicMock(scalar_one_or_none=lambda: fake_att)
+    cat_result = MagicMock(scalar_one_or_none=lambda: None)
+    session.execute = AsyncMock(side_effect=[att_result, cat_result])
+
+    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    fake_storage = MagicMock()
+    fake_storage.open.return_value = _make_minimal_png()
+
+    captured_request: list[httpx.Request] = []
+
+    def capture_handler(request: httpx.Request) -> httpx.Response:
+        captured_request.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    with patch("jai.services.ai._get_ai_config", new=AsyncMock(return_value=cfg)):
+        with patch("jai.services.ai.get_storage", return_value=fake_storage):
+            with respx.mock(base_url="http://fake") as mock:
+                mock.post("/chat/completions").mock(side_effect=capture_handler)
+                async with httpx.AsyncClient() as client:
+                    await extract_from_attachment(
+                        session, company_id, att_id, client=client
+                    )
+
+    body = _json.loads(captured_request[0].content)
+    user_text_parts = [
+        p["text"]
+        for p in body["messages"][0]["content"]
+        if p.get("type") == "text"
+    ]
+    assert user_text_parts
+    sent_text = user_text_parts[0]
+    assert "today's date is" in sent_text
+    assert _date.today().isoformat() in sent_text

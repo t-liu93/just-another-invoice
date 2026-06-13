@@ -14,7 +14,7 @@
  * - Prod-build button safety: avoid dynamic :loading on buttons inside v-if
  *   branches. Use v-if/v-else pattern for loading states.
  */
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -30,10 +30,11 @@ import {
 import AppHeader from '../../components/AppHeader.vue'
 import { useExpensesStore } from '../../stores/expenses'
 import type { ExpenseRead, ExpenseAttachmentRead } from '../../stores/expenses'
-import { get, ApiError } from '../../api/http'
+import { get, post, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
 
 type ExpenseCategoryRead = components['schemas']['ExpenseCategoryRead']
+type ExpenseCalculateResult = components['schemas']['ExpenseCalculateResult']
 type ExpenseCategoryListResponse = components['schemas']['ExpenseCategoryListResponse']
 type VatTreatmentRead = components['schemas']['VatTreatmentRead']
 type VatTreatmentListResponse = components['schemas']['VatTreatmentListResponse']
@@ -42,7 +43,7 @@ type VatRateListResponse = components['schemas']['VatRateListResponse']
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const store = useExpensesStore()
 
 const expenseId = computed(() => route.params.id as string | undefined)
@@ -142,17 +143,13 @@ function fillFromExpense(expense: ExpenseRead) {
   recurringExpenseId.value = expense.recurring_expense_id ?? null
 }
 
-// When user changes category, update deductible default
-watch(categoryId, (newCatId) => {
-  if (!isEdit.value || deductible.value === null) {
-    const cat = categories.value.find(c => c.id === newCatId)
-    if (cat && cat.default_deductible !== null) {
-      deductible.value = cat.default_deductible
-    } else {
-      deductible.value = true
-    }
-  }
-})
+// 仅在用户主动切换分类时触发：把可抵扣默认设为该分类的 default_deductible（为 null 则回落 true）。
+// 编程式赋值（fillFromExpense 里的 categoryId.value = ...）不会触发 @update:value，
+// 因此初始载入不会覆盖已保存的 deductible。
+function onCategoryChange(newCatId: string | null) {
+  const cat = categories.value.find(c => c.id === newCatId)
+  deductible.value = cat && cat.default_deductible !== null ? cat.default_deductible : true
+}
 
 async function loadAttachments() {
   if (!expenseId.value) return
@@ -276,13 +273,38 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// ---- VAT auto-compute (calls backend calculate endpoint, non-blocking) ----
+let vatDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+async function recomputeVat() {
+  if (netAmount.value === null || !vatRateId.value) return
+  try {
+    const result = await post<ExpenseCalculateResult>('/api/v1/expenses/calculate', {
+      net_amount: netAmount.value,
+      vat_rate_id: vatRateId.value,
+    })
+    vatAmount.value = Number(result.vat_amount)
+    grossAmountDisplay.value = result.gross_amount   // 顺带实时显示 gross
+  } catch {
+    /* 非致命：保持现状，不打断手动录入 */
+  }
+}
+
+function onVatRateChange() { void recomputeVat() }            // 选税率：立即
+
+function onNetInput() {                                        // 改净额：防抖
+  grossAmountDisplay.value = null
+  if (vatDebounceTimer) clearTimeout(vatDebounceTimer)
+  vatDebounceTimer = setTimeout(() => { void recomputeVat() }, 300)
+}
+
 // ---- AI extraction ----
 async function handleAiExtract(attachmentId: string) {
   aiExtracting.value = true
   aiError.value = null
   aiNote.value = null
   try {
-    const prefill = await store.aiExtract(attachmentId)
+    const prefill = await store.aiExtract(attachmentId, locale.value)
     // Populate form fields from prefill — user confirms before saving
     if (prefill.expense_date) expenseDate.value = prefill.expense_date
     if (prefill.supplier_name) supplierName.value = prefill.supplier_name
@@ -308,6 +330,10 @@ async function handleAiExtract(attachmentId: string) {
       if (match) categoryId.value = match.id
     }
     if (prefill.raw_model_note) aiNote.value = prefill.raw_model_note
+    // Fill note with AI summary only if user hasn't typed anything yet
+    if (prefill.summary && !note.value) {
+      note.value = prefill.summary
+    }
     // After prefill, clear grossAmountDisplay so user knows to save to get backend value
     grossAmountDisplay.value = null
   } catch (e: unknown) {
@@ -373,6 +399,7 @@ async function handleAiExtract(attachmentId: string) {
                       :placeholder="t('expenses.categoryPlaceholder')"
                       clearable
                       filterable
+                      @update:value="onCategoryChange"
                     />
                   </n-form-item>
 
@@ -401,6 +428,7 @@ async function handleAiExtract(attachmentId: string) {
                       :options="vatRateOptions"
                       :placeholder="t('expenses.vatRatePlaceholder')"
                       clearable
+                      @update:value="onVatRateChange"
                     />
                   </n-form-item>
 
@@ -412,7 +440,7 @@ async function handleAiExtract(attachmentId: string) {
                       :min="0"
                       :placeholder="t('expenses.amountPlaceholder')"
                       style="width: 100%"
-                      @update:value="grossAmountDisplay = null"
+                      @update:value="onNetInput"
                     />
                   </n-form-item>
 

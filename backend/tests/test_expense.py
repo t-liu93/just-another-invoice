@@ -16,7 +16,11 @@ from decimal import Decimal
 
 import pytest
 
-from jai.services.expense import compute_expense_amounts, resolve_deductible
+from jai.services.expense import (
+    compute_expense_amounts,
+    compute_expense_vat_from_rate,
+    resolve_deductible,
+)
 
 # ---------------------------------------------------------------------------
 # compute_expense_amounts
@@ -89,6 +93,70 @@ class TestComputeExpenseAmounts:
         assert net == Decimal("1.01")
         assert vat == Decimal("2.01")
         assert gross == Decimal("3.02")
+
+
+# ---------------------------------------------------------------------------
+# compute_expense_vat_from_rate
+# ---------------------------------------------------------------------------
+
+
+class TestComputeExpenseVatFromRate:
+    """``compute_expense_vat_from_rate`` – VAT derived from net × rate%."""
+
+    def test_typical_21_percent(self) -> None:
+        """100 × 21% = 21.00; gross = 121.00."""
+        net_q, vat_q, gross_q = compute_expense_vat_from_rate(Decimal("100"), Decimal("21"))
+        assert net_q == Decimal("100.00")
+        assert vat_q == Decimal("21.00")
+        assert gross_q == Decimal("121.00")
+
+    def test_rounding_at_half_up_boundary(self) -> None:
+        """99.99 × 21% = 20.9979 → rounds HALF_UP to 21.00; gross = 120.99."""
+        net_q, vat_q, gross_q = compute_expense_vat_from_rate(Decimal("99.99"), Decimal("21"))
+        assert net_q == Decimal("99.99")
+        # 99.99 * 0.21 = 20.9979 → ROUND_HALF_UP → 21.00
+        assert vat_q == Decimal("21.00")
+        assert gross_q == Decimal("120.99")
+
+    def test_zero_net(self) -> None:
+        """Zero net → zero vat and gross."""
+        net_q, vat_q, gross_q = compute_expense_vat_from_rate(Decimal("0"), Decimal("21"))
+        assert net_q == Decimal("0.00")
+        assert vat_q == Decimal("0.00")
+        assert gross_q == Decimal("0.00")
+
+    def test_9_percent(self) -> None:
+        """50 × 9% = 4.50; gross = 54.50."""
+        net_q, vat_q, gross_q = compute_expense_vat_from_rate(Decimal("50"), Decimal("9"))
+        assert net_q == Decimal("50.00")
+        assert vat_q == Decimal("4.50")
+        assert gross_q == Decimal("54.50")
+
+    def test_zero_rate(self) -> None:
+        """0% rate (reverse-charge): vat = 0, gross = net."""
+        net_q, vat_q, gross_q = compute_expense_vat_from_rate(Decimal("150"), Decimal("0"))
+        assert net_q == Decimal("150.00")
+        assert vat_q == Decimal("0.00")
+        assert gross_q == Decimal("150.00")
+
+    def test_round_half_up_exactly_at_boundary(self) -> None:
+        """1.005 × 21% = 0.21105 → ROUND_HALF_UP → 0.21; gross = 1.22."""
+        # net_q = quantize_to_minor_unit(1.005) = 1.01 (ROUND_HALF_UP)
+        # vat_q = quantize_to_minor_unit(1.01 * 21 / 100) = quantize(0.2121) = 0.21
+        # gross_q = quantize_to_minor_unit(1.01 + 0.21) = 1.22
+        net_q, vat_q, gross_q = compute_expense_vat_from_rate(Decimal("1.005"), Decimal("21"))
+        assert net_q == Decimal("1.01")
+        assert vat_q == Decimal("0.21")
+        assert gross_q == Decimal("1.22")
+
+    def test_large_amount(self) -> None:
+        """Large amount still quantises correctly."""
+        net_q, vat_q, gross_q = compute_expense_vat_from_rate(
+            Decimal("10000"), Decimal("21")
+        )
+        assert net_q == Decimal("10000.00")
+        assert vat_q == Decimal("2100.00")
+        assert gross_q == Decimal("12100.00")
 
 
 # ---------------------------------------------------------------------------
