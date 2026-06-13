@@ -66,7 +66,7 @@ from jai.schemas.setting import (
     QuoteNumberingConfig,
 )
 from jai.services.invoice import clone_quote_to_invoice
-from jai.services.money import quantize_money
+from jai.services.money import quantize_to_minor_unit
 from jai.services.numbering import allocate_quote_number
 from jai.services.pricing import (
     _derive_treatment_from_customer,
@@ -427,18 +427,18 @@ async def _build_and_persist_quote(
             )
         )
 
-    total_incl_vat = quantize_money(calc.total_incl_vat)
+    total_incl_vat = quantize_to_minor_unit(calc.total_incl_vat)
     treatment_effect_str = (
         treatment.effect.value
         if isinstance(treatment.effect, VatTreatmentEffect)
         else str(treatment.effect)
     )
 
-    subtotal_excl_vat = quantize_money(calc.subtotal_excl_vat)
-    line_discount_total = quantize_money(calc.line_discount_total)
-    taxable_amount = quantize_money(calc.taxable_amount)
-    vat_total = quantize_money(calc.vat_total)
-    doc_discount_amount = quantize_money(calc.document_discount_amount)
+    subtotal_excl_vat = quantize_to_minor_unit(calc.subtotal_excl_vat)
+    line_discount_total = quantize_to_minor_unit(calc.line_discount_total)
+    taxable_amount = quantize_to_minor_unit(calc.taxable_amount)
+    vat_total = quantize_to_minor_unit(calc.vat_total)
+    doc_discount_amount = quantize_to_minor_unit(calc.document_discount_amount)
 
     if existing_quote is not None:
         q = existing_quote
@@ -536,13 +536,13 @@ async def _build_and_persist_quote(
             line_row.vat_rate_label = None
             line_row.vat_rate_percent = None
 
-        line_row.subtotal_excl_vat = quantize_money(line_calc.subtotal_excl_vat)
-        line_row.subtotal_incl_vat = quantize_money(line_calc.subtotal_incl_vat)
-        line_row.line_discount_amount = quantize_money(line_calc.line_discount_amount)
-        line_row.document_discount_share = quantize_money(line_calc.document_discount_share)
-        line_row.taxable_amount = quantize_money(line_calc.taxable_amount)
-        line_row.vat_total = quantize_money(line_calc.vat_total)
-        line_row.total_incl_vat = quantize_money(line_calc.total_incl_vat)
+        line_row.subtotal_excl_vat = quantize_to_minor_unit(line_calc.subtotal_excl_vat)
+        line_row.subtotal_incl_vat = quantize_to_minor_unit(line_calc.subtotal_incl_vat)
+        line_row.line_discount_amount = quantize_to_minor_unit(line_calc.line_discount_amount)
+        line_row.document_discount_share = quantize_to_minor_unit(line_calc.document_discount_share)
+        line_row.taxable_amount = quantize_to_minor_unit(line_calc.taxable_amount)
+        line_row.vat_total = quantize_to_minor_unit(line_calc.vat_total)
+        line_row.total_incl_vat = quantize_to_minor_unit(line_calc.total_incl_vat)
 
         session.add(line_row)
         new_line_rows.append(line_row)

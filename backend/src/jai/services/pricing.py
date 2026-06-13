@@ -10,17 +10,25 @@ Public API
 
 Design notes
 ------------
-All monetary arithmetic uses ``Decimal`` with ``quantize_money()`` (3 dp,
-``ROUND_HALF_UP``).  The engine computes:
+All monetary arithmetic uses ``Decimal`` with **line-level rounding to the
+currency's minor unit** (EUR = 2 dp, ``ROUND_HALF_UP``; introduced in M7.5).
+``quantize_money()`` (3 dp) is retained for intermediate predicates only.
 
-1. Line subtotal (qty × unit_price)
-2. Line discount
-3. Document discount (fixed → distribute proportionally; percentage → direct)
-4. Taxable amount = after discounts
-5. VAT (effective rate depends on treatment effect)
-6. Line total (taxable + VAT)
+The engine computes:
 
-Aggregate invoice amounts are the sum of already-quantised line/tax results.
+1. Line subtotal = ``quantize_to_minor_unit(qty × unit_price)`` (先乘后舍)
+2. Line/document discount → ``quantize_to_minor_unit``
+3. Document discount (fixed → distribute proportionally; percentage → direct);
+   last non-zero line absorbs remainder so Σ shares == total_discount exactly.
+4. Taxable amount = after discounts (already at minor-unit precision)
+5. VAT = ``quantize_to_minor_unit(taxable × rate / 100)``  [excl-VAT input]
+       or derived as ``gross − net``                         [incl-VAT input]
+6. Line total = taxable + VAT  (no second rounding)
+
+Aggregate invoice amounts = Σ line values (already at minor unit); no further
+rounding.  ``unit_price`` is **not** rounded — it retains ≥ 3-dp input
+precision so that large-quantity/small-unit-price calculations do not
+accumulate truncation error.
 
 Red-line 1 compliance: the schema layer never computes amounts; this module
 is the sole authority.
@@ -51,7 +59,7 @@ from jai.schemas.invoice import (
     VatTreatmentSnapshot,
 )
 from jai.schemas.quote import QuoteCalculationRequest
-from jai.services.money import quantize_money
+from jai.services.money import quantize_money, quantize_to_minor_unit
 
 # ---------------------------------------------------------------------------
 # EU country codes (ISO 3166-1 alpha-2) – 27 member states as of 2026
@@ -117,7 +125,7 @@ def _calc_discount_amount(base: Decimal, discount: DiscountInput) -> Decimal:
     if discount.type == DiscountType.PERCENTAGE:
         if discount.value < 0:
             raise ValueError("Discount percentage must be ≥ 0.")
-        result = quantize_money(base * discount.value / Decimal("100"))
+        result = quantize_to_minor_unit(base * discount.value / Decimal("100"))
         if result > base:
             raise ValueError("Percentage discount exceeds base amount.")
         return result
@@ -126,7 +134,7 @@ def _calc_discount_amount(base: Decimal, discount: DiscountInput) -> Decimal:
             raise ValueError("Fixed discount must be ≥ 0.")
         if discount.value > base:
             raise ValueError("Fixed discount exceeds base amount.")
-        return quantize_money(discount.value)
+        return quantize_to_minor_unit(discount.value)
     # Should be unreachable with StrEnum, but guard anyway
     raise ValueError(f"Unknown discount type: {discount.type}")
 
@@ -138,8 +146,8 @@ def _distribute_fixed_discount(
     """Distribute a fixed document discount proportionally across lines.
 
     Each share (except the last non-zero line) is
-    ``quantize_money(total_discount × base_i / Σ bases)``, capped to the
-    remaining discount to prevent over-distribution from rounding.  The
+    ``quantize_to_minor_unit(total_discount × base_i / Σ bases)``, capped to
+    the remaining discount to prevent over-distribution from rounding.  The
     last non-zero base absorbs whatever is left so that
     ``Σ shares == total_discount`` exactly and every share ``≥ 0``.
     """
@@ -164,7 +172,7 @@ def _distribute_fixed_discount(
             # Last non-zero line absorbs whatever remains
             shares[i] = remaining
         else:
-            share = quantize_money(total_discount * base_i / total_base)
+            share = quantize_to_minor_unit(total_discount * base_i / total_base)
             # Cap to remaining to prevent over-distribution
             if share > remaining:
                 share = remaining
@@ -279,7 +287,7 @@ def _compute_line_mode(
     after_line_discounts: list[Decimal] = []
 
     for line in lines:
-        raw = quantize_money(line.quantity * line.unit_price)
+        raw = quantize_to_minor_unit(line.quantity * line.unit_price)
         line_disc = _calc_discount_amount(raw, line.discount)
         after = raw - line_disc
         raw_subtotals.append(raw)
@@ -312,7 +320,7 @@ def _compute_line_mode(
 
         if not amounts_include_vat:
             # Excl VAT input: taxable is excl, compute VAT then incl
-            vat = quantize_money(taxable * eff_rate / Decimal("100"))
+            vat = quantize_to_minor_unit(taxable * eff_rate / Decimal("100"))
             total_incl = taxable + vat
             sub_excl = raw_subtotals[i]
             sub_incl = raw_subtotals[i]  # same as excl before VAT
@@ -320,7 +328,9 @@ def _compute_line_mode(
             # Incl VAT input: taxable (after discounts) is incl, reverse-compute
             total_incl = taxable
             if eff_rate > 0:
-                taxable = quantize_money(total_incl / (Decimal("1") + eff_rate / Decimal("100")))
+                taxable = quantize_to_minor_unit(
+                    total_incl / (Decimal("1") + eff_rate / Decimal("100"))
+                )
                 vat = total_incl - taxable
             else:
                 taxable = total_incl
@@ -328,7 +338,9 @@ def _compute_line_mode(
             # Reverse-compute raw subtotal excl
             raw_incl = raw_subtotals[i]
             if eff_rate > 0:
-                sub_excl = quantize_money(raw_incl / (Decimal("1") + eff_rate / Decimal("100")))
+                sub_excl = quantize_to_minor_unit(
+                    raw_incl / (Decimal("1") + eff_rate / Decimal("100"))
+                )
             else:
                 sub_excl = raw_incl
             sub_incl = raw_incl
@@ -390,7 +402,7 @@ def _compute_document_mode(
     line_results: list[_LineResult] = []
 
     for i, line in enumerate(lines):
-        raw = quantize_money(line.quantity * line.unit_price)
+        raw = quantize_to_minor_unit(line.quantity * line.unit_price)
         line_disc = _calc_discount_amount(raw, line.discount)
         after = raw - line_disc
 
@@ -404,7 +416,9 @@ def _compute_document_mode(
         else:
             sub_incl = raw
             if eff_rate > 0:
-                sub_excl = quantize_money(raw / (Decimal("1") + eff_rate / Decimal("100")))
+                sub_excl = quantize_to_minor_unit(
+                    raw / (Decimal("1") + eff_rate / Decimal("100"))
+                )
             else:
                 sub_excl = raw
             taxable = after
@@ -435,12 +449,12 @@ def _compute_document_mode(
     doc_taxable = total_after_line - doc_disc_total
 
     if not amounts_include_vat:
-        doc_vat = quantize_money(doc_taxable * eff_rate / Decimal("100"))
+        doc_vat = quantize_to_minor_unit(doc_taxable * eff_rate / Decimal("100"))
         doc_total_incl = doc_taxable + doc_vat
     else:
         doc_total_incl = doc_taxable
         if eff_rate > 0:
-            doc_taxable = quantize_money(
+            doc_taxable = quantize_to_minor_unit(
                 doc_total_incl / (Decimal("1") + eff_rate / Decimal("100"))
             )
             doc_vat = doc_total_incl - doc_taxable

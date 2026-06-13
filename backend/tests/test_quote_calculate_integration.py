@@ -165,9 +165,9 @@ class TestQuoteCalculateHappyFlow:
         data = resp.json()
         assert data["tax_mode"] == "LINE"
         assert data["amounts_include_vat"] is False
-        assert data["subtotal_excl_vat"] == "100.000"
-        assert data["vat_total"] == "21.000"
-        assert data["total_incl_vat"] == "121.000"
+        assert data["subtotal_excl_vat"] == "100.00"
+        assert data["vat_total"] == "21.00"
+        assert data["total_incl_vat"] == "121.00"
         assert data["line_discount_total"] == "0"
         assert data["document_discount_amount"] == "0"
         assert len(data["lines"]) == 1
@@ -199,9 +199,9 @@ class TestQuoteCalculateHappyFlow:
         assert resp.status_code == 200
         data = resp.json()
         assert data["tax_mode"] == "DOCUMENT"
-        assert data["subtotal_excl_vat"] == "200.000"
-        assert data["vat_total"] == "42.000"
-        assert data["total_incl_vat"] == "242.000"
+        assert data["subtotal_excl_vat"] == "200.00"
+        assert data["vat_total"] == "42.00"
+        assert data["total_incl_vat"] == "242.00"
         assert len(data["document_taxes"]) == 1
         assert len(data["line_taxes"]) == 0
 
@@ -230,9 +230,9 @@ class TestQuoteCalculateHappyFlow:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["taxable_amount"] == "100.000"
-        assert data["vat_total"] == "21.000"
-        assert data["total_incl_vat"] == "121.000"
+        assert data["taxable_amount"] == "100.00"
+        assert data["vat_total"] == "21.00"
+        assert data["total_incl_vat"] == "121.00"
 
     async def test_multi_line_multi_rate(self, db_client: AsyncClient) -> None:
         """2 lines: 21% + 9%, verify separate tax entries."""
@@ -255,7 +255,7 @@ class TestQuoteCalculateHappyFlow:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["vat_total"] == "30.000"  # 21 + 9
+        assert data["vat_total"] == "30.00"  # 21 + 9
         assert len(data["line_taxes"]) == 2
 
     async def test_line_and_document_discounts(self, db_client: AsyncClient) -> None:
@@ -285,10 +285,10 @@ class TestQuoteCalculateHappyFlow:
         assert resp.status_code == 200
         data = resp.json()
         # Line disc: 10, after line: 90. Doc disc (10% of 90): 9. Taxable: 81.
-        assert data["line_discount_total"] == "10.000"
-        assert data["document_discount_amount"] == "9.000"
-        assert data["taxable_amount"] == "81.000"
-        assert data["vat_total"] == "17.010"  # 81 × 21%
+        assert data["line_discount_total"] == "10.00"
+        assert data["document_discount_amount"] == "9.00"
+        assert data["taxable_amount"] == "81.00"
+        assert data["vat_total"] == "17.01"  # 81 × 21% = 17.01
 
     async def test_valid_until_accepted_does_not_affect_pricing(
         self, db_client: AsyncClient
@@ -305,7 +305,7 @@ class TestQuoteCalculateHappyFlow:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total_incl_vat"] == "121.000"
+        assert data["total_incl_vat"] == "121.00"
 
     async def test_zero_rate_line(self, db_client: AsyncClient) -> None:
         """LINE mode with 0% VAT rate → total equals subtotal."""
@@ -324,8 +324,8 @@ class TestQuoteCalculateHappyFlow:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["vat_total"] == "0.000"
-        assert data["total_incl_vat"] == "100.000"
+        assert data["vat_total"] == "0.00"
+        assert data["total_incl_vat"] == "100.00"
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +349,7 @@ class TestQuoteVatTreatmentDerivation:
         )
         assert resp.status_code == 200
         assert resp.json()["vat_treatment_snapshot"]["code"] == "NL_DOMESTIC"
-        assert resp.json()["vat_total"] == "21.000"
+        assert resp.json()["vat_total"] == "21.00"
 
     async def test_eu_b2b_reverse(self, db_client: AsyncClient) -> None:
         """NL company + DE customer with VAT number → EU_B2B_REVERSE, VAT = 0."""
@@ -366,7 +366,7 @@ class TestQuoteVatTreatmentDerivation:
         data = resp.json()
         assert data["vat_treatment_snapshot"]["code"] == "EU_B2B_REVERSE"
         assert data["vat_treatment_snapshot"]["requires_icp"] is True
-        assert data["vat_total"] == "0.000"
+        assert data["vat_total"] == "0.00"
 
     async def test_eu_b2c(self, db_client: AsyncClient) -> None:
         """NL company + FR customer without VAT number → EU_B2C."""
@@ -381,7 +381,7 @@ class TestQuoteVatTreatmentDerivation:
         )
         assert resp.status_code == 200
         assert resp.json()["vat_treatment_snapshot"]["code"] == "EU_B2C"
-        assert resp.json()["vat_total"] == "21.000"
+        assert resp.json()["vat_total"] == "21.00"
 
     async def test_export_non_eu(self, db_client: AsyncClient) -> None:
         """NL company + US customer → EXPORT_NON_EU, VAT = 0."""
@@ -397,7 +397,7 @@ class TestQuoteVatTreatmentDerivation:
         assert resp.status_code == 200
         data = resp.json()
         assert data["vat_treatment_snapshot"]["code"] == "EXPORT_NON_EU"
-        assert data["vat_total"] == "0.000"
+        assert data["vat_total"] == "0.00"
 
     async def test_explicit_treatment_override(self, db_client: AsyncClient) -> None:
         """Explicitly provide treatment_id overrides derivation."""
@@ -414,7 +414,7 @@ class TestQuoteVatTreatmentDerivation:
         assert resp.status_code == 200
         data = resp.json()
         assert data["vat_treatment_snapshot"]["code"] == "EXPORT_NON_EU"
-        assert data["vat_total"] == "0.000"
+        assert data["vat_total"] == "0.00"
 
     async def test_customer_no_billing_country_derives_nl_domestic(
         self, db_client: AsyncClient
@@ -684,8 +684,8 @@ class TestQuoteCalculateValidation:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["document_taxes"]) == 1
-        assert data["document_taxes"][0]["taxable_amount"] == "0.000"
-        assert data["document_taxes"][0]["tax_amount"] == "0.000"
+        assert data["document_taxes"][0]["taxable_amount"] == "0.00"
+        assert data["document_taxes"][0]["tax_amount"] == "0.00"
         assert data["document_taxes"][0]["vat_rate_percent"] == "21.000"
 
     async def test_missing_quote_date_422(self, db_client: AsyncClient) -> None:
