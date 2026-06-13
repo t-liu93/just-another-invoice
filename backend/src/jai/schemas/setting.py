@@ -45,6 +45,9 @@ SETTING_KEY_QUOTE_DEFAULT_VALID_DAYS: str = "quote.default_valid_days"
 #: User-level preferences (theme, locale, …).
 SETTING_KEY_USER_PREFERENCES: str = "user.preferences"
 
+#: AI / receipt-extraction configuration (GLOBAL level, env fallback).
+SETTING_KEY_AI: str = "ai"
+
 
 # ---------------------------------------------------------------------------
 # Onboarding state (GLOBAL level)
@@ -270,3 +273,78 @@ class UserPreferences(BaseModel):
         default="en",
         description="UI language preference (interface locale).",
     )
+
+
+# ---------------------------------------------------------------------------
+# AI / receipt-extraction configuration (GLOBAL level, env fallback)
+# ---------------------------------------------------------------------------
+
+
+class AiSettings(BaseModel):
+    """AI service configuration stored at GLOBAL level.
+
+    Stored with key ``SETTING_KEY_AI`` (``"ai"``).  Mirrors the SMTP settings
+    pattern: plain-text JSONB, read-desensitised, env fallback (D1).
+
+    ``receipt_prompt`` is the user-editable extraction instruction.  When empty
+    the service falls back to the built-in ``DEFAULT_RECEIPT_PROMPT`` constant.
+    The system always appends the fixed ``_OUTPUT_CONTRACT`` footer so that the
+    JSON output schema cannot be accidentally broken by a custom prompt (D15).
+
+    ``api_key`` is stored in plain text (same approach as SMTP ``password``).
+    It is **never** returned in any API response; only ``api_key_set: bool``
+    is exposed (see ``AiSettingsRead``).  Credentials are never written to logs.
+    """
+
+    enabled: bool = False
+    base_url: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = ""
+    receipt_prompt: str = ""
+
+
+class AiSettingsRead(BaseModel):
+    """AI settings as returned by the API – ``api_key`` is desensitised.
+
+    ``api_key_set`` replaces the raw key: ``True`` means a key is stored,
+    ``False`` means the field is empty.  All other fields are returned as-is
+    so the user can inspect and update them.
+    """
+
+    enabled: bool = False
+    base_url: str = "https://api.openai.com/v1"
+    api_key_set: bool = False
+    model: str = ""
+    receipt_prompt: str = ""
+
+
+class AiSettingsUpdate(BaseModel):
+    """Request body for ``PUT /settings/ai``.
+
+    ``api_key`` semantics mirror ``SmtpSettingsUpdate.password``:
+    - ``None`` (field omitted) → keep the existing key unchanged.
+    - Empty string ``""`` → clear the stored key.
+    - Non-empty string → replace with the new key.
+
+    All other fields are optional; omitted fields keep their current value.
+    """
+
+    enabled: bool | None = None
+    base_url: str | None = None
+    api_key: str | None = None  # None = keep existing; "" = clear
+    model: str | None = None
+    receipt_prompt: str | None = None
+
+
+class AiTestResult(BaseModel):
+    """Result from ``POST /settings/ai/test``.
+
+    ``ok`` is ``True`` when the endpoint responded successfully.
+    ``multimodal`` is ``True`` when the model accepted an image input without
+    error (confirms vision capability).
+    ``detail`` carries a human-readable message for failures.
+    """
+
+    ok: bool
+    multimodal: bool
+    detail: str

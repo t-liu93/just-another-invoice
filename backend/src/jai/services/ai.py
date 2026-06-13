@@ -1,0 +1,786 @@
+"""AI receipt extraction service (M8 step 4).
+
+Architecture
+------------
+- Uses OpenAI-compatible Chat Completions API via ``httpx.AsyncClient``.
+- All configuration (base_url, api_key, model, prompt) comes from the database
+  setting ``SETTING_KEY_AI`` with env-variable fallback (D1, D6).
+- The ``httpx.AsyncClient`` is injectable so unit tests can supply a mock
+  transport without touching the network (D6 – never hit real endpoints in tests).
+- PDF receipts are rasterised with ``pypdfium2`` (pure-wheel, no poppler) and
+  encoded as PNG images for the multimodal ``image_url`` parts (D16).
+- The extraction result (``ExpenseAIPrefill``) is **never persisted** – it is
+  returned as-is for the user to review and confirm (D5).
+
+Security
+--------
+- ``api_key`` is **never** written to logs or included in any response body.
+  Search ``api_key`` in this file: it only appears in the Authorization header
+  construction (not logged) and in ``AiSettings`` field access.
+- Receipt image bytes are treated as untrusted input; model output is parsed
+  defensively (all fields nullable, strict type / range coercion).
+- Red-line 7: user-supplied image data flows into base64 strings embedded in
+  the prompt; it is never rendered or executed server-side.
+
+Prompt design (D15)
+-------------------
+The effective prompt sent to the model is:
+
+    (settings.receipt_prompt or DEFAULT_RECEIPT_PROMPT) + _OUTPUT_CONTRACT
+
+Users can override the extraction instruction via ``AiSettings.receipt_prompt``.
+The ``_OUTPUT_CONTRACT`` footer (which defines the JSON output schema) is
+**always appended by the service** and cannot be altered by the user.  This
+guarantees that the JSON parser can always handle the model's output regardless
+of prompt customisation.
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import json
+import logging
+import re
+import uuid
+from datetime import date
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+import httpx
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from jai.config import get_settings
+from jai.models._enums import SettingLevel
+from jai.schemas.expense import ExpenseAIPrefill
+from jai.schemas.setting import (
+    SETTING_KEY_AI,
+    AiSettings,
+    AiTestResult,
+)
+from jai.services.storage import get_storage
+
+logger = logging.getLogger("jai.ai")
+
+# ---------------------------------------------------------------------------
+# Probe image (built-in minimal PNG, used for connectivity/multimodal testing)
+# ---------------------------------------------------------------------------
+# This 1×1 white pixel PNG is embedded as literal bytes so that the test probe
+# never needs to read from disk and never exposes user receipt data (D14).
+# Generated via: struct/zlib Python stdlib (no Pillow dependency for this).
+_PROBE_PNG_BYTES: bytes = bytes.fromhex(
+    "89504e470d0a1a0a"  # PNG signature
+    "0000000d49484452"  # IHDR length + type
+    "00000001"          # width = 1
+    "00000001"          # height = 1
+    "0802000000"        # bit depth=8, color type=2 (RGB), compression/filter/interlace
+    "907753de"          # IHDR CRC
+    "0000000c"          # IDAT length
+    "49444154"          # IDAT type
+    "789c63f8ffff3f00"  # zlib-compressed pixel data (white RGB)
+    "05fe02fe"          # rest of compressed data
+    "0def46b8"          # IDAT CRC
+    "0000000049454e44"  # IEND length + type
+    "ae426082"          # IEND CRC
+)
+
+# ---------------------------------------------------------------------------
+# Prompt constants (D15)
+# ---------------------------------------------------------------------------
+
+DEFAULT_RECEIPT_PROMPT: str = (
+    "You are an expert receipt and invoice analyser, specialised in Dutch (NL) and "
+    "EU business documents. Extract the following fields from the receipt image(s) "
+    "provided. The document may be a BTW (VAT) invoice, a till receipt, a PDF "
+    "statement, or a scanned document.\n\n"
+    "Fields to extract:\n"
+    "- expense_date: the invoice or receipt date (ISO 8601 format: YYYY-MM-DD)\n"
+    "- supplier_name: the name of the supplier / vendor\n"
+    "- net_amount: the net (excl. BTW/VAT) total amount as a decimal number\n"
+    "- vat_amount: the total BTW/VAT amount as a decimal number\n"
+    "- vat_rate_percent: the VAT rate percentage (e.g. 21, 9, or 0)\n"
+    "- suggested_category_name: a short expense category (e.g. 'Office supplies', "
+    "'Travel', 'Software', 'Utilities', 'Meals', 'Professional services')\n"
+    "- confidence: your overall confidence level: 'high', 'medium', or 'low'\n"
+    "- raw_model_note: any caveat or uncertainty about the extraction\n\n"
+    "Return ONLY a JSON object. Omit keys you cannot determine with reasonable "
+    "confidence."
+)
+
+# This footer is ALWAYS appended to the effective prompt (after the user's
+# custom instruction or the default above).  It pins the output format so
+# the JSON parser can always handle the model's reply regardless of what the
+# user writes in their custom prompt.
+_OUTPUT_CONTRACT: str = (
+    "\n\n---\nIMPORTANT: Reply with EXACTLY one JSON object using these keys "
+    "(omit any key you cannot determine):\n"
+    '{"expense_date": "YYYY-MM-DD", "supplier_name": "...", '
+    '"net_amount": 0.00, "vat_amount": 0.00, "vat_rate_percent": 21, '
+    '"suggested_category_name": "...", "confidence": "high|medium|low", '
+    '"raw_model_note": "..."}\n'
+    "Do NOT wrap in markdown code fences. Do NOT include any text outside the "
+    "JSON object."
+)
+
+# ---------------------------------------------------------------------------
+# Pydantic models for httpx request / response (mypy-friendly, D6)
+# ---------------------------------------------------------------------------
+
+
+class _ImageUrlContent(BaseModel):
+    type: str = "image_url"
+    image_url: dict[str, str]
+
+
+class _TextContent(BaseModel):
+    type: str = "text"
+    text: str
+
+
+class _ChatMessage(BaseModel):
+    role: str
+    content: list[dict[str, Any]]
+
+
+class _ChatRequest(BaseModel):
+    model: str
+    messages: list[dict[str, Any]]
+    max_tokens: int = 512
+    response_format: dict[str, str] | None = None
+
+
+class _ChatChoice(BaseModel):
+    message: dict[str, Any]
+
+
+class _ChatResponse(BaseModel):
+    choices: list[_ChatChoice]
+
+
+# ---------------------------------------------------------------------------
+# Config resolution (mirrors services/email.py::_get_smtp_config)
+# ---------------------------------------------------------------------------
+
+
+async def _get_ai_config(session: AsyncSession) -> AiSettings:
+    """Load AI settings from the DB, falling back to environment variables.
+
+    Mirrors ``services/email.py::_get_smtp_config`` with field-level fallback:
+    1. Try DB ``SETTING_KEY_AI`` at GLOBAL level.
+    2. For each critical field (``base_url``, ``api_key``, ``model``) use the
+       DB value when non-empty, otherwise fall back to ``config.ai_*``.
+    3. ``enabled`` and ``receipt_prompt`` use the DB value when a row exists,
+       otherwise fall back to env / default.
+
+    This matches the SMTP pattern: a DB row with a blank ``api_key`` does not
+    shadow the ``AI_API_KEY`` env variable.  The ``api_key`` field is **never**
+    logged.
+    """
+    from jai.services.settings import get_setting
+
+    try:
+        cfg = await get_setting(
+            session,
+            SETTING_KEY_AI,
+            level=SettingLevel.GLOBAL,
+            value_type=AiSettings,
+        )
+    except Exception:
+        logger.warning("Failed to read AI settings from DB", exc_info=True)
+        cfg = None
+
+    # Env fallback (field-level, mirroring _get_smtp_config).
+    settings = get_settings()
+
+    if cfg is None:
+        # No DB row at all – pure env fallback.
+        return AiSettings(
+            enabled=settings.ai_enabled,
+            base_url=settings.ai_base_url,
+            api_key=settings.ai_api_key,
+            model=settings.ai_model,
+            receipt_prompt="",
+        )
+
+    # DB row exists: use DB value per field when non-empty, else fall back to env.
+    return AiSettings(
+        enabled=cfg.enabled,
+        base_url=cfg.base_url if cfg.base_url else settings.ai_base_url,
+        api_key=cfg.api_key if cfg.api_key else settings.ai_api_key,
+        model=cfg.model if cfg.model else settings.ai_model,
+        receipt_prompt=cfg.receipt_prompt,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PDF rasterisation (D16)
+# ---------------------------------------------------------------------------
+
+
+def _attachment_to_images(mime_type: str, raw_bytes: bytes) -> list[bytes]:
+    """Convert a receipt file to a list of PNG image byte strings.
+
+    Supported MIME types
+    --------------------
+    - ``image/*`` → returned as-is (single-element list).
+    - ``application/pdf`` → each page is rasterised with ``pypdfium2`` (up to
+      ``config.ai_pdf_max_pages`` pages) and encoded as PNG via Pillow.
+
+    Raises
+    ------
+    ValueError
+        For unsupported MIME types (caller maps this to HTTP 422).
+    """
+    settings = get_settings()
+    mime_type = mime_type.split(";")[0].strip().lower()
+
+    if mime_type.startswith("image/"):
+        return [raw_bytes]
+
+    if mime_type == "application/pdf":
+        import pypdfium2 as pdfium
+
+        doc = pdfium.PdfDocument(raw_bytes)
+        try:
+            page_count = len(doc)
+            max_pages = settings.ai_pdf_max_pages
+            pages_to_render = min(page_count, max_pages)
+            scale = settings.ai_pdf_render_scale
+
+            images: list[bytes] = []
+            for i in range(pages_to_render):
+                page = doc[i]
+                bitmap = page.render(scale=scale)
+                pil_image = bitmap.to_pil()
+                # Convert to RGB if necessary (avoids issues with RGBA PDFs)
+                if pil_image.mode not in ("RGB", "L"):
+                    pil_image = pil_image.convert("RGB")
+                buf = io.BytesIO()
+                pil_image.save(buf, format="PNG", optimize=False)
+                images.append(buf.getvalue())
+            return images
+        finally:
+            doc.close()
+
+    raise ValueError(
+        f"Unsupported MIME type for AI extraction: {mime_type!r}. "
+        "Only image/* and application/pdf are supported."
+    )
+
+
+# ---------------------------------------------------------------------------
+# httpx Chat Completions call (injectable client for testing)
+# ---------------------------------------------------------------------------
+
+
+def _build_messages(
+    image_bytes_list: list[bytes],
+    prompt_text: str,
+    mime_hint: str = "image/png",
+) -> list[dict[str, Any]]:
+    """Build the Chat Completions messages payload.
+
+    Each image byte string becomes one ``image_url`` content part.  The
+    text prompt is the final content part in the user message.
+
+    ``mime_hint`` should be the MIME type of the *original* attachment (e.g.
+    ``image/png``, ``image/jpeg``).  For PDF-derived images the bytes are
+    always PNG-encoded (from pypdfium2 → Pillow), so if the original MIME
+    is ``application/pdf`` we always use ``image/png`` in the data URL.
+    All other image MIME types are used as-is.
+    """
+    content: list[dict[str, Any]] = []
+
+    # For PDF-derived images the rasterised bytes are always PNG regardless
+    # of page count.  For native images use the declared MIME type.
+    resolved_mime = (
+        "image/png"
+        if mime_hint == "application/pdf" or not mime_hint.startswith("image/")
+        else mime_hint
+    )
+
+    for img_bytes in image_bytes_list:
+        b64 = base64.b64encode(img_bytes).decode("ascii")
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{resolved_mime};base64,{b64}"},
+            }
+        )
+
+    content.append({"type": "text", "text": prompt_text})
+
+    return [{"role": "user", "content": content}]
+
+
+async def _call_chat_completions(
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    client: httpx.AsyncClient | None = None,
+    *,
+    request_json_mode: bool = True,
+) -> str:
+    """POST to {base_url}/chat/completions and return the response text.
+
+    The ``client`` parameter is injectable for testing.  When ``None`` a
+    temporary ``httpx.AsyncClient`` is created for the duration of the call.
+
+    When ``request_json_mode=True`` (the default for real extraction calls),
+    ``response_format={"type": "json_object"}`` is included in the request.
+    If the endpoint responds with HTTP 400 (common when the model or gateway
+    does not support json mode), the call is retried **without**
+    ``response_format``.  Parsing is always defensive so this is safe (D15 –
+    do not hard-depend on json mode).
+
+    When ``request_json_mode=False`` (used for the connectivity probe),
+    ``response_format`` is never sent, so endpoints that only lack json-mode
+    support are not mistakenly reported as non-multimodal.
+
+    Raises
+    ------
+    httpx.HTTPStatusError
+        For 4xx / 5xx responses (after any retry).
+    httpx.TimeoutException
+        For connection / read timeouts.
+    httpx.ConnectError
+        For network failures.
+    RuntimeError
+        If the response has an unexpected shape.
+    """
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    url = f"{base_url.rstrip('/')}/chat/completions"
+
+    async def _do_post(
+        _client: httpx.AsyncClient, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        resp = await _client.post(url, json=body, headers=headers)
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
+
+    base_body: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 512,
+    }
+    body_with_json_mode = {**base_body, "response_format": {"type": "json_object"}}
+
+    if client is not None:
+        if request_json_mode:
+            try:
+                data = await _do_post(client, body_with_json_mode)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 400:
+                    # Endpoint doesn't support json mode – retry without it.
+                    data = await _do_post(client, base_body)
+                else:
+                    raise
+        else:
+            data = await _do_post(client, base_body)
+    else:
+        async with httpx.AsyncClient(timeout=60.0) as _client:
+            if request_json_mode:
+                try:
+                    data = await _do_post(_client, body_with_json_mode)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 400:
+                        data = await _do_post(_client, base_body)
+                    else:
+                        raise
+            else:
+                data = await _do_post(_client, base_body)
+
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("AI response contained no choices.")
+    message = choices[0].get("message") or {}
+    content = message.get("content", "")
+    if not isinstance(content, str):
+        raise RuntimeError(f"Unexpected AI response content type: {type(content)!r}")
+    return content
+
+
+# ---------------------------------------------------------------------------
+# Robust JSON parsing (D15 – defensive, all fields nullable)
+# ---------------------------------------------------------------------------
+
+
+def _strip_code_fence(text: str) -> str:
+    """Remove markdown code fences from model output.
+
+    Models sometimes wrap JSON in ```json ... ``` blocks despite instructions
+    not to.  This strips the wrapper if present.
+    """
+    text = text.strip()
+    # Remove ```json...``` or ```...``` fences
+    fence_re = re.compile(r"^```(?:json)?\s*([\s\S]*?)\s*```$", re.MULTILINE)
+    match = fence_re.match(text)
+    if match:
+        return match.group(1).strip()
+    return text
+
+
+def _safe_decimal(value: object, *, min_val: Decimal | None = None) -> Decimal | None:
+    """Convert *value* to Decimal with optional range guard.
+
+    Returns ``None`` on any conversion error or range violation (red-line 7:
+    do not blindly trust model output).
+    """
+    if value is None:
+        return None
+    try:
+        d = Decimal(str(value))
+        if min_val is not None and d < min_val:
+            return None
+        return d
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _safe_date(value: object) -> date | None:
+    """Convert *value* to a ``date`` (ISO 8601 string 'YYYY-MM-DD').
+
+    Returns ``None`` on failure (red-line 7).
+    """
+    if value is None:
+        return None
+    try:
+        text = str(value).strip()
+        # Accept full datetime strings; take date part only.
+        return date.fromisoformat(text[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_model_output(raw_text: str) -> dict[str, Any]:
+    """Parse and validate the raw model output into a field dict.
+
+    Strategy:
+    1. Strip code fences.
+    2. ``json.loads`` the result.
+    3. Unknown keys are silently ignored (only whitelisted keys survive).
+
+    Returns an empty dict on any failure – callers must handle all-None prefill.
+    """
+    try:
+        cleaned = _strip_code_fence(raw_text)
+        data = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        logger.debug("AI: could not parse JSON from model output: %r", raw_text[:200])
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    # Whitelist: only keys we expect (red-line 7 – ignore unknown model fields)
+    allowed_keys = {
+        "expense_date",
+        "supplier_name",
+        "net_amount",
+        "vat_amount",
+        "vat_rate_percent",
+        "suggested_category_name",
+        "confidence",
+        "raw_model_note",
+    }
+    return {k: v for k, v in data.items() if k in allowed_keys}
+
+
+# ---------------------------------------------------------------------------
+# Category matching (best-effort by name)
+# ---------------------------------------------------------------------------
+
+
+async def _match_category(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    name: str | None,
+) -> uuid.UUID | None:
+    """Best-effort case-insensitive match of ``name`` against expense categories.
+
+    Returns the category UUID if found, otherwise ``None``.
+    """
+    if not name:
+        return None
+
+    from sqlalchemy import func, select
+
+    from jai.models.dictionary import ExpenseCategory
+
+    stmt = select(ExpenseCategory).where(
+        ExpenseCategory.company_id == company_id,
+        func.lower(ExpenseCategory.name) == name.strip().lower(),
+    )
+    result = await session.execute(stmt)
+    cat = result.scalar_one_or_none()
+    return cat.id if cat is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Public API: extract_from_attachment
+# ---------------------------------------------------------------------------
+
+
+async def extract_from_attachment(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    client: httpx.AsyncClient | None = None,
+) -> ExpenseAIPrefill:
+    """Run AI receipt extraction on an already-uploaded attachment.
+
+    Steps
+    -----
+    1. Load the attachment (404 on cross-company access).
+    2. Check AI is enabled + key present (raises ``ValueError`` → 409).
+    3. Read file bytes from storage.
+    4. Rasterise to images (``_attachment_to_images``; 422 on unsupported MIME).
+    5. Build Chat Completions request + call model.
+    6. Parse output defensively → ``ExpenseAIPrefill`` (all nullable).
+    7. Best-effort category name matching.
+    8. Return the prefill – never persisted (D5).
+
+    Raises
+    ------
+    LookupError
+        If attachment doesn't exist or belongs to a different company (→ 404).
+    ValueError
+        If AI is disabled or ``api_key`` is empty (→ 409).
+    ValueError
+        If the MIME type is unsupported (→ 422).
+    RuntimeError
+        If the model call fails (→ 502).
+    """
+    from sqlalchemy import select
+
+    from jai.models.expense_attachment import ExpenseAttachment
+
+    # 1. Load attachment – scoped to company (cross-company → 404)
+    stmt = select(ExpenseAttachment).where(
+        ExpenseAttachment.id == attachment_id,
+        ExpenseAttachment.company_id == company_id,
+    )
+    result = await session.execute(stmt)
+    attachment = result.scalar_one_or_none()
+    if attachment is None:
+        raise LookupError(
+            f"Attachment {attachment_id} not found or does not belong to this company."
+        )
+
+    # 2. Check AI config
+    ai_cfg = await _get_ai_config(session)
+    if not ai_cfg.enabled:
+        raise ValueError(
+            "AI receipt extraction is disabled. Enable it in Settings → AI to use "
+            "this feature."
+        )
+    if not ai_cfg.api_key:
+        raise ValueError(
+            "AI API key is not configured. Add your key in Settings → AI."
+        )
+    if not ai_cfg.model:
+        raise ValueError(
+            "AI model is not configured. Set the model name in Settings → AI."
+        )
+
+    # 3. Read bytes from storage (get_storage is module-level for testability)
+    storage = get_storage()
+    raw_bytes = storage.open(attachment.storage_key)
+
+    # 4. Rasterise to image list (raises ValueError for unsupported MIME → 422)
+    image_list = _attachment_to_images(attachment.mime_type, raw_bytes)
+
+    # 5. Build prompt and call model
+    prompt_text = (ai_cfg.receipt_prompt or DEFAULT_RECEIPT_PROMPT) + _OUTPUT_CONTRACT
+
+    mime_hint = attachment.mime_type.split(";")[0].strip().lower()
+    messages = _build_messages(image_list, prompt_text, mime_hint=mime_hint)
+
+    try:
+        raw_response = await _call_chat_completions(
+            base_url=ai_cfg.base_url,
+            api_key=ai_cfg.api_key,
+            model=ai_cfg.model,
+            messages=messages,
+            client=client,
+        )
+    except httpx.TimeoutException as exc:
+        logger.warning("AI: request timed out for attachment %s", attachment_id)
+        raise RuntimeError(
+            "AI model request timed out. The receipt may be too complex or the "
+            "service is temporarily unavailable."
+        ) from exc
+    except httpx.ConnectError as exc:
+        logger.warning("AI: connection error for attachment %s: %s", attachment_id, exc)
+        raise RuntimeError(
+            "Could not connect to the AI service. Check the base URL in Settings → AI."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        logger.warning(
+            "AI: HTTP %d error for attachment %s", status_code, attachment_id
+        )
+        raise RuntimeError(
+            f"AI service returned HTTP {status_code}. "
+            "Check your API key and model configuration."
+        ) from exc
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "AI: unexpected error for attachment %s: %s", attachment_id, exc
+        )
+        raise RuntimeError(f"AI extraction failed: {exc}") from exc
+
+    # 6. Parse output defensively
+    parsed = _parse_model_output(raw_response)
+
+    # 7. Best-effort category matching
+    suggested_name = parsed.get("suggested_category_name")
+    cat_name: str | None = str(suggested_name) if suggested_name else None
+    cat_id = await _match_category(session, company_id, cat_name)
+
+    # 8. Build prefill (all fields nullable; range-validate amounts)
+    return ExpenseAIPrefill(
+        expense_date=_safe_date(parsed.get("expense_date")),
+        supplier_name=str(parsed["supplier_name"]) if parsed.get("supplier_name") else None,
+        net_amount=_safe_decimal(parsed.get("net_amount"), min_val=Decimal("0")),
+        vat_amount=_safe_decimal(parsed.get("vat_amount"), min_val=Decimal("0")),
+        vat_rate_percent=_safe_decimal(parsed.get("vat_rate_percent"), min_val=Decimal("0")),
+        suggested_category_name=cat_name,
+        suggested_category_id=cat_id,
+        raw_model_note=str(parsed["raw_model_note"]) if parsed.get("raw_model_note") else None,
+        confidence=str(parsed["confidence"]) if parsed.get("confidence") else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API: test_ai_config
+# ---------------------------------------------------------------------------
+
+
+async def test_ai_config(
+    cfg: AiSettings,
+    client: httpx.AsyncClient | None = None,
+) -> AiTestResult:
+    """Send a connectivity and multimodal probe using the given config.
+
+    Uses the built-in ``_PROBE_PNG_BYTES`` (a 1×1 white PNG) so that no user
+    receipt data is ever sent during a test (D14).
+
+    Returns
+    -------
+    AiTestResult
+        ``ok=True, multimodal=True`` on success.
+        ``ok=False`` on auth/connection failure.
+        ``ok=True, multimodal=False`` if the endpoint responds but rejects images.
+    """
+    if not cfg.api_key:
+        return AiTestResult(
+            ok=False, multimodal=False, detail="API key is not configured."
+        )
+    if not cfg.model:
+        return AiTestResult(
+            ok=False, multimodal=False, detail="Model name is not configured."
+        )
+
+    b64 = base64.b64encode(_PROBE_PNG_BYTES).decode("ascii")
+    probe_messages: list[dict[str, Any]] = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{b64}"},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "This is a connectivity test. Reply with exactly: "
+                        '{"status": "ok"}'
+                    ),
+                },
+            ],
+        }
+    ]
+
+    try:
+        await _call_chat_completions(
+            base_url=cfg.base_url,
+            api_key=cfg.api_key,
+            model=cfg.model,
+            messages=probe_messages,
+            client=client,
+            request_json_mode=False,  # Probe only checks connectivity + multimodal
+        )
+        return AiTestResult(
+            ok=True,
+            multimodal=True,
+            detail="Connection successful and model accepted image input.",
+        )
+
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        # Try to get error detail from response body
+        try:
+            err_body = exc.response.json()
+            err_msg = (
+                err_body.get("error", {}).get("message", "")
+                or str(err_body)
+            )
+        except Exception:
+            err_msg = exc.response.text[:200]
+
+        if status_code in (401, 403):
+            return AiTestResult(
+                ok=False,
+                multimodal=False,
+                detail=f"Authentication failed (HTTP {status_code}): {err_msg}",
+            )
+        if status_code == 404:
+            return AiTestResult(
+                ok=False,
+                multimodal=False,
+                detail=f"Model not found (HTTP 404): {err_msg or cfg.model!r}",
+            )
+        # 400 might mean the model doesn't support image inputs
+        if status_code == 400:
+            return AiTestResult(
+                ok=True,
+                multimodal=False,
+                detail=(
+                    f"Endpoint reachable but rejected the image request "
+                    f"(HTTP 400 – model may not support multimodal input): {err_msg}"
+                ),
+            )
+        return AiTestResult(
+            ok=False,
+            multimodal=False,
+            detail=f"HTTP {status_code}: {err_msg}",
+        )
+
+    except httpx.ConnectError as exc:
+        return AiTestResult(
+            ok=False,
+            multimodal=False,
+            detail=f"Connection failed: {exc}",
+        )
+
+    except httpx.TimeoutException:
+        return AiTestResult(
+            ok=False,
+            multimodal=False,
+            detail="Request timed out.",
+        )
+
+    except Exception as exc:
+        return AiTestResult(
+            ok=False,
+            multimodal=False,
+            detail=f"Unexpected error: {exc}",
+        )

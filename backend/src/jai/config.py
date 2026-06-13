@@ -116,6 +116,19 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
 
+    # -- AI / receipt extraction (M8 step 4) --------------------------------
+    # These serve as env fallback when no AI settings exist in the DB.
+    # ``ai_enabled=false`` by default: AI features must be explicitly enabled.
+    ai_base_url: str = "https://api.openai.com/v1"
+    ai_api_key: str = ""
+    ai_model: str = ""
+    ai_enabled: bool = False
+    # Maximum number of PDF pages to rasterise when extracting from a PDF receipt.
+    ai_pdf_max_pages: int = 3
+    # Scale factor for pypdfium2 page rendering (higher = more detail, more tokens).
+    # 2.0 gives approximately 150 DPI for A4 pages, sufficient for OCR-quality reading.
+    ai_pdf_render_scale: float = 2.0
+
     @model_validator(mode="after")
     def _assemble_database_url(self) -> Settings:
         """Build ``database_url`` from parts if not explicitly provided.

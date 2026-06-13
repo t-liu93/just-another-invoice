@@ -176,3 +176,38 @@ class ExpenseAttachmentListResponse(BaseModel):
     """List of attachments for a single expense."""
 
     items: list[ExpenseAttachmentRead]
+
+
+# ---------------------------------------------------------------------------
+# AI pre-fill response (step 4)
+# ---------------------------------------------------------------------------
+
+
+class ExpenseAIPrefill(BaseModel):
+    """Fields pre-filled by the AI receipt extraction pipeline (D5).
+
+    All fields are optional – the model may not be able to extract every
+    value, and the caller should treat missing fields as "needs manual input".
+    This schema intentionally contains **no credentials** and is **not
+    persisted** – it is returned directly to the frontend so the user can
+    review and confirm before saving a proper expense record.
+
+    ``suggested_category_name`` is the raw text returned by the model.
+    ``suggested_category_id`` is populated by the service when the name can be
+    matched (case-insensitive, best-effort) against the company's expense
+    categories.
+
+    VAT treatment is intentionally absent: cross-border treatment inference
+    is unreliable, so the user always selects it manually (D15 / M8 AI pipeline
+    note).
+    """
+
+    expense_date: date | None = None
+    supplier_name: str | None = None
+    net_amount: Decimal | None = None
+    vat_amount: Decimal | None = None
+    vat_rate_percent: Decimal | None = None
+    suggested_category_name: str | None = None
+    suggested_category_id: uuid.UUID | None = None
+    raw_model_note: str | None = None
+    confidence: str | None = None

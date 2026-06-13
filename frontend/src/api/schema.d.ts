@@ -549,6 +549,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/ai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ai Settings
+         * @description Return the current AI settings (api_key desensitised to api_key_set bool).
+         */
+        get: operations["get_ai_settings_api_v1_settings_ai_get"];
+        /**
+         * Update Ai Settings
+         * @description Update AI settings.
+         *
+         *     ``api_key`` semantics (mirrors SmtpSettingsUpdate.password):
+         *     - Omitted (``None``) → keep existing key.
+         *     - Empty string ``""`` → clear the key.
+         *     - Non-empty string → replace with new key.
+         *
+         *     All other fields: omitted (``None``) → keep existing value.
+         */
+        put: operations["update_ai_settings_api_v1_settings_ai_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ai/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Ai Settings
+         * @description Send a connectivity + multimodal probe using the given (or stored) AI config.
+         *
+         *     The request body accepts the same fields as PUT /settings/ai but all are
+         *     optional.  Fields omitted from the body fall back to the stored configuration
+         *     (or env defaults), so the caller can test with temporary values without
+         *     persisting them.
+         *
+         *     Uses an internal 1×1 white PNG probe image – **no user data is transmitted**
+         *     (D14).  The ``api_key`` is **never** returned in the response (D1).
+         */
+        post: operations["test_ai_settings_api_v1_settings_ai_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vat-rates": {
         parameters: {
             query?: never;
@@ -1255,6 +1314,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/ai-extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ai Extract Endpoint
+         * @description Run AI receipt extraction on an already-uploaded attachment.
+         *
+         *     Returns ``ExpenseAIPrefill`` with pre-filled fields for the user to review.
+         *     **The prefill is never persisted** – the user must confirm by calling
+         *     POST /expenses with the reviewed data.
+         *
+         *     Error responses:
+         *     - ``404`` – attachment not found or belongs to a different company.
+         *     - ``409`` – AI is disabled or API key / model not configured.
+         *     - ``422`` – attachment MIME type not supported by the AI pipeline.
+         *     - ``502`` – model call failed or timed out (safe to retry or fall back to manual).
+         */
+        post: operations["ai_extract_endpoint_api_v1_expenses_ai_extract_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/{expense_id}": {
         parameters: {
             query?: never;
@@ -1666,6 +1755,81 @@ export interface components {
             /** Country Code */
             country_code?: string | null;
             type: components["schemas"]["AddressType"];
+        };
+        /**
+         * AiSettingsRead
+         * @description AI settings as returned by the API – ``api_key`` is desensitised.
+         *
+         *     ``api_key_set`` replaces the raw key: ``True`` means a key is stored,
+         *     ``False`` means the field is empty.  All other fields are returned as-is
+         *     so the user can inspect and update them.
+         */
+        AiSettingsRead: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled?: boolean;
+            /**
+             * Base Url
+             * @default https://api.openai.com/v1
+             */
+            base_url?: string;
+            /**
+             * Api Key Set
+             * @default false
+             */
+            api_key_set?: boolean;
+            /**
+             * Model
+             * @default
+             */
+            model?: string;
+            /**
+             * Receipt Prompt
+             * @default
+             */
+            receipt_prompt?: string;
+        };
+        /**
+         * AiSettingsUpdate
+         * @description Request body for ``PUT /settings/ai``.
+         *
+         *     ``api_key`` semantics mirror ``SmtpSettingsUpdate.password``:
+         *     - ``None`` (field omitted) → keep the existing key unchanged.
+         *     - Empty string ``""`` → clear the stored key.
+         *     - Non-empty string → replace with the new key.
+         *
+         *     All other fields are optional; omitted fields keep their current value.
+         */
+        AiSettingsUpdate: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Receipt Prompt */
+            receipt_prompt?: string | null;
+        };
+        /**
+         * AiTestResult
+         * @description Result from ``POST /settings/ai/test``.
+         *
+         *     ``ok`` is ``True`` when the endpoint responded successfully.
+         *     ``multimodal`` is ``True`` when the model accepted an image input without
+         *     error (confirms vision capability).
+         *     ``detail`` carries a human-readable message for failures.
+         */
+        AiTestResult: {
+            /** Ok */
+            ok: boolean;
+            /** Multimodal */
+            multimodal: boolean;
+            /** Detail */
+            detail: string;
         };
         /** Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post */
         Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post: {
@@ -2368,6 +2532,45 @@ export interface components {
             customer_id?: string | null;
             /** Notes */
             notes?: string | null;
+        };
+        /**
+         * ExpenseAIPrefill
+         * @description Fields pre-filled by the AI receipt extraction pipeline (D5).
+         *
+         *     All fields are optional – the model may not be able to extract every
+         *     value, and the caller should treat missing fields as "needs manual input".
+         *     This schema intentionally contains **no credentials** and is **not
+         *     persisted** – it is returned directly to the frontend so the user can
+         *     review and confirm before saving a proper expense record.
+         *
+         *     ``suggested_category_name`` is the raw text returned by the model.
+         *     ``suggested_category_id`` is populated by the service when the name can be
+         *     matched (case-insensitive, best-effort) against the company's expense
+         *     categories.
+         *
+         *     VAT treatment is intentionally absent: cross-border treatment inference
+         *     is unreliable, so the user always selects it manually (D15 / M8 AI pipeline
+         *     note).
+         */
+        ExpenseAIPrefill: {
+            /** Expense Date */
+            expense_date?: string | null;
+            /** Supplier Name */
+            supplier_name?: string | null;
+            /** Net Amount */
+            net_amount?: string | null;
+            /** Vat Amount */
+            vat_amount?: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent?: string | null;
+            /** Suggested Category Name */
+            suggested_category_name?: string | null;
+            /** Suggested Category Id */
+            suggested_category_id?: string | null;
+            /** Raw Model Note */
+            raw_model_note?: string | null;
+            /** Confidence */
+            confidence?: string | null;
         };
         /**
          * ExpenseAttachmentListResponse
@@ -4890,6 +5093,17 @@ export interface components {
              */
             active?: boolean;
         };
+        /**
+         * _AiExtractRequest
+         * @description Request body for POST /expenses/ai-extract.
+         */
+        _AiExtractRequest: {
+            /**
+             * Attachment Id
+             * Format: uuid
+             */
+            attachment_id: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -5859,6 +6073,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuoteDefaultValidDaysRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_settings_api_v1_settings_ai_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiSettingsRead"];
+                };
+            };
+        };
+    };
+    update_ai_settings_api_v1_settings_ai_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_ai_settings_api_v1_settings_ai_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiTestResult"];
                 };
             };
             /** @description Validation Error */
@@ -8031,6 +8331,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_extract_endpoint_api_v1_expenses_ai_extract_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_AiExtractRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseAIPrefill"];
                 };
             };
             /** @description Validation Error */

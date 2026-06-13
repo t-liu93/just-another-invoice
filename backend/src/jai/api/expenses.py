@@ -1,15 +1,22 @@
-"""Expense API routes – CRUD + list (M8 step 1).
+"""Expense API routes – CRUD + list + AI extraction (M8 steps 1 + 4).
 
 Endpoints:
-  POST   /api/v1/expenses         – create an expense → 201 ExpenseRead
-  GET    /api/v1/expenses         – list expenses with filters → 200 ExpenseListResponse
-  GET    /api/v1/expenses/{id}    – get a single expense → 200 ExpenseRead
-  PUT    /api/v1/expenses/{id}    – update an expense → 200 ExpenseRead
-  DELETE /api/v1/expenses/{id}    – delete an expense → 204
+  POST   /api/v1/expenses              – create an expense → 201 ExpenseRead
+  GET    /api/v1/expenses              – list expenses with filters → 200 ExpenseListResponse
+  POST   /api/v1/expenses/ai-extract   – AI receipt extraction → 200 ExpenseAIPrefill
+  GET    /api/v1/expenses/{id}         – get a single expense → 200 ExpenseRead
+  PUT    /api/v1/expenses/{id}         – update an expense → 200 ExpenseRead
+  DELETE /api/v1/expenses/{id}         – delete an expense → 204
 
 Auth: owner-only (mirrors api/payments.py).
 company_id is always injected by the service; never taken from the request body
 (red-line 2).
+
+Error mapping for ai-extract:
+  - Unsupported MIME type → 422
+  - AI disabled / no key → 409
+  - Model failure / timeout → 502
+  - Cross-company attachment → 404
 """
 
 from __future__ import annotations
@@ -18,12 +25,18 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models.user import User
-from jai.schemas.expense import ExpenseInput, ExpenseListResponse, ExpenseRead
+from jai.schemas.expense import (
+    ExpenseAIPrefill,
+    ExpenseInput,
+    ExpenseListResponse,
+    ExpenseRead,
+)
 from jai.services.expense import (
     create_expense,
     delete_expense,
@@ -32,6 +45,12 @@ from jai.services.expense import (
     update_expense,
 )
 from jai.services.storage import get_storage
+
+
+class _AiExtractRequest(BaseModel):
+    """Request body for POST /expenses/ai-extract."""
+
+    attachment_id: uuid.UUID
 
 router = APIRouter(prefix="/api/v1", tags=["expenses"])
 
@@ -85,6 +104,63 @@ async def create_expense_endpoint(
 # ---------------------------------------------------------------------------
 # List expenses
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# AI extract (step 4) – registered BEFORE /expenses/{expense_id} to avoid
+# the parameterised route swallowing the literal path "/expenses/ai-extract".
+# ---------------------------------------------------------------------------
+
+
+@router.post("/expenses/ai-extract", response_model=ExpenseAIPrefill)
+async def ai_extract_endpoint(
+    body: _AiExtractRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ExpenseAIPrefill:
+    """Run AI receipt extraction on an already-uploaded attachment.
+
+    Returns ``ExpenseAIPrefill`` with pre-filled fields for the user to review.
+    **The prefill is never persisted** – the user must confirm by calling
+    POST /expenses with the reviewed data.
+
+    Error responses:
+    - ``404`` – attachment not found or belongs to a different company.
+    - ``409`` – AI is disabled or API key / model not configured.
+    - ``422`` – attachment MIME type not supported by the AI pipeline.
+    - ``502`` – model call failed or timed out (safe to retry or fall back to manual).
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    from jai.services.ai import extract_from_attachment
+
+    try:
+        return await extract_from_attachment(
+            session,
+            company_id,
+            body.attachment_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        err_str = str(exc)
+        # MIME not supported → 422
+        if "Unsupported MIME type" in err_str:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err_str
+            ) from exc
+        # AI disabled / no key / no model → 409 Conflict
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=err_str
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
 
 # NOTE: this route MUST be registered before /expenses/{expense_id} so that
 # FastAPI matches the literal "/expenses" path before the parameterised one.

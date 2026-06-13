@@ -1,4 +1,4 @@
-"""Settings API routes – SMTP configuration, numbering config, user preferences.
+"""Settings API routes – SMTP configuration, numbering config, user preferences, AI.
 
 Endpoints:
   - ``GET  /api/v1/settings/smtp``                    – SMTP config (desensitised).
@@ -10,6 +10,9 @@ Endpoints:
   - ``PUT  /api/v1/settings/invoice-number-sequence`` – advance sequence (forward only).
   - ``GET  /api/v1/settings/me``                      – current user preferences.
   - ``PUT  /api/v1/settings/me``                      – update user preferences.
+  - ``GET  /api/v1/settings/ai``                      – AI config (key desensitised).
+  - ``PUT  /api/v1/settings/ai``                      – update AI config.
+  - ``POST /api/v1/settings/ai/test``                 – probe AI connectivity + multimodal.
 """
 
 from __future__ import annotations
@@ -25,11 +28,16 @@ from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.user import User
 from jai.schemas.setting import (
+    SETTING_KEY_AI,
     SETTING_KEY_INVOICE_NUMBERING,
     SETTING_KEY_QUOTE_DEFAULT_VALID_DAYS,
     SETTING_KEY_QUOTE_NUMBERING,
     SETTING_KEY_SMTP,
     SETTING_KEY_USER_PREFERENCES,
+    AiSettings,
+    AiSettingsRead,
+    AiSettingsUpdate,
+    AiTestResult,
     InvoiceNumberingConfig,
     InvoiceNumberSequenceRead,
     InvoiceNumberSequenceWrite,
@@ -613,3 +621,145 @@ async def update_quote_default_valid_days(
     )
     await session.commit()
     return value
+
+
+# ---------------------------------------------------------------------------
+# AI settings (GLOBAL level, owner-only) – M8 step 4
+# ---------------------------------------------------------------------------
+
+
+def _ai_to_read_model(cfg: AiSettings) -> AiSettingsRead:
+    """Convert internal AiSettings to the desensitised API response.
+
+    ``api_key`` is replaced by ``api_key_set: bool`` – the raw key is
+    **never** returned by any endpoint (D1 security requirement).
+    """
+    return AiSettingsRead(
+        enabled=cfg.enabled,
+        base_url=cfg.base_url,
+        api_key_set=bool(cfg.api_key),
+        model=cfg.model,
+        receipt_prompt=cfg.receipt_prompt,
+    )
+
+
+@router.get("/ai", response_model=AiSettingsRead)
+async def get_ai_settings(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> AiSettingsRead:
+    """Return the current AI settings (api_key desensitised to api_key_set bool)."""
+    _owner_only(user)
+
+    cfg = await get_setting(
+        session,
+        SETTING_KEY_AI,
+        level=SettingLevel.GLOBAL,
+        value_type=AiSettings,
+    )
+    if cfg is None:
+        return AiSettingsRead()
+    return _ai_to_read_model(cfg)
+
+
+@router.put("/ai", response_model=AiSettingsRead)
+async def update_ai_settings(
+    body: AiSettingsUpdate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> AiSettingsRead:
+    """Update AI settings.
+
+    ``api_key`` semantics (mirrors SmtpSettingsUpdate.password):
+    - Omitted (``None``) → keep existing key.
+    - Empty string ``""`` → clear the key.
+    - Non-empty string → replace with new key.
+
+    All other fields: omitted (``None``) → keep existing value.
+    """
+    _owner_only(user)
+
+    # Load existing to merge partial updates
+    existing = await get_setting(
+        session,
+        SETTING_KEY_AI,
+        level=SettingLevel.GLOBAL,
+        value_type=AiSettings,
+    )
+    base = existing if existing is not None else AiSettings()
+
+    # Resolve api_key: None → keep, "" → clear, other → replace
+    new_api_key: str
+    if body.api_key is None:
+        new_api_key = base.api_key
+    else:
+        new_api_key = body.api_key  # includes "" (clear)
+
+    new_cfg = AiSettings(
+        enabled=body.enabled if body.enabled is not None else base.enabled,
+        base_url=body.base_url if body.base_url is not None else base.base_url,
+        api_key=new_api_key,
+        model=body.model if body.model is not None else base.model,
+        receipt_prompt=(
+            body.receipt_prompt if body.receipt_prompt is not None else base.receipt_prompt
+        ),
+    )
+
+    await set_setting(
+        session,
+        SETTING_KEY_AI,
+        new_cfg,
+        level=SettingLevel.GLOBAL,
+    )
+    await session.commit()
+
+    return _ai_to_read_model(new_cfg)
+
+
+@router.post("/ai/test", response_model=AiTestResult)
+async def test_ai_settings(
+    body: AiSettingsUpdate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> AiTestResult:
+    """Send a connectivity + multimodal probe using the given (or stored) AI config.
+
+    The request body accepts the same fields as PUT /settings/ai but all are
+    optional.  Fields omitted from the body fall back to the stored configuration
+    (or env defaults), so the caller can test with temporary values without
+    persisting them.
+
+    Uses an internal 1×1 white PNG probe image – **no user data is transmitted**
+    (D14).  The ``api_key`` is **never** returned in the response (D1).
+    """
+    _owner_only(user)
+
+    from jai.services.ai import test_ai_config
+
+    # Load stored config, then overlay body fields
+    existing = await get_setting(
+        session,
+        SETTING_KEY_AI,
+        level=SettingLevel.GLOBAL,
+        value_type=AiSettings,
+    )
+    base = existing if existing is not None else AiSettings()
+
+    # Resolve api_key for probe: None → keep stored, "" → clear, other → override
+    probe_api_key: str
+    if body.api_key is None:
+        probe_api_key = base.api_key
+    else:
+        probe_api_key = body.api_key
+
+    probe_cfg = AiSettings(
+        enabled=body.enabled if body.enabled is not None else base.enabled,
+        base_url=body.base_url if body.base_url is not None else base.base_url,
+        api_key=probe_api_key,
+        model=body.model if body.model is not None else base.model,
+        receipt_prompt=(
+            body.receipt_prompt if body.receipt_prompt is not None else base.receipt_prompt
+        ),
+    )
+
+    return await test_ai_config(probe_cfg)
