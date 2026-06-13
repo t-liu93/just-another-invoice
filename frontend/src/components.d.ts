@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AddressFieldsForm: typeof import('./components/AddressFieldsForm.vue')['default']
+    AiSettingsForm: typeof import('./components/settings/AiSettingsForm.vue')['default']
     AppHeader: typeof import('./components/AppHeader.vue')['default']
     DictionarySettings: typeof import('./components/settings/DictionarySettings.vue')['default']
     InvoicePaymentPanel: typeof import('./components/InvoicePaymentPanel.vue')['default']
@@ -22,6 +23,7 @@ declare module 'vue' {
     NCollapse: typeof import('naive-ui')['NCollapse']
     NCollapseItem: typeof import('naive-ui')['NCollapseItem']
     NConfigProvider: typeof import('naive-ui')['NConfigProvider']
+    NDatePicker: typeof import('naive-ui')['NDatePicker']
     NDialogProvider: typeof import('naive-ui')['NDialogProvider']
     NDivider: typeof import('naive-ui')['NDivider']
     NEmpty: typeof import('naive-ui')['NEmpty']
@@ -46,6 +48,7 @@ declare module 'vue' {
     NSpin: typeof import('naive-ui')['NSpin']
     NStep: typeof import('naive-ui')['NStep']
     NSteps: typeof import('naive-ui')['NSteps']
+    NSwitch: typeof import('naive-ui')['NSwitch']
     NTag: typeof import('naive-ui')['NTag']
     NText: typeof import('naive-ui')['NText']
     PreferenceSettings: typeof import('./components/settings/PreferenceSettings.vue')['default']

@@ -15,6 +15,7 @@ Coverage:
 - Owner-only: non-owner → 403
 - Negative net or vat → 422 (schema validation)
 - Full CRUD: create → read → update → delete
+- PUT confirms draft (is_draft True → False); idempotent on already-confirmed expense
 """
 
 from __future__ import annotations
@@ -884,3 +885,134 @@ class TestExpenseList:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 3
+
+
+# ---------------------------------------------------------------------------
+# PUT-based draft confirmation (M8 step-1 contract)
+# ---------------------------------------------------------------------------
+
+
+async def _create_recurring_and_run(
+    client: AsyncClient,
+    *,
+    category_id: str,
+    vat_treatment_id: str,
+    vat_rate_id: str,
+    start_date: str = "2025-01-01",
+) -> dict:
+    """Create a recurring-expense template and trigger run-now to get a draft."""
+    body = {
+        "name": "Confirm-test Template",
+        "category_id": category_id,
+        "vat_treatment_id": vat_treatment_id,
+        "vat_rate_id": vat_rate_id,
+        "net_amount": "100.00",
+        "vat_amount": "21.00",
+        "frequency": "MONTHLY",
+        "start_date": start_date,
+        "active": True,
+    }
+    resp = await client.post("/api/v1/recurring-expenses", json=body)
+    assert resp.status_code == 201, resp.text
+    rec_id = resp.json()["id"]
+
+    run_resp = await client.post(f"/api/v1/recurring-expenses/{rec_id}/run-now")
+    assert run_resp.status_code == 200, run_resp.text
+    assert run_resp.json()["generated"] >= 1
+
+    # Retrieve the generated draft via the expense list (is_draft=true)
+    list_resp = await client.get("/api/v1/expenses?is_draft=true")
+    assert list_resp.status_code == 200
+    items = list_resp.json()["items"]
+    assert len(items) >= 1
+    return items[0]  # most-recent draft
+
+
+@pytest.mark.integration
+class TestPutConfirmsDraft:
+    """PUT /expenses/{id} always sets is_draft=False (step-1 contract)."""
+
+    async def test_put_draft_sets_is_draft_false(self, db_client: AsyncClient) -> None:
+        """PUT on a draft expense (is_draft=True) → response + DB have is_draft=False."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        cat = await _create_expense_category(db_client)
+        treatment = seeds["purch_treatments"]["NL_DOMESTIC_PURCH"]
+        rate = seeds["rates"]["NL standard (21%)"]
+
+        # Generate a draft via recurring-expense run-now
+        draft = await _create_recurring_and_run(
+            db_client,
+            category_id=cat["id"],
+            vat_treatment_id=treatment["id"],
+            vat_rate_id=rate["id"],
+        )
+        assert draft["is_draft"] is True, "pre-condition: must be a draft"
+        draft_id = draft["id"]
+
+        # Fetch full expense (list item may be minimal)
+        full_resp = await db_client.get(f"/api/v1/expenses/{draft_id}")
+        assert full_resp.status_code == 200
+        full = full_resp.json()
+
+        # PUT (confirm) – send clean ExpenseInput, no is_draft field
+        put_resp = await db_client.put(
+            f"/api/v1/expenses/{draft_id}",
+            json={
+                "expense_date": full["expense_date"],
+                "category_id": full["category_id"],
+                "vat_treatment_id": full["vat_treatment_id"],
+                "vat_rate_id": full["vat_rate_id"],
+                "net_amount": full["net_amount"],
+                "vat_amount": full["vat_amount"],
+                "deductible": full["deductible"],
+                "reference": full.get("reference"),
+                "note": full.get("note"),
+            },
+        )
+        assert put_resp.status_code == 200, put_resp.text
+        updated = put_resp.json()
+
+        # Response confirms is_draft is now False
+        assert updated["is_draft"] is False, "PUT must flip is_draft to False"
+
+        # Verify DB state via GET
+        get_resp = await db_client.get(f"/api/v1/expenses/{draft_id}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["is_draft"] is False, "DB must persist is_draft=False"
+
+    async def test_put_confirmed_expense_stays_false(self, db_client: AsyncClient) -> None:
+        """PUT on an already-confirmed expense keeps is_draft=False (idempotent)."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        cat = await _create_expense_category(db_client)
+        treatment = seeds["purch_treatments"]["NL_DOMESTIC_PURCH"]
+        rate = seeds["rates"]["NL standard (21%)"]
+
+        # Create a regular (non-draft) expense
+        exp = await _create_expense(
+            db_client,
+            category_id=cat["id"],
+            vat_treatment_id=treatment["id"],
+            vat_rate_id=rate["id"],
+            net_amount="50.00",
+            vat_amount="10.50",
+        )
+        assert exp["is_draft"] is False, "pre-condition: regular create sets is_draft=False"
+        exp_id = exp["id"]
+
+        # PUT again → is_draft must remain False
+        put_resp = await db_client.put(
+            f"/api/v1/expenses/{exp_id}",
+            json={
+                "expense_date": exp["expense_date"],
+                "category_id": exp["category_id"],
+                "vat_treatment_id": exp["vat_treatment_id"],
+                "vat_rate_id": exp["vat_rate_id"],
+                "net_amount": exp["net_amount"],
+                "vat_amount": exp["vat_amount"],
+                "deductible": exp["deductible"],
+            },
+        )
+        assert put_resp.status_code == 200, put_resp.text
+        assert put_resp.json()["is_draft"] is False, "is_draft must stay False (idempotent)"

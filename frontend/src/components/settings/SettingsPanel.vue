@@ -23,6 +23,7 @@ import PreferenceSettings from './PreferenceSettings.vue'
 import SmtpSettingsForm from './SmtpSettingsForm.vue'
 import ThemeSettings from './ThemeSettings.vue'
 import DictionarySettings from './DictionarySettings.vue'
+import AiSettingsForm from './AiSettingsForm.vue'
 
 const { t } = useI18n()
 const { isOpen, activeCategory, close } = useSettingsPanel()
@@ -53,10 +54,9 @@ const menuOptions = computed<MenuOption[]>(() => [
     icon: renderIcon(BookOutline),
   },
   {
-    label: `${t('settings.panel.categoryAi')} · ${t('settings.panel.comingSoon')}`,
+    label: t('settings.panel.categoryAi'),
     key: 'ai',
     icon: renderIcon(SparklesOutline),
-    disabled: true,
   },
 ])
 
@@ -95,6 +95,7 @@ function onMenuUpdate(key: string) {
         <SmtpSettingsForm v-else-if="activeCategory === 'smtp'" />
         <ThemeSettings v-else-if="activeCategory === 'theme'" />
         <DictionarySettings v-else-if="activeCategory === 'dictionary'" />
+        <AiSettingsForm v-else-if="activeCategory === 'ai'" />
       </div>
     </div>
   </n-modal>

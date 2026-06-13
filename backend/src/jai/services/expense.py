@@ -383,14 +383,14 @@ async def update_expense(
 ) -> ExpenseRead:
     """Edit an expense.  Same guards as create_expense.
 
-    Also supports transitioning ``is_draft`` from True to False (confirm a
-    recurring-expense draft) by calling PUT with ``is_draft`` not in the body
-    – caller must set it on the ORM object if needed.  The service does NOT
-    reset is_draft here; it preserves the existing value unless overridden.
+    PUT semantics include confirmation: any PUT call sets ``is_draft = False``.
+    Drafts produced by recurring-expense generation are confirmed by the first
+    PUT (step-1 contract).  Already-confirmed expenses remain ``is_draft=False``.
+    ``ExpenseInput`` never carries ``is_draft`` (red-line 1; it is derived here).
     """
     exp = await _load_expense(session, expense_id, company_id)
-    # Preserve is_draft: the PUT endpoint may not change this; step 3 route adds
-    # explicit confirm logic.
+    # PUT always confirms the draft (step-1 contract: PUT sets is_draft → False).
+    exp.is_draft = False
     await _apply_body(session, exp, body, company_id)
     await session.commit()
     await session.refresh(exp)

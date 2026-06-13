@@ -145,6 +145,30 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/expenses',
+    name: 'expense-list',
+    component: () => import('../views/expenses/ExpenseList.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/expenses/new',
+    name: 'expense-new',
+    component: () => import('../views/expenses/ExpenseEdit.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/expenses/:id/edit',
+    name: 'expense-edit',
+    component: () => import('../views/expenses/ExpenseEdit.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/recurring-expenses',
+    name: 'recurring-expense-list',
+    component: () => import('../views/expenses/RecurringExpenseList.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/estimates/new',
     name: 'estimate-new',
     component: () => import('../views/estimates/EstimateEdit.vue'),

@@ -26,6 +26,8 @@ import {
   ReceiptOutline,
   CalculatorOutline,
   WalletOutline,
+  CardOutline,
+  RepeatOutline,
 } from '@vicons/ionicons5'
 import { NIcon, type MenuOption } from 'naive-ui'
 
@@ -48,6 +50,8 @@ const navOptions = computed<MenuOption[]>(() => [
   { label: t('nav.quotes'), key: 'quote-list', icon: renderIcon(ReceiptOutline) },
   { label: t('nav.estimates'), key: 'estimate-list', icon: renderIcon(CalculatorOutline) },
   { label: t('nav.payments'), key: 'payment-list', icon: renderIcon(WalletOutline) },
+  { label: t('nav.expenses'), key: 'expense-list', icon: renderIcon(CardOutline) },
+  { label: t('nav.recurring'), key: 'recurring-expense-list', icon: renderIcon(RepeatOutline) },
 ])
 
 /** Highlight the active top-level section based on the current route name. */
@@ -59,6 +63,8 @@ const activeKey = computed<string | null>(() => {
   if (typeof name === 'string' && name.startsWith('quote')) return 'quote-list'
   if (typeof name === 'string' && name.startsWith('estimate')) return 'estimate-list'
   if (typeof name === 'string' && name.startsWith('payment')) return 'payment-list'
+  if (typeof name === 'string' && name.startsWith('recurring-expense')) return 'recurring-expense-list'
+  if (typeof name === 'string' && name.startsWith('expense')) return 'expense-list'
   if (name === 'dashboard') return 'dashboard'
   return null
 })
@@ -71,6 +77,8 @@ function handleNav(key: string) {
   else if (key === 'quote-list') router.push('/quotes')
   else if (key === 'estimate-list') router.push('/estimates')
   else if (key === 'payment-list') router.push('/payments')
+  else if (key === 'expense-list') router.push('/expenses')
+  else if (key === 'recurring-expense-list') router.push('/recurring-expenses')
 }
 
 function toggleLocale() {
