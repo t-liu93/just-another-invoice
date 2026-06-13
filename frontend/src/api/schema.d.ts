@@ -1231,6 +1231,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Expenses Endpoint
+         * @description Return a paginated expenses list filtered by the given parameters.
+         */
+        get: operations["list_expenses_endpoint_api_v1_expenses_get"];
+        put?: never;
+        /**
+         * Create Expense Endpoint
+         * @description Create a new expense record.
+         */
+        post: operations["create_expense_endpoint_api_v1_expenses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expenses/{expense_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Expense Endpoint
+         * @description Fetch a single expense by id (scoped to caller's company).
+         */
+        get: operations["get_expense_endpoint_api_v1_expenses__expense_id__get"];
+        /**
+         * Update Expense Endpoint
+         * @description Update an expense (recalculates amounts + snapshots).
+         *
+         *     Also used to confirm a recurring-expense draft (set is_draft=false via
+         *     the existing is_draft field on the expense; step 3 adds explicit confirm
+         *     endpoint).
+         */
+        put: operations["update_expense_endpoint_api_v1_expenses__expense_id__put"];
+        post?: never;
+        /**
+         * Delete Expense Endpoint
+         * @description Delete an expense (cascade removes attachments; step 2 cleans disk files).
+         */
+        delete: operations["delete_expense_endpoint_api_v1_expenses__expense_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -2194,6 +2250,178 @@ export interface components {
              * @default true
              */
             active?: boolean;
+        };
+        /**
+         * ExpenseInput
+         * @description Request body for POST/PUT /api/v1/expenses.
+         *
+         *     Only collects raw user input – net/vat amounts, date, category, treatment,
+         *     rate, supplier, reference, note, deductible.  All computed fields
+         *     (gross, base_*, snapshots, currency, exchange_rate, is_draft) are derived
+         *     by the service layer (red-line 1).
+         */
+        ExpenseInput: {
+            /**
+             * Expense Date
+             * Format: date
+             */
+            expense_date: string;
+            /**
+             * Category Id
+             * Format: uuid
+             */
+            category_id: string;
+            /** Supplier Name */
+            supplier_name?: string | null;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /**
+             * Net Amount
+             * @description Net (excl. VAT) amount ≥ 0.
+             */
+            net_amount: number | string;
+            /**
+             * Vat Amount
+             * @description VAT amount ≥ 0.
+             */
+            vat_amount: number | string;
+            /**
+             * Deductible
+             * @description Whether this expense is VAT-deductible. Defaults to category.default_deductible, then True.
+             */
+            deductible?: boolean | null;
+            /** Reference */
+            reference?: string | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * ExpenseListItem
+         * @description Minimal overview row for GET /api/v1/expenses.
+         */
+        ExpenseListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Expense Date
+             * Format: date
+             */
+            expense_date: string;
+            /** Category Name */
+            category_name?: string | null;
+            /** Supplier Name */
+            supplier_name?: string | null;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Deductible */
+            deductible: boolean;
+            /** Is Draft */
+            is_draft: boolean;
+            /**
+             * Attachment Count
+             * @default 0
+             */
+            attachment_count?: number;
+        };
+        /**
+         * ExpenseListResponse
+         * @description Paginated expenses list.
+         */
+        ExpenseListResponse: {
+            /** Items */
+            items: components["schemas"]["ExpenseListItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ExpenseRead
+         * @description Full expense record as returned by read endpoints.
+         */
+        ExpenseRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Expense Date
+             * Format: date
+             */
+            expense_date: string;
+            /** Category Id */
+            category_id?: string | null;
+            /** Category Name */
+            category_name?: string | null;
+            /** Supplier Name */
+            supplier_name?: string | null;
+            /** Vat Treatment Id */
+            vat_treatment_id?: string | null;
+            /** Vat Treatment Code */
+            vat_treatment_code: string;
+            /** Vat Treatment Label */
+            vat_treatment_label: string;
+            /** Vat Treatment Effect */
+            vat_treatment_effect: string;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Deductible */
+            deductible: boolean;
+            /** Currency */
+            currency: string;
+            /** Exchange Rate */
+            exchange_rate: string;
+            /** Base Net Amount */
+            base_net_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
+            /** Reference */
+            reference?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Is Draft */
+            is_draft: boolean;
+            /**
+             * Attachment Count
+             * @default 0
+             */
+            attachment_count?: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * ForgotPasswordRequest
@@ -7342,6 +7570,177 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["InvoicePaymentsResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_expenses_endpoint_api_v1_expenses_get: {
+        parameters: {
+            query?: {
+                /** @description Search supplier, reference, or category. */
+                q?: string | null;
+                category_id?: string | null;
+                vat_treatment_id?: string | null;
+                deductible?: boolean | null;
+                is_draft?: boolean | null;
+                /** @description Inclusive lower bound on expense_date. */
+                date_from?: string | null;
+                /** @description Inclusive upper bound on expense_date. */
+                date_to?: string | null;
+                limit?: number;
+                offset?: number;
+                sort_by?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_expense_endpoint_api_v1_expenses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_expense_endpoint_api_v1_expenses__expense_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_expense_endpoint_api_v1_expenses__expense_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_expense_endpoint_api_v1_expenses__expense_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
