@@ -117,3 +117,15 @@ class RecurringFrequency(enum.StrEnum):
     MONTHLY = "MONTHLY"
     QUARTERLY = "QUARTERLY"
     YEARLY = "YEARLY"
+
+
+class PaidBy(enum.StrEnum):
+    """Payment source indicator for an expense (D2 / M8.5).
+
+    Indicates whether the expense was paid from the private account or the
+    business account.  **Pure bookkeeping – does not affect any calculation.**
+    Default: ``BUSINESS``.
+    """
+
+    PRIVATE = "PRIVATE"
+    BUSINESS = "BUSINESS"

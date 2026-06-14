@@ -125,6 +125,35 @@ class RecurringExpense(Base):
     # -- Deductibility (D9) ---------------------------------------------------
     deductible: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
+    # -- Bookkeeping fields (M8.5 parity: same three columns as expense, D8) --
+    paid_by: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'BUSINESS'"),
+        comment=(
+            "PaidBy enum: PRIVATE | BUSINESS. Template value; copied to "
+            "generated Expense on generation (D8). Pure bookkeeping, no calc."
+        ),
+    )
+    business_percentage: Mapped[object] = mapped_column(
+        _RATE,  # NUMERIC(6,3)
+        nullable=False,
+        server_default=text("100"),
+        comment=(
+            "Business-use percentage 0–100. Template value; copied to "
+            "generated Expense on generation (D8)."
+        ),
+    )
+    depreciation_years: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+        comment=(
+            "Depreciation years ≥ 1. Template value; copied to generated "
+            "Expense on generation (D8). Amortisation deferred to M10."
+        ),
+    )
+
     # -- Notes (text, red-line 10) --------------------------------------------
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 

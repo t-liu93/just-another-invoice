@@ -31,7 +31,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import RecurringFrequency
+from jai.models._enums import PaidBy, RecurringFrequency
 from jai.models.company import Company
 from jai.models.dictionary import ExpenseCategory
 from jai.models.expense import Expense
@@ -187,6 +187,9 @@ def _recurring_to_read(rec: RecurringExpense) -> RecurringExpenseRead:
         gross_amount=Decimal(str(rec.gross_amount)),
         deductible=rec.deductible,
         note=rec.note,
+        paid_by=PaidBy(rec.paid_by),
+        business_percentage=Decimal(str(rec.business_percentage)),
+        depreciation_years=int(rec.depreciation_years),
         frequency=rec.frequency,
         start_date=rec.start_date,
         end_date=rec.end_date,
@@ -257,6 +260,11 @@ async def _apply_body(
     rec.gross_amount = gross_q
     rec.deductible = effective_deductible
     rec.note = body.note
+
+    # -- Bookkeeping fields (M8.5 parity: pure storage, no calculation, D8) --
+    rec.paid_by = body.paid_by.value
+    rec.business_percentage = body.business_percentage
+    rec.depreciation_years = body.depreciation_years
 
     rec.frequency = body.frequency
     rec.start_date = body.start_date
@@ -445,6 +453,10 @@ def _clone_expense_from_template(
     # always the company's base currency so we load it from the template's company).
     # For generation we must load the company; do this in the caller.
     exp.note = rec.note
+    # -- Bookkeeping fields (M8.5 D8: copy template values to generated expense) --
+    exp.paid_by = rec.paid_by
+    exp.business_percentage = rec.business_percentage
+    exp.depreciation_years = rec.depreciation_years
     exp.is_draft = True
     exp.recurring_expense_id = rec.id
     exp.creator_id = creator_id

@@ -26,6 +26,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -156,6 +157,35 @@ class Expense(Base):
         Text, nullable=True, comment="Ticket / invoice reference number from supplier."
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # -- Bookkeeping fields (M8.5: pure storage, no calculation, D1–D4) --------
+    paid_by: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'BUSINESS'"),
+        comment=(
+            "PaidBy enum: PRIVATE | BUSINESS. Payment source indicator – "
+            "pure bookkeeping, does not affect any calculation (D2)."
+        ),
+    )
+    business_percentage: Mapped[object] = mapped_column(
+        _RATE,  # NUMERIC(6,3) – same scale as vat_rate_percent
+        nullable=False,
+        server_default=text("100"),
+        comment=(
+            "Business-use percentage 0–100. M10 will use this to prorate "
+            "deductible VAT and cost amounts (D3). Stored as-is, no calculation here."
+        ),
+    )
+    depreciation_years: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+        comment=(
+            "Depreciation years ≥ 1. 1 = fully expensed this year; "
+            ">1 = multi-year asset, amortisation calculated by M10 (D4)."
+        ),
+    )
 
     # -- Draft flag (D3: recurring expenses generate as draft) ----------------
     is_draft: Mapped[bool] = mapped_column(

@@ -35,7 +35,7 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import VatTreatmentSide
+from jai.models._enums import PaidBy, VatTreatmentSide
 from jai.models.company import Company
 from jai.models.dictionary import ExpenseCategory
 from jai.models.expense import Expense
@@ -288,6 +288,9 @@ def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
         base_gross_amount=Decimal(str(exp.base_gross_amount)),
         reference=exp.reference,
         note=exp.note,
+        paid_by=PaidBy(exp.paid_by),
+        business_percentage=Decimal(str(exp.business_percentage)),
+        depreciation_years=int(exp.depreciation_years),
         is_draft=exp.is_draft,
         recurring_expense_id=getattr(exp, "recurring_expense_id", None),
         attachment_count=attachment_count,
@@ -357,6 +360,11 @@ async def _apply_body(
 
     exp.reference = body.reference
     exp.note = body.note
+
+    # -- Bookkeeping fields (M8.5: pure storage, no calculation, D1–D4) -------
+    exp.paid_by = body.paid_by.value
+    exp.business_percentage = body.business_percentage
+    exp.depreciation_years = body.depreciation_years
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +601,9 @@ async def list_expenses(
             deductible=exp.deductible,
             is_draft=exp.is_draft,
             attachment_count=attachment_counts.get(exp.id, 0),
+            paid_by=PaidBy(exp.paid_by),
+            business_percentage=Decimal(str(exp.business_percentage)),
+            depreciation_years=int(exp.depreciation_years),
         )
         for exp in expenses
     ]

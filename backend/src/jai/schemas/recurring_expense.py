@@ -17,6 +17,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
 
+from jai.models._enums import PaidBy
+
 # ---------------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------------
@@ -46,6 +48,20 @@ class RecurringExpenseInput(BaseModel):
         ),
     )
     note: str | None = None
+
+    # -- Bookkeeping fields (M8.5 parity, D8) ---------------------------------
+    paid_by: PaidBy = PaidBy.BUSINESS
+    business_percentage: Decimal = Field(
+        default=Decimal("100"),
+        ge=0,
+        le=100,
+        description="Business-use percentage 0–100.",
+    )
+    depreciation_years: int = Field(
+        default=1,
+        ge=1,
+        description="Depreciation years; 1 = fully expensed this year.",
+    )
 
     # -- Schedule --------------------------------------------------------------
     frequency: str = Field(
@@ -108,6 +124,11 @@ class RecurringExpenseRead(BaseModel):
     deductible: bool
 
     note: str | None = None
+
+    # Bookkeeping fields (M8.5 parity, D8)
+    paid_by: PaidBy
+    business_percentage: Decimal
+    depreciation_years: int
 
     # Schedule
     frequency: str

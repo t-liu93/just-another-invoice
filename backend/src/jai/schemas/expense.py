@@ -22,6 +22,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator  # noqa: F401
 
+from jai.models._enums import PaidBy
+
 # ---------------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------------
@@ -52,6 +54,20 @@ class ExpenseInput(BaseModel):
     )
     reference: str | None = None
     note: str | None = None
+
+    # -- Bookkeeping fields (M8.5, D1–D4) ------------------------------------
+    paid_by: PaidBy = PaidBy.BUSINESS
+    business_percentage: Decimal = Field(
+        default=Decimal("100"),
+        ge=0,
+        le=100,
+        description="Business-use percentage 0–100.",
+    )
+    depreciation_years: int = Field(
+        default=1,
+        ge=1,
+        description="Depreciation years; 1 = fully expensed this year.",
+    )
 
     @field_validator("net_amount", "vat_amount")
     @classmethod
@@ -108,6 +124,11 @@ class ExpenseRead(BaseModel):
     reference: str | None = None
     note: str | None = None
 
+    # Bookkeeping fields (M8.5)
+    paid_by: PaidBy
+    business_percentage: Decimal
+    depreciation_years: int
+
     # Draft flag (D3)
     is_draft: bool
 
@@ -140,6 +161,11 @@ class ExpenseListItem(BaseModel):
     deductible: bool
     is_draft: bool
     attachment_count: int = 0
+
+    # Bookkeeping fields (M8.5 – visible in list like an Excel row, D1/D9)
+    paid_by: PaidBy
+    business_percentage: Decimal
+    depreciation_years: int
 
 
 # ---------------------------------------------------------------------------

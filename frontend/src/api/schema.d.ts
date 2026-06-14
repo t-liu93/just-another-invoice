@@ -2785,6 +2785,20 @@ export interface components {
             reference?: string | null;
             /** Note */
             note?: string | null;
+            /** @default BUSINESS */
+            paid_by?: components["schemas"]["PaidBy"];
+            /**
+             * Business Percentage
+             * @description Business-use percentage 0–100.
+             * @default 100
+             */
+            business_percentage?: number | string;
+            /**
+             * Depreciation Years
+             * @description Depreciation years; 1 = fully expensed this year.
+             * @default 1
+             */
+            depreciation_years?: number;
         };
         /**
          * ExpenseListItem
@@ -2820,6 +2834,11 @@ export interface components {
              * @default 0
              */
             attachment_count?: number;
+            paid_by: components["schemas"]["PaidBy"];
+            /** Business Percentage */
+            business_percentage: string;
+            /** Depreciation Years */
+            depreciation_years: number;
         };
         /**
          * ExpenseListResponse
@@ -2888,6 +2907,11 @@ export interface components {
             reference?: string | null;
             /** Note */
             note?: string | null;
+            paid_by: components["schemas"]["PaidBy"];
+            /** Business Percentage */
+            business_percentage: string;
+            /** Depreciation Years */
+            depreciation_years: number;
             /** Is Draft */
             is_draft: boolean;
             /** Recurring Expense Id */
@@ -3678,6 +3702,16 @@ export interface components {
             /** Body */
             body: string;
         };
+        /**
+         * PaidBy
+         * @description Payment source indicator for an expense (D2 / M8.5).
+         *
+         *     Indicates whether the expense was paid from the private account or the
+         *     business account.  **Pure bookkeeping – does not affect any calculation.**
+         *     Default: ``BUSINESS``.
+         * @enum {string}
+         */
+        PaidBy: "PRIVATE" | "BUSINESS";
         /**
          * PaymentInput
          * @description Request body for POST /api/v1/invoices/{id}/payments.
@@ -4639,6 +4673,20 @@ export interface components {
             deductible?: boolean | null;
             /** Note */
             note?: string | null;
+            /** @default BUSINESS */
+            paid_by?: components["schemas"]["PaidBy"];
+            /**
+             * Business Percentage
+             * @description Business-use percentage 0–100.
+             * @default 100
+             */
+            business_percentage?: number | string;
+            /**
+             * Depreciation Years
+             * @description Depreciation years; 1 = fully expensed this year.
+             * @default 1
+             */
+            depreciation_years?: number;
             /**
              * Frequency
              * @description One of: MONTHLY, QUARTERLY, YEARLY.
@@ -4716,6 +4764,11 @@ export interface components {
             deductible: boolean;
             /** Note */
             note?: string | null;
+            paid_by: components["schemas"]["PaidBy"];
+            /** Business Percentage */
+            business_percentage: string;
+            /** Depreciation Years */
+            depreciation_years: number;
             /** Frequency */
             frequency: string;
             /**
