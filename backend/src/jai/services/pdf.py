@@ -1,10 +1,12 @@
-"""PDF rendering service – M9 step 1.
+"""PDF rendering service – M9 step 1 / step 3.
 
 Public API
 ----------
 - ``build_invoice_html``   – pure function: assemble Jinja2 context + render template.
+- ``build_quote_html``     – pure function: assemble Jinja2 context + render quote template.
 - ``html_to_pdf``          – thin WeasyPrint wrapper (lazily imported; D8).
 - ``render_invoice_pdf``   – DB-backed orchestrator: load invoice, build HTML, render PDF.
+- ``render_quote_pdf``     – DB-backed orchestrator: load quote, build HTML, render PDF.
 
 Architecture decisions (from M9 D1–D8)
 ---------------------------------------
@@ -85,6 +87,12 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "bank_details": "Bank Details",
         "terms": "Terms & Conditions",
         "warranty": "Warranty",
+        # Quote-specific labels (M9 step 3)
+        "quote": "Quote",
+        "quote_number": "Quote #",
+        "quote_date": "Quote Date",
+        "valid_until": "Valid Until",
+        "status": "Status",
     },
     "zh": {
         "invoice": "发票",
@@ -113,6 +121,12 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "bank_details": "银行信息",
         "terms": "条款与条件",
         "warranty": "质保说明",
+        # Quote-specific labels (M9 step 3)
+        "quote": "报价",
+        "quote_number": "报价号",
+        "quote_date": "报价日期",
+        "valid_until": "有效期至",
+        "status": "状态",
     },
 }
 
@@ -456,4 +470,200 @@ async def render_invoice_pdf(
     pdf_bytes = html_to_pdf(html)
 
     filename = f"{invoice.invoice_number}.pdf"
+    return pdf_bytes, filename
+
+
+# ---------------------------------------------------------------------------
+# Quote PDF rendering (M9 step 3)
+# ---------------------------------------------------------------------------
+
+
+def build_quote_html(
+    quote: Any,
+    company: Any,
+    customer: Any,
+    locale: str,
+    logo_data_uri: str | None,
+) -> str:
+    """Render quote HTML from ORM objects.
+
+    This is a **pure function** – no I/O, no DB, no WeasyPrint.
+    Amounts are read directly from snapshot fields; nothing is recalculated
+    (red-line 1).  Jinja2 autoescape is ON (red-line 7).
+
+    **Client-facing zero-leakage**: this function renders only the quote's
+    own snapshot fields (lines, taxes, totals, content blocks).  Cost/margin/
+    estimate data is never passed to the template and must never appear in the
+    PDF output (M6.5 guard, extended to M9).
+
+    Parameters
+    ----------
+    quote:
+        ``Quote`` ORM instance (with ``.lines`` and ``.taxes`` preloaded).
+    company:
+        ``Company`` ORM instance.
+    customer:
+        ``Customer`` ORM instance (with ``.addresses`` preloaded).
+    locale:
+        ``"en"`` or ``"zh"``.  Unknown values fall back to ``"en"``.
+    logo_data_uri:
+        A ``data:<mime>;base64,...`` string, or ``None`` if no logo is set.
+        **Must never be a URL** (D7).
+
+    Returns
+    -------
+    str
+        Rendered HTML string (UTF-8).
+    """
+    from jai.models._enums import AddressType
+
+    labels = _get_labels(locale)
+
+    # -- Resolve billing address ----------------------------------------------
+    billing_address: Any = None
+    if hasattr(customer, "addresses"):
+        for addr in customer.addresses:
+            if addr.type == AddressType.BILLING:
+                billing_address = addr
+                break
+
+    # -- Read CSS inline so WeasyPrint receives a self-contained HTML ---------
+    css_text = _CSS_PATH.read_text(encoding="utf-8")
+
+    # -- Build template context (quote-only fields; no cost/margin) -----------
+    context: dict[str, Any] = {
+        "locale": locale if locale in PDF_LABELS else _DEFAULT_LOCALE,
+        "labels": labels,
+        "quote": quote,
+        "company": company,
+        "customer": customer,
+        "billing_address": billing_address,
+        "logo_data_uri": logo_data_uri,
+        "css": css_text,
+    }
+
+    template = _jinja_env.get_template("quote.html")
+    return template.render(**context)
+
+
+async def render_quote_pdf(
+    session: AsyncSession,
+    quote_id: uuid.UUID,
+    company_id: uuid.UUID,
+    locale: str | None = None,
+) -> tuple[bytes, str]:
+    """Load a quote from the DB, render it as PDF, and return (bytes, filename).
+
+    Steps
+    -----
+    1. Load Quote (with lines + taxes via selectinload) scoped to company_id.
+    2. Load Company and Customer.
+    3. Resolve document locale via ``resolve_document_locale`` (D2 chain).
+    4. Inline logo as data URI from binary_asset.content (never a URL).
+    5. Call build_quote_html → html_to_pdf.
+    6. Return (pdf_bytes, "<quote_number>.pdf").
+
+    Parameters
+    ----------
+    locale:
+        Explicit locale override (``"en"`` / ``"zh"``).  When ``None``, the
+        locale is resolved from the D2 chain: customer.locale →
+        company-default setting → ``"en"``.
+
+    Raises
+    ------
+    HTTPException(404)
+        If the quote doesn't exist or belongs to a different company (red-line 2).
+    """
+    from fastapi import HTTPException, status
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from jai.models.binary_asset import BinaryAsset
+    from jai.models.company import Company
+    from jai.models.customer import Customer
+    from jai.models.quote import Quote, QuoteLine
+
+    # -- Load quote scoped to company (red-line 2) ----------------------------
+    stmt = (
+        select(Quote)
+        .where(Quote.id == quote_id, Quote.company_id == company_id)
+        .options(
+            selectinload(Quote.lines).selectinload(QuoteLine.line_taxes),
+            selectinload(Quote.taxes),
+        )
+    )
+    result = await session.execute(stmt)
+    quote = result.scalar_one_or_none()
+    if quote is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Quote not found.",
+        )
+
+    # -- Load company ---------------------------------------------------------
+    company_stmt = select(Company).where(Company.id == company_id)
+    company_result = await session.execute(company_stmt)
+    company = company_result.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found.",
+        )
+
+    # -- Load customer (with addresses) ---------------------------------------
+    from sqlalchemy.orm import selectinload as _sil
+
+    customer_stmt = (
+        select(Customer)
+        .where(Customer.id == quote.customer_id)
+        .options(_sil(Customer.addresses))
+    )
+    customer_result = await session.execute(customer_stmt)
+    customer = customer_result.scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found.",
+        )
+
+    # -- Resolve locale via D2 chain ------------------------------------------
+    from jai.models._enums import SettingLevel
+    from jai.schemas.setting import SETTING_KEY_DOCUMENT_DEFAULTS, DocumentDefaultsSetting
+    from jai.services.settings import get_setting
+
+    company_default_setting = await get_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=DocumentDefaultsSetting,
+    )
+    company_default_locale: str | None = (
+        company_default_setting.locale if company_default_setting is not None else None
+    )
+    customer_locale: str | None = getattr(customer, "locale", None)
+    resolved_locale = resolve_document_locale(locale, customer_locale, company_default_locale)
+
+    # -- Inline logo as data: URI (D7 – never a URL) -------------------------
+    logo_data_uri: str | None = None
+    if company.logo_id is not None:
+        asset_stmt = select(BinaryAsset).where(BinaryAsset.id == company.logo_id)
+        asset_result = await session.execute(asset_stmt)
+        asset = asset_result.scalar_one_or_none()
+        if asset is not None:
+            b64 = base64.b64encode(asset.content).decode("ascii")
+            logo_data_uri = f"data:{asset.mime_type};base64,{b64}"
+
+    # -- Build HTML + render PDF ----------------------------------------------
+    html = build_quote_html(
+        quote=quote,
+        company=company,
+        customer=customer,
+        locale=resolved_locale,
+        logo_data_uri=logo_data_uri,
+    )
+    pdf_bytes = html_to_pdf(html)
+
+    filename = f"{quote.quote_number}.pdf"
     return pdf_bytes, filename
