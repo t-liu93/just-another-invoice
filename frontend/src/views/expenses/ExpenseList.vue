@@ -222,6 +222,34 @@ const columns = computed(() => [
     },
   },
   {
+    title: t('expenses.paidBy'),
+    key: 'paid_by',
+    width: 100,
+    align: 'center' as const,
+    render(row: ExpenseListItem) {
+      return row.paid_by === 'PRIVATE'
+        ? h(NTag, { type: 'warning', size: 'small' }, () => t('expenses.paidByPrivate'))
+        : h(NTag, { type: 'default', size: 'small' }, () => t('expenses.paidByBusiness'))
+    },
+  },
+  {
+    title: t('expenses.bookkeeping'),
+    key: 'bookkeeping',
+    width: 120,
+    align: 'center' as const,
+    render(row: ExpenseListItem) {
+      const tags: ReturnType<typeof h>[] = []
+      const pct = Number(row.business_percentage)
+      if (pct !== 100) {
+        tags.push(h(NTag, { type: 'info', size: 'small', style: 'margin: 1px' }, () => `${pct.toFixed(0)}%`))
+      }
+      if (row.depreciation_years > 1) {
+        tags.push(h(NTag, { type: 'info', size: 'small', style: 'margin: 1px' }, () => `${row.depreciation_years}y`))
+      }
+      return tags.length ? h(NSpace, { size: 2, align: 'center', wrap: true }, () => tags) : h(NText, { depth: 3 }, () => '—')
+    },
+  },
+  {
     title: t('expenses.status'),
     key: 'is_draft',
     width: 90,

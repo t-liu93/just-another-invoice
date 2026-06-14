@@ -972,6 +972,12 @@
     "confirmed": "Confirmed",
     "status": "Status",
     "fromRecurring": "Auto-generated",
+    "paidBy": "Paid by",
+    "paidByBusiness": "Business",
+    "paidByPrivate": "Private",
+    "businessPercentage": "Business use %",
+    "depreciationYears": "Depreciation (years)",
+    "bookkeeping": "Bookkeeping",
     "ai": {
       "autoFill": "Auto-fill from receipt",
       "extracting": "Extracting…",

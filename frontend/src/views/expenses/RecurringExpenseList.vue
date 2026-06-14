@@ -5,6 +5,7 @@ import {
   NButton, NSpace, NDataTable, NAlert, NSpin,
   NPagination, NSelect, NTag, NPopconfirm, NModal, NForm,
   NFormItem, NInput, NInputNumber, NCheckbox, NSwitch, NDatePicker,
+  NRadioGroup, NRadioButton, NText,
 } from 'naive-ui'
 import { AddOutline, PlayOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
@@ -13,6 +14,8 @@ import { useRecurringExpensesStore } from '../../stores/recurringExpenses'
 import type { RecurringExpenseRead, RecurringExpenseInput } from '../../stores/recurringExpenses'
 import { get, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
+
+type PaidBy = components['schemas']['PaidBy']
 
 type ExpenseCategoryRead = components['schemas']['ExpenseCategoryRead']
 type ExpenseCategoryListResponse = components['schemas']['ExpenseCategoryListResponse']
@@ -83,6 +86,10 @@ const formStartDate = ref(new Date().toISOString().slice(0, 10))
 const formEndDate = ref<string | null>(null)
 const formMaxOccurrences = ref<number | null>(null)
 const formActive = ref(true)
+// Bookkeeping fields (M8.5)
+const formPaidBy = ref<PaidBy>('BUSINESS')
+const formBusinessPercentage = ref<number>(100)
+const formDepreciationYears = ref<number>(1)
 
 const formStartDateTs = computed({
   get: () => formStartDate.value ? new Date(formStartDate.value).getTime() : null,
@@ -108,6 +115,10 @@ function resetForm() {
   formEndDate.value = null
   formMaxOccurrences.value = null
   formActive.value = true
+  // Bookkeeping fields (M8.5) defaults
+  formPaidBy.value = 'BUSINESS'
+  formBusinessPercentage.value = 100
+  formDepreciationYears.value = 1
   modalError.value = null
 }
 
@@ -133,6 +144,10 @@ function openEdit(row: RecurringExpenseRead) {
   formEndDate.value = row.end_date ?? null
   formMaxOccurrences.value = row.max_occurrences ?? null
   formActive.value = row.active
+  // Bookkeeping fields (M8.5) — programmatic assignment, does NOT trigger @update:value
+  formPaidBy.value = row.paid_by
+  formBusinessPercentage.value = Number(row.business_percentage)
+  formDepreciationYears.value = row.depreciation_years
   modalError.value = null
   showModal.value = true
 }
@@ -160,6 +175,10 @@ async function handleSaveModal() {
       end_date: formEndDate.value,
       max_occurrences: formMaxOccurrences.value,
       active: formActive.value,
+      // Bookkeeping fields (M8.5) — passed as-is, no local computation
+      paid_by: formPaidBy.value,
+      business_percentage: formBusinessPercentage.value,
+      depreciation_years: formDepreciationYears.value,
     }
     if (editingId.value) {
       await store.updateRecurringExpense(editingId.value, body)
@@ -267,6 +286,34 @@ const columns = computed(() => [
     key: 'occurrences_generated',
     width: 90,
     align: 'center' as const,
+  },
+  {
+    title: t('expenses.paidBy'),
+    key: 'paid_by',
+    width: 100,
+    align: 'center' as const,
+    render(row: RecurringExpenseRead) {
+      return row.paid_by === 'PRIVATE'
+        ? h(NTag, { type: 'warning', size: 'small' }, () => t('expenses.paidByPrivate'))
+        : h(NTag, { type: 'default', size: 'small' }, () => t('expenses.paidByBusiness'))
+    },
+  },
+  {
+    title: t('expenses.bookkeeping'),
+    key: 'bookkeeping',
+    width: 120,
+    align: 'center' as const,
+    render(row: RecurringExpenseRead) {
+      const tags: ReturnType<typeof h>[] = []
+      const pct = Number(row.business_percentage)
+      if (pct !== 100) {
+        tags.push(h(NTag, { type: 'info', size: 'small', style: 'margin: 1px' }, () => `${pct.toFixed(0)}%`))
+      }
+      if (row.depreciation_years > 1) {
+        tags.push(h(NTag, { type: 'info', size: 'small', style: 'margin: 1px' }, () => `${row.depreciation_years}y`))
+      }
+      return tags.length ? h(NSpace, { size: 2, align: 'center', wrap: true }, () => tags) : h(NText, { depth: 3 }, () => '—')
+    },
   },
   {
     title: t('recurring.active'),
@@ -432,6 +479,43 @@ const columns = computed(() => [
             {{ t('expenses.deductibleLabel') }}
           </n-checkbox>
         </n-form-item>
+
+        <!-- Paid By (M8.5) -->
+        <n-form-item :label="t('expenses.paidBy')">
+          <n-radio-group
+            :value="formPaidBy"
+            @update:value="(v: PaidBy) => { formPaidBy = v }"
+          >
+            <n-radio-button value="BUSINESS">{{ t('expenses.paidByBusiness') }}</n-radio-button>
+            <n-radio-button value="PRIVATE">{{ t('expenses.paidByPrivate') }}</n-radio-button>
+          </n-radio-group>
+        </n-form-item>
+
+        <!-- Business % (M8.5) -->
+        <n-form-item :label="t('expenses.businessPercentage')">
+          <n-input-number
+            :value="formBusinessPercentage"
+            :precision="1"
+            :min="0"
+            :max="100"
+            style="width: 160px"
+            @update:value="(v: number | null) => { formBusinessPercentage = v ?? 100 }"
+          >
+            <template #suffix>%</template>
+          </n-input-number>
+        </n-form-item>
+
+        <!-- Depreciation years (M8.5) -->
+        <n-form-item :label="t('expenses.depreciationYears')">
+          <n-input-number
+            :value="formDepreciationYears"
+            :precision="0"
+            :min="1"
+            style="width: 160px"
+            @update:value="(v: number | null) => { formDepreciationYears = v ?? 1 }"
+          />
+        </n-form-item>
+
         <n-form-item :label="t('recurring.active')">
           <n-switch v-model:value="formActive" />
         </n-form-item>

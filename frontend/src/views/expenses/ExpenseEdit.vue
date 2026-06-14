@@ -20,7 +20,7 @@ import { useI18n } from 'vue-i18n'
 import {
   NForm, NFormItem, NInput, NInputNumber, NSelect, NCheckbox,
   NButton, NSpace, NAlert, NSpin, NText, NTag,
-  NUpload, NIcon, NCard, NPopconfirm,
+  NUpload, NIcon, NCard, NPopconfirm, NRadioGroup, NRadioButton,
 } from 'naive-ui'
 import type { UploadFileInfo } from 'naive-ui'
 import {
@@ -33,6 +33,7 @@ import type { ExpenseRead, ExpenseAttachmentRead } from '../../stores/expenses'
 import { get, post, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
 
+type PaidBy = components['schemas']['PaidBy']
 type ExpenseCategoryRead = components['schemas']['ExpenseCategoryRead']
 type ExpenseCalculateResult = components['schemas']['ExpenseCalculateResult']
 type ExpenseCategoryListResponse = components['schemas']['ExpenseCategoryListResponse']
@@ -60,6 +61,10 @@ const vatAmount = ref<number | null>(null)
 const deductible = ref<boolean | null>(null)
 const reference = ref('')
 const note = ref('')
+// ---- Bookkeeping fields (M8.5) — raw inputs, no local computation ----
+const paidBy = ref<PaidBy>('BUSINESS')
+const businessPercentage = ref<number>(100)
+const depreciationYears = ref<number>(1)
 
 // ---- Backend-computed display fields (red-line 1: read from response only) ----
 const grossAmountDisplay = ref<string | null>(null)
@@ -137,6 +142,10 @@ function fillFromExpense(expense: ExpenseRead) {
   deductible.value = expense.deductible
   reference.value = expense.reference ?? ''
   note.value = expense.note ?? ''
+  // Bookkeeping fields (M8.5) — programmatic assignment, does NOT trigger @update:value
+  paidBy.value = expense.paid_by
+  businessPercentage.value = Number(expense.business_percentage)
+  depreciationYears.value = expense.depreciation_years
   // Backend-computed display
   grossAmountDisplay.value = expense.gross_amount
   isDraft.value = expense.is_draft
@@ -190,6 +199,7 @@ async function handleSave() {
   pageError.value = null
   try {
     // Only send raw inputs — no gross/base_*/is_draft (red-line 1)
+    // Bookkeeping fields (M8.5): passed as-is, no local computation
     const body = {
       expense_date: expenseDate.value,
       category_id: categoryId.value,
@@ -201,6 +211,9 @@ async function handleSave() {
       deductible: deductible.value,
       reference: reference.value || null,
       note: note.value || null,
+      paid_by: paidBy.value,
+      business_percentage: businessPercentage.value,
+      depreciation_years: depreciationYears.value,
     }
     let result: ExpenseRead
     if (isEdit.value && expenseId.value) {
@@ -471,6 +484,42 @@ async function handleAiExtract(attachmentId: string) {
                     <n-checkbox :checked="deductible ?? true" @update:checked="deductible = $event">
                       {{ t('expenses.deductibleLabel') }}
                     </n-checkbox>
+                  </n-form-item>
+
+                  <!-- Paid By (M8.5) -->
+                  <n-form-item :label="t('expenses.paidBy')">
+                    <n-radio-group
+                      :value="paidBy"
+                      @update:value="(v: PaidBy) => { paidBy = v }"
+                    >
+                      <n-radio-button value="BUSINESS">{{ t('expenses.paidByBusiness') }}</n-radio-button>
+                      <n-radio-button value="PRIVATE">{{ t('expenses.paidByPrivate') }}</n-radio-button>
+                    </n-radio-group>
+                  </n-form-item>
+
+                  <!-- Business % (M8.5) -->
+                  <n-form-item :label="t('expenses.businessPercentage')">
+                    <n-input-number
+                      :value="businessPercentage"
+                      :precision="1"
+                      :min="0"
+                      :max="100"
+                      style="width: 160px"
+                      @update:value="(v: number | null) => { businessPercentage = v ?? 100 }"
+                    >
+                      <template #suffix>%</template>
+                    </n-input-number>
+                  </n-form-item>
+
+                  <!-- Depreciation years (M8.5) -->
+                  <n-form-item :label="t('expenses.depreciationYears')">
+                    <n-input-number
+                      :value="depreciationYears"
+                      :precision="0"
+                      :min="1"
+                      style="width: 160px"
+                      @update:value="(v: number | null) => { depreciationYears = v ?? 1 }"
+                    />
                   </n-form-item>
 
                   <!-- Reference -->

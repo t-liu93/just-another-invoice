@@ -972,6 +972,12 @@
     "confirmed": "已确认",
     "status": "状态",
     "fromRecurring": "自动生成",
+    "paidBy": "付款来源",
+    "paidByBusiness": "公司账户",
+    "paidByPrivate": "私人账户",
+    "businessPercentage": "业务使用比例",
+    "depreciationYears": "折旧年数",
+    "bookkeeping": "记账",
     "ai": {
       "autoFill": "拍票据自动填",
       "extracting": "识别中…",

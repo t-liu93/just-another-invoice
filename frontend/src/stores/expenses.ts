@@ -115,6 +115,10 @@ export const useExpensesStore = defineStore('expenses', () => {
         deductible: expense.deductible,
         reference: expense.reference,
         note: expense.note,
+        // Bookkeeping fields (M8.5) — preserve as-is when confirming draft
+        paid_by: expense.paid_by,
+        business_percentage: expense.business_percentage,
+        depreciation_years: expense.depreciation_years,
       }
       return await put<ExpenseRead>(`/api/v1/expenses/${id}`, body)
     } catch (e: unknown) {
