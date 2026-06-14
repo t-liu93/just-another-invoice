@@ -137,3 +137,59 @@ export function uploadFile<T>(
     body: formData,
   })
 }
+
+/**
+ * Fetch a binary resource (e.g. PDF) and trigger a browser download.
+ *
+ * - Uses `credentials: 'include'` so the session cookie is sent.
+ * - On non-2xx responses, reads the body as JSON/text and throws `ApiError`.
+ * - The filename is extracted from the `Content-Disposition` response header
+ *   when present; otherwise falls back to `fallbackFilename`.
+ */
+export async function downloadBlob(
+  url: string,
+  fallbackFilename: string = 'download',
+): Promise<void> {
+  const res = await fetch(url, { credentials: 'include' })
+
+  if (!res.ok) {
+    let body: unknown
+    try {
+      body = await res.json()
+    } catch {
+      body = await res.text().catch(() => null)
+    }
+    throw new ApiError(res.status, body, humanMessage(res.status, body))
+  }
+
+  const blob = await res.blob()
+
+  // Extract filename from Content-Disposition header, e.g.:
+  //   attachment; filename="INV-2025-001.pdf"
+  //   attachment; filename*=UTF-8''INV-2025-001.pdf
+  let filename = fallbackFilename
+  const cd = res.headers.get('Content-Disposition')
+  if (cd) {
+    const utf8Match = cd.match(/filename\*=UTF-8''([^;]+)/i)
+    if (utf8Match) {
+      filename = decodeURIComponent(utf8Match[1])
+    } else {
+      const plainMatch = cd.match(/filename="?([^";]+)"?/i)
+      if (plainMatch) {
+        filename = plainMatch[1].trim()
+      }
+    }
+  }
+
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}

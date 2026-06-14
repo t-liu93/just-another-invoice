@@ -928,6 +928,7 @@
     "paidTotal": "Paid",
     "dueAmount": "Due",
     "needSentStatus": "Mark the invoice as Sent before recording payments.",
+    "downloadReceipt": "Download receipt PDF",
     "paidStatus": {
       "UNPAID": "Unpaid",
       "PARTIALLY_PAID": "Partially paid",
@@ -1064,5 +1065,35 @@
     "delete": "Delete",
     "deleteConfirm": "Delete this receipt?",
     "saveFirstHint": "Save the expense first, then you can attach receipts."
+  },
+  "pdf": {
+    "download": "Download PDF",
+    "downloadFailed": "Failed to download PDF.",
+    "localeDefault": "Follow default language",
+    "localeEn": "English",
+    "localeZh": "Chinese"
+  },
+  "sendDialog": {
+    "title": "Send Email",
+    "to": "To",
+    "toPlaceholder": "recipient@example.com",
+    "toRequired": "Please enter a recipient email address.",
+    "cc": "CC",
+    "ccPlaceholder": "Optional, comma-separated",
+    "locale": "Language",
+    "subject": "Subject",
+    "subjectPlaceholder": "Leave blank to use the stored template",
+    "body": "Body",
+    "bodyPlaceholder": "Leave blank to use the stored template. Placeholders (e.g. {INVOICE_NUMBER}) are filled in at send time.",
+    "send": "Send",
+    "sendSuccess": "Email sent successfully.",
+    "sendFailed": "Failed to send email."
+  },
+  "emailLog": {
+    "title": "Email Log",
+    "empty": "No emails sent for this document yet.",
+    "cc": "CC",
+    "statusSENT": "Sent",
+    "statusFAILED": "Failed"
   }
 }

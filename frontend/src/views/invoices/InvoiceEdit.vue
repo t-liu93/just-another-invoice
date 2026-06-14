@@ -7,15 +7,17 @@ import {
   useMessage,
   NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert,
   NDivider, NInputNumber, NSelect, NSwitch, NTag, NDatePicker,
-  NGrid, NGi, NText, NModal, NList, NListItem, NThing,
+  NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown,
 } from 'naive-ui'
-import { AddOutline, TrashOutline, DocumentTextOutline } from '@vicons/ionicons5'
+import { AddOutline, TrashOutline, DocumentTextOutline, DownloadOutline, MailOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
 import InvoicePaymentPanel from '../../components/InvoicePaymentPanel.vue'
+import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
+import EmailLogPanel from '../../components/EmailLogPanel.vue'
 import { useInvoicesStore } from '../../stores/invoices'
 import type { InvoicePaymentsResponse } from '../../stores/payments'
-import { get } from '../../api/http'
+import { get, downloadBlob } from '../../api/http'
 import type { components } from '../../api/schema'
 
 type CustomerRead = components['schemas']['CustomerRead']
@@ -28,6 +30,7 @@ type InvoiceRead = components['schemas']['InvoiceRead']
 type DocumentTemplateRead = components['schemas']['DocumentTemplateRead']
 type ContentBlockRead = components['schemas']['ContentBlockRead']
 type NoteTemplateRead = components['schemas']['NoteTemplateRead']
+type EmailLogRead = components['schemas']['EmailLogRead']
 
 interface LineRow {
   product_id: string | null
@@ -468,6 +471,54 @@ function handlePaymentsChanged(aggregate: InvoicePaymentsResponse) {
 }
 
 const fmtMoney = (v: string | number) => Number(v).toFixed(2)
+
+// ---- PDF download ----
+const downloadingPdf = ref(false)
+
+const pdfLocaleOptions = computed(() => [
+  { label: t('pdf.localeDefault'), key: 'default' },
+  { label: t('pdf.localeEn'), key: 'en' },
+  { label: t('pdf.localeZh'), key: 'zh' },
+])
+
+async function handleDownloadPdf(locale?: 'en' | 'zh') {
+  if (!existingInvoice.value) return
+  downloadingPdf.value = true
+  try {
+    const id = existingInvoice.value.id
+    const url = locale
+      ? `/api/v1/invoices/${id}/pdf?locale=${locale}`
+      : `/api/v1/invoices/${id}/pdf`
+    await downloadBlob(url, `${existingInvoice.value.invoice_number}.pdf`)
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('pdf.downloadFailed'))
+  } finally {
+    downloadingPdf.value = false
+  }
+}
+
+function handlePdfLocaleSelect(key: string) {
+  if (key === 'default') {
+    handleDownloadPdf()
+  } else {
+    handleDownloadPdf(key as 'en' | 'zh')
+  }
+}
+
+// ---- Send dialog ----
+const sendDialogShow = ref(false)
+
+function openSendDialog() {
+  sendDialogShow.value = true
+}
+
+// ---- Email log panel ref ----
+const emailLogPanelRef = ref<InstanceType<typeof EmailLogPanel> | null>(null)
+
+function handleSent(_log: EmailLogRead) {
+  // Refresh email log panel after successful send
+  emailLogPanelRef.value?.refresh()
+}
 </script>
 
 <template>
@@ -496,6 +547,29 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
                 <n-text depth="3" style="font-size: 13px">
                   {{ t('invoices.due') }}: {{ existingInvoice.currency }} {{ fmtMoney(existingInvoice.due_amount) }}
                 </n-text>
+
+                <!-- PDF download dropdown (default / en / zh) -->
+                <n-dropdown
+                  :options="pdfLocaleOptions"
+                  trigger="click"
+                  @select="handlePdfLocaleSelect"
+                >
+                  <!-- v-if/v-else pattern to avoid loading-prop+v-if prod bug -->
+                  <n-button v-if="downloadingPdf" size="small" loading disabled>
+                    {{ t('pdf.download') }}
+                  </n-button>
+                  <n-button v-else size="small">
+                    <template #icon><n-icon><DownloadOutline /></n-icon></template>
+                    {{ t('pdf.download') }}
+                  </n-button>
+                </n-dropdown>
+
+                <!-- Send email button -->
+                <n-button size="small" type="info" @click="openSendDialog">
+                  <template #icon><n-icon><MailOutline /></n-icon></template>
+                  {{ t('sendDialog.title') }}
+                </n-button>
+
                 <template v-if="existingInvoice.status === 'DRAFT'">
                   <n-button size="small" type="info" @click="handleStatusTransition('SENT')">
                     {{ t('invoices.markSent') }}
@@ -880,6 +954,14 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
               @payments-changed="handlePaymentsChanged"
             />
 
+            <!-- Email log (only for existing invoices) -->
+            <EmailLogPanel
+              v-if="isEdit && existingInvoice"
+              ref="emailLogPanelRef"
+              doc-type="invoice"
+              :doc-id="existingInvoice.id"
+            />
+
             <!-- Action buttons -->
             <n-space justify="end" style="margin-bottom: 24px">
               <n-button @click="router.push('/invoices')">{{ t('invoices.backToList') }}</n-button>
@@ -943,6 +1025,17 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
         </n-space>
       </template>
     </n-modal>
+
+    <!-- Send email dialog (only when editing an existing invoice) -->
+    <DocumentSendDialog
+      v-if="isEdit && existingInvoice"
+      v-model:show="sendDialogShow"
+      doc-type="invoice"
+      :doc-id="existingInvoice.id"
+      :customer-email="selectedCustomer?.email ?? null"
+      :customer-locale="selectedCustomer?.locale ?? null"
+      @sent="handleSent"
+    />
   </div>
 </template>
 

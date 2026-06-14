@@ -7,14 +7,16 @@ import {
   useMessage, useDialog,
   NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert,
   NDivider, NInputNumber, NSelect, NSwitch, NTag, NDatePicker,
-  NGrid, NGi, NText, NModal, NList, NListItem, NThing,
+  NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown,
 } from 'naive-ui'
-import { AddOutline, TrashOutline, DocumentTextOutline } from '@vicons/ionicons5'
+import { AddOutline, TrashOutline, DocumentTextOutline, DownloadOutline, MailOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
+import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
+import EmailLogPanel from '../../components/EmailLogPanel.vue'
 import { useQuotesStore } from '../../stores/quotes'
 import { useInvoicesStore } from '../../stores/invoices'
-import { get } from '../../api/http'
+import { get, downloadBlob } from '../../api/http'
 import type { components } from '../../api/schema'
 
 type CustomerRead = components['schemas']['CustomerRead']
@@ -27,6 +29,7 @@ type QuoteRead = components['schemas']['QuoteRead']
 type DocumentTemplateRead = components['schemas']['DocumentTemplateRead']
 type ContentBlockRead = components['schemas']['ContentBlockRead']
 type NoteTemplateRead = components['schemas']['NoteTemplateRead']
+type EmailLogRead = components['schemas']['EmailLogRead']
 
 interface LineRow {
   product_id: string | null
@@ -571,6 +574,56 @@ onMounted(async () => {
 const isReadOnly = computed(() => existingQuote.value?.status === 'ACCEPTED' && isEdit.value)
 
 const fmtMoney = (v: string | number) => Number(v).toFixed(2)
+
+// ---- Selected customer for dialog pre-fill ----
+const selectedCustomer = computed(() => customers.value.find(c => c.id === customerId.value) ?? null)
+
+// ---- PDF download ----
+const downloadingPdf = ref(false)
+
+const pdfLocaleOptions = computed(() => [
+  { label: t('pdf.localeDefault'), key: 'default' },
+  { label: t('pdf.localeEn'), key: 'en' },
+  { label: t('pdf.localeZh'), key: 'zh' },
+])
+
+async function handleDownloadPdf(locale?: 'en' | 'zh') {
+  if (!existingQuote.value) return
+  downloadingPdf.value = true
+  try {
+    const id = existingQuote.value.id
+    const url = locale
+      ? `/api/v1/quotes/${id}/pdf?locale=${locale}`
+      : `/api/v1/quotes/${id}/pdf`
+    await downloadBlob(url, `${existingQuote.value.quote_number}.pdf`)
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('pdf.downloadFailed'))
+  } finally {
+    downloadingPdf.value = false
+  }
+}
+
+function handlePdfLocaleSelect(key: string) {
+  if (key === 'default') {
+    handleDownloadPdf()
+  } else {
+    handleDownloadPdf(key as 'en' | 'zh')
+  }
+}
+
+// ---- Send dialog ----
+const sendDialogShow = ref(false)
+
+function openSendDialog() {
+  sendDialogShow.value = true
+}
+
+// ---- Email log panel ref ----
+const emailLogPanelRef = ref<InstanceType<typeof EmailLogPanel> | null>(null)
+
+function handleSent(_log: EmailLogRead) {
+  emailLogPanelRef.value?.refresh()
+}
 </script>
 
 <template>
@@ -597,6 +650,28 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
                   : 'warning'">
                   {{ t(`quotes.status${existingQuote.status}`) }}
                 </n-tag>
+
+                <!-- PDF download dropdown (default / en / zh) -->
+                <n-dropdown
+                  :options="pdfLocaleOptions"
+                  trigger="click"
+                  @select="handlePdfLocaleSelect"
+                >
+                  <!-- v-if/v-else to avoid loading-prop+v-if prod bug -->
+                  <n-button v-if="downloadingPdf" size="small" loading disabled>
+                    {{ t('pdf.download') }}
+                  </n-button>
+                  <n-button v-else size="small">
+                    <template #icon><n-icon><DownloadOutline /></n-icon></template>
+                    {{ t('pdf.download') }}
+                  </n-button>
+                </n-dropdown>
+
+                <!-- Send email button -->
+                <n-button size="small" type="info" @click="openSendDialog">
+                  <template #icon><n-icon><MailOutline /></n-icon></template>
+                  {{ t('sendDialog.title') }}
+                </n-button>
 
                 <!-- Show link to converted invoice -->
                 <n-text v-if="existingQuote.converted_invoice_id" depth="3" style="font-size: 13px">
@@ -1017,6 +1092,14 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
 
             </n-form>
 
+            <!-- Email log (only for existing quotes) -->
+            <EmailLogPanel
+              v-if="isEdit && existingQuote"
+              ref="emailLogPanelRef"
+              doc-type="quote"
+              :doc-id="existingQuote.id"
+            />
+
             <!-- Action buttons -->
             <n-space justify="end" style="margin-bottom: 24px">
               <n-button @click="router.push('/quotes')">{{ t('quotes.backToList') }}</n-button>
@@ -1114,6 +1197,17 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
         </n-space>
       </template>
     </n-modal>
+
+    <!-- Send email dialog (only for existing quotes) -->
+    <DocumentSendDialog
+      v-if="isEdit && existingQuote"
+      v-model:show="sendDialogShow"
+      doc-type="quote"
+      :doc-id="existingQuote.id"
+      :customer-email="selectedCustomer?.email ?? null"
+      :customer-locale="selectedCustomer?.locale ?? null"
+      @sent="handleSent"
+    />
   </div>
 </template>
 

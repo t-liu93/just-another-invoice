@@ -928,6 +928,7 @@
     "paidTotal": "已收",
     "dueAmount": "待收",
     "needSentStatus": "请先将发票标记为已发送，再登记收款。",
+    "downloadReceipt": "下载收款收据 PDF",
     "paidStatus": {
       "UNPAID": "未付款",
       "PARTIALLY_PAID": "部分付款",
@@ -1064,5 +1065,35 @@
     "delete": "删除",
     "deleteConfirm": "确认删除此票据？",
     "saveFirstHint": "请先保存开支，然后再上传票据。"
+  },
+  "pdf": {
+    "download": "下载 PDF",
+    "downloadFailed": "下载 PDF 失败。",
+    "localeDefault": "跟随默认语言",
+    "localeEn": "英文",
+    "localeZh": "中文"
+  },
+  "sendDialog": {
+    "title": "发送邮件",
+    "to": "收件人",
+    "toPlaceholder": "recipient@example.com",
+    "toRequired": "请输入收件人邮箱地址。",
+    "cc": "抄送",
+    "ccPlaceholder": "可选，多个地址用逗号分隔",
+    "locale": "语言",
+    "subject": "主题",
+    "subjectPlaceholder": "留空则使用预设模板",
+    "body": "正文",
+    "bodyPlaceholder": "留空则使用预设模板。占位符（如 {INVOICE_NUMBER}）将在发送时自动替换。",
+    "send": "发送",
+    "sendSuccess": "邮件已发送。",
+    "sendFailed": "发送邮件失败。"
+  },
+  "emailLog": {
+    "title": "邮件发送记录",
+    "empty": "本单据暂无邮件发送记录。",
+    "cc": "抄送",
+    "statusSENT": "已发送",
+    "statusFAILED": "发送失败"
   }
 }

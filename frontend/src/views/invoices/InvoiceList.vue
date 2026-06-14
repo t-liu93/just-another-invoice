@@ -5,23 +5,84 @@ import { useI18n } from 'vue-i18n'
 import {
   useMessage, useDialog,
   NButton, NSpace, NInput, NDataTable, NAlert, NSpin,
-  NPagination, NSelect, NTag,
+  NPagination, NSelect, NTag, NDropdown,
 } from 'naive-ui'
-import { AddOutline, SearchOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
+import { AddOutline, SearchOutline, CreateOutline, TrashOutline, DownloadOutline, MailOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
+import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import { useInvoicesStore } from '../../stores/invoices'
 import type { InvoiceListItem } from '../../stores/invoices'
-import { get } from '../../api/http'
+import { get, downloadBlob } from '../../api/http'
 import type { components } from '../../api/schema'
 
 type CustomerRead = components['schemas']['CustomerRead']
+type EmailLogRead = components['schemas']['EmailLogRead']
 
 const router = useRouter()
 const { t } = useI18n()
 const message = useMessage()
 const dialog = useDialog()
 const store = useInvoicesStore()
+
+// Send dialog state
+const sendDialogShow = ref(false)
+const sendDialogInvoiceId = ref('')
+const sendDialogCustomerEmail = ref<string | null>(null)
+const sendDialogCustomerLocale = ref<'en' | 'zh' | null>(null)
+
+async function openSendDialog(row: InvoiceListItem) {
+  sendDialogInvoiceId.value = row.id
+  sendDialogCustomerEmail.value = null
+  sendDialogCustomerLocale.value = null
+  sendDialogShow.value = true
+  // Fetch customer info for email/locale pre-fill
+  try {
+    const cust = await get<CustomerRead>(`/api/v1/customers/${row.customer_id}`)
+    sendDialogCustomerEmail.value = cust.email ?? null
+    sendDialogCustomerLocale.value = (cust.locale as 'en' | 'zh' | null | undefined) ?? null
+  } catch {
+    // Non-critical: dialog pre-fill is best-effort
+  }
+}
+
+function handleSent(_log: EmailLogRead) {
+  // Log was created; no further action needed in list view
+}
+
+// Download PDF for a list row
+const downloadingId = ref<string | null>(null)
+
+async function handleDownloadPdf(id: string, locale?: 'en' | 'zh') {
+  downloadingId.value = id
+  try {
+    const url = locale
+      ? `/api/v1/invoices/${id}/pdf?locale=${locale}`
+      : `/api/v1/invoices/${id}/pdf`
+    await downloadBlob(url, `invoice-${id}.pdf`)
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('pdf.downloadFailed'))
+  } finally {
+    downloadingId.value = null
+  }
+}
+
+function pdfLocaleOptions(id: string) {
+  return [
+    { label: t('pdf.localeDefault'), key: `${id}:default` },
+    { label: t('pdf.localeEn'), key: `${id}:en` },
+    { label: t('pdf.localeZh'), key: `${id}:zh` },
+  ]
+}
+
+function handlePdfLocaleSelect(key: string) {
+  const [id, locale] = key.split(':')
+  if (locale === 'default') {
+    handleDownloadPdf(id)
+  } else {
+    handleDownloadPdf(id, locale as 'en' | 'zh')
+  }
+}
 
 // Customer filter state
 const customers = ref<CustomerRead[]>([])
@@ -198,7 +259,7 @@ const columns = computed(() => [
   {
     title: t('invoices.actions'),
     key: 'actions',
-    width: 88,
+    width: 148,
     align: 'center' as const,
     render(row: InvoiceListItem) {
       const isEditable = row.status === 'DRAFT'
@@ -213,6 +274,39 @@ const columns = computed(() => [
             onClick: () => handleEdit(row.id),
           },
           () => h(NIcon, null, { default: () => h(CreateOutline) }),
+        ),
+        // PDF download dropdown (default / en / zh)
+        h(
+          NDropdown,
+          {
+            options: pdfLocaleOptions(row.id),
+            trigger: 'click',
+            onSelect: handlePdfLocaleSelect,
+          },
+          () => h(
+            NButton,
+            {
+              size: 'small',
+              quaternary: true,
+              circle: true,
+              title: t('pdf.download'),
+              loading: downloadingId.value === row.id,
+              disabled: downloadingId.value === row.id,
+            },
+            () => h(NIcon, null, { default: () => h(DownloadOutline) }),
+          ),
+        ),
+        // Send email button
+        h(
+          NButton,
+          {
+            size: 'small',
+            quaternary: true,
+            circle: true,
+            title: t('sendDialog.title'),
+            onClick: () => openSendDialog(row),
+          },
+          () => h(NIcon, null, { default: () => h(MailOutline) }),
         ),
         ...(isEditable ? [h(
           NButton,
@@ -329,6 +423,16 @@ const columns = computed(() => [
         </div>
       </n-layout-content>
     </n-layout>
+
+    <!-- Send email dialog -->
+    <DocumentSendDialog
+      v-model:show="sendDialogShow"
+      doc-type="invoice"
+      :doc-id="sendDialogInvoiceId"
+      :customer-email="sendDialogCustomerEmail"
+      :customer-locale="sendDialogCustomerLocale"
+      @sent="handleSent"
+    />
   </div>
 </template>
 

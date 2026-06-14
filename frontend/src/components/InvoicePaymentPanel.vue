@@ -21,12 +21,12 @@ import {
   useMessage, useDialog,
   NCard, NSpace, NTag, NText, NButton, NForm, NFormItem,
   NInputNumber, NSelect, NInput, NDatePicker, NAlert, NSpin,
-  NDivider, NIcon, NEmpty,
+  NDivider, NIcon, NEmpty, NDropdown,
 } from 'naive-ui'
-import { AddOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
+import { AddOutline, CreateOutline, TrashOutline, DownloadOutline } from '@vicons/ionicons5'
 import { usePaymentsStore } from '../stores/payments'
 import type { InvoicePaymentsResponse, PaymentRead } from '../stores/payments'
-import { get } from '../api/http'
+import { get, downloadBlob } from '../api/http'
 import type { components } from '../api/schema'
 import { localDateStr } from '../utils/date'
 
@@ -72,6 +72,40 @@ const editReference = ref<string | null>(null)
 const recordSaving = ref(false)
 const editSaving = ref(false)
 const deleteSaving = ref<string | null>(null) // stores the payment id being deleted
+
+// ---- Receipt PDF download ----
+const receiptDownloadingId = ref<string | null>(null)
+
+function receiptPdfLocaleOptions(paymentId: string) {
+  return [
+    { label: t('pdf.localeDefault'), key: `${paymentId}:default` },
+    { label: t('pdf.localeEn'), key: `${paymentId}:en` },
+    { label: t('pdf.localeZh'), key: `${paymentId}:zh` },
+  ]
+}
+
+async function handleDownloadReceipt(paymentId: string, locale?: 'en' | 'zh') {
+  receiptDownloadingId.value = paymentId
+  try {
+    const url = locale
+      ? `/api/v1/payments/${paymentId}/receipt-pdf?locale=${locale}`
+      : `/api/v1/payments/${paymentId}/receipt-pdf`
+    await downloadBlob(url, `receipt-${paymentId}.pdf`)
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('pdf.downloadFailed'))
+  } finally {
+    receiptDownloadingId.value = null
+  }
+}
+
+function handleReceiptLocaleSelect(key: string) {
+  const [id, locale] = key.split(':')
+  if (locale === 'default') {
+    handleDownloadReceipt(id)
+  } else {
+    handleDownloadReceipt(id, locale as 'en' | 'zh')
+  }
+}
 
 // ---- computed ----
 const canRecord = computed(() =>
@@ -318,28 +352,47 @@ function handleDelete(payment: PaymentRead) {
                   · {{ payment.note }}
                 </n-text>
               </div>
-              <n-space v-if="canRecord" size="small" :wrap-item="false" class="payment-item-actions">
-                <n-button
-                  size="small"
-                  quaternary
-                  circle
-                  :title="t('payments.edit')"
-                  @click="openEdit(payment)"
+              <n-space size="small" :wrap-item="false" class="payment-item-actions">
+                <!-- Receipt PDF download dropdown (always visible, not gated by canRecord) -->
+                <n-dropdown
+                  :options="receiptPdfLocaleOptions(payment.id)"
+                  trigger="click"
+                  @select="handleReceiptLocaleSelect"
                 >
-                  <template #icon><n-icon><CreateOutline /></n-icon></template>
-                </n-button>
-                <!-- Delete button: no dynamic prop, no loading state here; deletion dialog handles it -->
-                <n-button
-                  size="small"
-                  quaternary
-                  circle
-                  type="error"
-                  :title="t('payments.delete')"
-                  :disabled="deleteSaving === payment.id"
-                  @click="handleDelete(payment)"
-                >
-                  <template #icon><n-icon><TrashOutline /></n-icon></template>
-                </n-button>
+                  <n-button
+                    size="small"
+                    quaternary
+                    circle
+                    :title="t('payments.downloadReceipt')"
+                    :disabled="receiptDownloadingId === payment.id"
+                  >
+                    <template #icon><n-icon><DownloadOutline /></n-icon></template>
+                  </n-button>
+                </n-dropdown>
+
+                <template v-if="canRecord">
+                  <n-button
+                    size="small"
+                    quaternary
+                    circle
+                    :title="t('payments.edit')"
+                    @click="openEdit(payment)"
+                  >
+                    <template #icon><n-icon><CreateOutline /></n-icon></template>
+                  </n-button>
+                  <!-- Delete button: no dynamic prop, no loading state here; deletion dialog handles it -->
+                  <n-button
+                    size="small"
+                    quaternary
+                    circle
+                    type="error"
+                    :title="t('payments.delete')"
+                    :disabled="deleteSaving === payment.id"
+                    @click="handleDelete(payment)"
+                  >
+                    <template #icon><n-icon><TrashOutline /></n-icon></template>
+                  </n-button>
+                </template>
               </n-space>
             </div>
             <n-divider v-if="aggregate && aggregate.items && aggregate.items.indexOf(payment) < aggregate.items.length - 1" style="margin: 6px 0" />

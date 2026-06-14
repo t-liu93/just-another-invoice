@@ -16,6 +16,8 @@ declare module 'vue' {
     AppHeader: typeof import('./components/AppHeader.vue')['default']
     DictionarySettings: typeof import('./components/settings/DictionarySettings.vue')['default']
     DocumentDefaultsSettings: typeof import('./components/settings/DocumentDefaultsSettings.vue')['default']
+    DocumentSendDialog: typeof import('./components/DocumentSendDialog.vue')['default']
+    EmailLogPanel: typeof import('./components/EmailLogPanel.vue')['default']
     EmailTemplatesSettings: typeof import('./components/settings/EmailTemplatesSettings.vue')['default']
     InvoicePaymentPanel: typeof import('./components/InvoicePaymentPanel.vue')['default']
     NAlert: typeof import('naive-ui')['NAlert']
