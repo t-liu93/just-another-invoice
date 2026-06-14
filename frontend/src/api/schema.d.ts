@@ -1042,6 +1042,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/{invoice_id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Invoice Email Endpoint
+         * @description Send an invoice email with PDF attachment.
+         *
+         *     Renders the PDF immediately (D5 – no cache), resolves the email template
+         *     for the requested locale (D4), and sends via the configured SMTP (D6 –
+         *     synchronous, no auto-retry).  Always writes an EmailLog row (SENT or FAILED).
+         *
+         *     Returns the EmailLog row so the caller can display the send result.
+         */
+        post: operations["send_invoice_email_endpoint_api_v1_invoices__invoice_id__send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Invoice Emails Endpoint
+         * @description Return the email send log for an invoice (newest first).
+         */
+        get: operations["list_invoice_emails_endpoint_api_v1_invoices__invoice_id__emails_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/pdf": {
         parameters: {
             query?: never;
@@ -1259,6 +1305,50 @@ export interface paths {
          * @description Reactivate an EXPIRED quote: set status back to SENT and extend valid_until.
          */
         post: operations["reactivate_quote_endpoint_api_v1_quotes__quote_id__reactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Quote Email Endpoint
+         * @description Send a quote email with PDF attachment.
+         *
+         *     Renders the PDF immediately (D5 – no cache), resolves the email template
+         *     for the requested locale (D4), and sends via the configured SMTP (D6 –
+         *     synchronous, no auto-retry).  Always writes an EmailLog row (SENT or FAILED).
+         */
+        post: operations["send_quote_email_endpoint_api_v1_quotes__quote_id__send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Quote Emails Endpoint
+         * @description Return the email send log for a quote (newest first).
+         */
+        get: operations["list_quote_emails_endpoint_api_v1_quotes__quote_id__emails_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1945,27 +2035,27 @@ export interface components {
              * Enabled
              * @default false
              */
-            enabled?: boolean;
+            enabled: boolean;
             /**
              * Base Url
              * @default https://api.openai.com/v1
              */
-            base_url?: string;
+            base_url: string;
             /**
              * Api Key Set
              * @default false
              */
-            api_key_set?: boolean;
+            api_key_set: boolean;
             /**
              * Model
              * @default
              */
-            model?: string;
+            model: string;
             /**
              * Receipt Prompt
              * @default
              */
-            receipt_prompt?: string;
+            receipt_prompt: string;
         };
         /**
          * AiSettingsUpdate
@@ -2084,7 +2174,7 @@ export interface components {
              * Has Logo
              * @default false
              */
-            has_logo?: boolean;
+            has_logo: boolean;
             /** Logo Url */
             logo_url?: string | null;
             /**
@@ -2188,7 +2278,7 @@ export interface components {
              * Is Default
              * @default false
              */
-            is_default?: boolean;
+            is_default: boolean;
         };
         /**
          * CustomerListResponse
@@ -2291,13 +2381,13 @@ export interface components {
          */
         DiscountInput: {
             /** @default NONE */
-            type?: components["schemas"]["DiscountType"];
+            type: components["schemas"]["DiscountType"];
             /**
              * Value
              * @description Discount value. Ignored when type=NONE.
              * @default 0
              */
-            value?: number | string;
+            value: number | string;
         };
         /**
          * DiscountType
@@ -2316,7 +2406,7 @@ export interface components {
              * @default en
              * @enum {string}
              */
-            locale?: "en" | "zh";
+            locale: "en" | "zh";
         };
         /**
          * DocumentDefaultsUpdate
@@ -2329,6 +2419,51 @@ export interface components {
              * @enum {string}
              */
             locale: "en" | "zh";
+        };
+        /**
+         * DocumentSendRequest
+         * @description Body for POST /api/v1/invoices/{id}/send and /api/v1/quotes/{id}/send.
+         *
+         *     ``to`` is mandatory; all other fields are optional overrides.
+         *
+         *     ``cc`` may be a single address string (``"a@b.com"``) or a comma-separated
+         *     list (``"a@b.com, c@d.com"``).  It is normalised to a list at the service
+         *     layer.
+         *
+         *     ``locale`` when omitted falls through to the D2 resolution chain:
+         *       export override → customer.locale → company default locale → "en".
+         *
+         *     ``subject`` / ``body`` when supplied replace the template values but still
+         *     go through the ``render_email_template`` pipeline (placeholder substitution
+         *     + nh3 + nl2br + HTML shell).
+         */
+        DocumentSendRequest: {
+            /**
+             * To
+             * Format: email
+             * @description Primary recipient email address.
+             */
+            to: string;
+            /**
+             * Cc
+             * @description Optional CC addresses, comma-separated (e.g. 'a@b.com' or 'a@b.com, c@d.com').
+             */
+            cc?: string | null;
+            /**
+             * Locale
+             * @description Language for the email and PDF attachment.  Overrides the D2 resolution chain when supplied.
+             */
+            locale?: ("en" | "zh") | null;
+            /**
+             * Subject
+             * @description Custom email subject.  Uses the stored template when omitted.
+             */
+            subject?: string | null;
+            /**
+             * Body
+             * @description Custom email body (plain text + placeholders).  Uses the stored template body when omitted.  Still goes through placeholder rendering + nh3 sanitisation.
+             */
+            body?: string | null;
         };
         /**
          * DocumentTemplateLineRead
@@ -2381,13 +2516,13 @@ export interface components {
             /** Unit Price */
             unit_price?: number | string | null;
             /** @default NONE */
-            discount_type?: components["schemas"]["DiscountType"];
+            discount_type: components["schemas"]["DiscountType"];
             /**
              * Discount Value
              * @description Discount value. Ignored when discount_type=NONE.
              * @default 0
              */
-            discount_value?: number | string;
+            discount_value: number | string;
             /** Vat Rate Id */
             vat_rate_id?: string | null;
         };
@@ -2413,7 +2548,7 @@ export interface components {
              * Lines
              * @default []
              */
-            lines?: components["schemas"]["DocumentTemplateLineRead"][];
+            lines: components["schemas"]["DocumentTemplateLineRead"][];
             /**
              * Created At
              * Format: date-time
@@ -2445,6 +2580,79 @@ export interface components {
              */
             lines: components["schemas"]["DocumentTemplateLineWrite"][];
         };
+        /**
+         * EmailLogListResponse
+         * @description Paginated list of email log rows for a document.
+         */
+        EmailLogListResponse: {
+            /** Items */
+            items: components["schemas"]["EmailLogRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * EmailLogRead
+         * @description Single email_log row as returned by the API.
+         *
+         *     Deliberately excludes ``company_id`` and any SMTP credential fields.
+         *     ``body_snapshot`` is included for audit purposes; it is HTML-escaped
+         *     user-supplied content (never raw credentials).
+         */
+        EmailLogRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            related_type: components["schemas"]["EmailRelatedType"];
+            /**
+             * Related Id
+             * Format: uuid
+             */
+            related_id: string;
+            /** To Email */
+            to_email: string;
+            /** Cc */
+            cc: string | null;
+            /** Subject */
+            subject: string;
+            /** Body Snapshot */
+            body_snapshot: string;
+            /** Attachment Filename */
+            attachment_filename: string | null;
+            /** Locale */
+            locale: string | null;
+            status: components["schemas"]["EmailStatus"];
+            /** Error Message */
+            error_message: string | null;
+            /** Creator Id */
+            creator_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Sent At */
+            sent_at: string | null;
+        };
+        /**
+         * EmailRelatedType
+         * @description Which document type an email_log row relates to (M9 step 6).
+         *
+         *     Uses a generic ``(related_type, related_id)`` pair instead of multiple
+         *     nullable FKs (red-line 6).
+         * @enum {string}
+         */
+        EmailRelatedType: "INVOICE" | "QUOTE";
+        /**
+         * EmailStatus
+         * @description Send-attempt status for an email_log row (M9 step 6).
+         *
+         *     ``SENT``   – aiosmtplib accepted the message without error.
+         *     ``FAILED`` – sending raised an exception; ``error_message`` has details.
+         * @enum {string}
+         */
+        EmailStatus: "SENT" | "FAILED";
         /**
          * EmailTemplate
          * @description A single email template with a subject line and plain-text body.
@@ -2518,12 +2726,12 @@ export interface components {
              * Groups
              * @default []
              */
-            groups?: components["schemas"]["EstimateGroupInput"][];
+            groups: components["schemas"]["EstimateGroupInput"][];
             /**
              * Lines
              * @default []
              */
-            lines?: components["schemas"]["EstimateLineInput"][];
+            lines: components["schemas"]["EstimateLineInput"][];
         };
         /**
          * EstimateGroupCalculationRead
@@ -2631,7 +2839,7 @@ export interface components {
              * @description Markup-on-cost rate. Must be in [0, 99.9999].
              * @default 0
              */
-            margin_rate?: number | string;
+            margin_rate: number | string;
             /** Unit Id */
             unit_id?: string | null;
             /** Unit Name */
@@ -2771,12 +2979,12 @@ export interface components {
              * Groups
              * @default []
              */
-            groups?: components["schemas"]["EstimateGroupInput"][];
+            groups: components["schemas"]["EstimateGroupInput"][];
             /**
              * Lines
              * @default []
              */
-            lines?: components["schemas"]["EstimateLineInput"][];
+            lines: components["schemas"]["EstimateLineInput"][];
             /**
              * Name
              * @description Internal estimate name.
@@ -2957,7 +3165,7 @@ export interface components {
              * Active
              * @default true
              */
-            active?: boolean;
+            active: boolean;
         };
         /**
          * ExpenseInput
@@ -3011,19 +3219,19 @@ export interface components {
             /** Note */
             note?: string | null;
             /** @default BUSINESS */
-            paid_by?: components["schemas"]["PaidBy"];
+            paid_by: components["schemas"]["PaidBy"];
             /**
              * Business Percentage
              * @description Business-use percentage 0–100.
              * @default 100
              */
-            business_percentage?: number | string;
+            business_percentage: number | string;
             /**
              * Depreciation Years
              * @description Depreciation years; 1 = fully expensed this year.
              * @default 1
              */
-            depreciation_years?: number;
+            depreciation_years: number;
         };
         /**
          * ExpenseListItem
@@ -3058,7 +3266,7 @@ export interface components {
              * Attachment Count
              * @default 0
              */
-            attachment_count?: number;
+            attachment_count: number;
             paid_by: components["schemas"]["PaidBy"];
             /** Business Percentage */
             business_percentage: string;
@@ -3145,7 +3353,7 @@ export interface components {
              * Attachment Count
              * @default 0
              */
-            attachment_count?: number;
+            attachment_count: number;
             /**
              * Created At
              * Format: date-time
@@ -3241,7 +3449,7 @@ export interface components {
              * Amounts Include Vat
              * @default false
              */
-            amounts_include_vat?: boolean;
+            amounts_include_vat: boolean;
             /** Vat Treatment Id */
             vat_treatment_id?: string | null;
             /** Document Vat Rate Id */
@@ -3252,7 +3460,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount?: components["schemas"]["DiscountInput"];
+            discount: components["schemas"]["DiscountInput"];
             /**
              * Lines
              * @description At least 1 line required.
@@ -3333,7 +3541,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount?: components["schemas"]["DiscountInput"];
+            discount: components["schemas"]["DiscountInput"];
             /** Vat Rate Id */
             vat_rate_id?: string | null;
         };
@@ -3392,7 +3600,7 @@ export interface components {
              * Line Taxes
              * @default []
              */
-            line_taxes?: components["schemas"]["InvoiceLineReadTax"][];
+            line_taxes: components["schemas"]["InvoiceLineReadTax"][];
         };
         /**
          * InvoiceLineReadTax
@@ -3548,13 +3756,13 @@ export interface components {
              * @description Numbering template. Supported placeholders: {{SERIES:VALUE}}, {{SEQUENCE:n}}, {{CUSTOMER_SERIES}}, {{CUSTOMER_SEQUENCE:n}}, {{DATE:format}}.
              * @default {{SERIES:INV}}-{{SEQUENCE:6}}
              */
-            template?: string;
+            template: string;
             /**
              * Sequence Start
              * @description Starting number used only when the sequence row is first created. Changing this after the first invoice has no effect.
              * @default 1
              */
-            sequence_start?: number;
+            sequence_start: number;
             /**
              * Preview
              * @description Read-only: preview of the next invoice number (ignored on PUT).
@@ -3600,7 +3808,7 @@ export interface components {
              * Items
              * @default []
              */
-            items?: components["schemas"]["PaymentRead"][];
+            items: components["schemas"]["PaymentRead"][];
         };
         /**
          * InvoiceRead
@@ -3701,12 +3909,12 @@ export interface components {
              * Lines
              * @default []
              */
-            lines?: components["schemas"]["InvoiceLineRead"][];
+            lines: components["schemas"]["InvoiceLineRead"][];
             /**
              * Taxes
              * @default []
              */
-            taxes?: components["schemas"]["InvoiceTaxRowRead"][];
+            taxes: components["schemas"]["InvoiceTaxRowRead"][];
             /**
              * Created At
              * Format: date-time
@@ -3813,7 +4021,7 @@ export interface components {
              * Amounts Include Vat
              * @default false
              */
-            amounts_include_vat?: boolean;
+            amounts_include_vat: boolean;
             /** Vat Treatment Id */
             vat_treatment_id?: string | null;
             /** Document Vat Rate Id */
@@ -3824,7 +4032,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount?: components["schemas"]["DiscountInput"];
+            discount: components["schemas"]["DiscountInput"];
             /** Notes */
             notes?: string | null;
             /** Warranty Text */
@@ -4059,7 +4267,7 @@ export interface components {
              * Active
              * @default true
              */
-            active?: boolean;
+            active: boolean;
         };
         /**
          * PaymentRead
@@ -4156,7 +4364,7 @@ export interface components {
              * Active
              * @default true
              */
-            active?: boolean;
+            active: boolean;
         };
         /**
          * ProductImportRequest
@@ -4177,7 +4385,7 @@ export interface components {
              * Updated
              * @default 0
              */
-            updated?: number;
+            updated: number;
             /** Errors */
             errors: components["schemas"]["ProductImportRowError"][];
         };
@@ -4193,7 +4401,7 @@ export interface components {
              * Name
              * @default
              */
-            name?: string;
+            name: string;
             /** Sku */
             sku?: string | null;
             /** Category Name */
@@ -4334,7 +4542,7 @@ export interface components {
              * Active
              * @default true
              */
-            active?: boolean;
+            active: boolean;
         };
         /**
          * QuoteCalculationRead
@@ -4398,7 +4606,7 @@ export interface components {
              * Amounts Include Vat
              * @default false
              */
-            amounts_include_vat?: boolean;
+            amounts_include_vat: boolean;
             /** Vat Treatment Id */
             vat_treatment_id?: string | null;
             /** Document Vat Rate Id */
@@ -4409,7 +4617,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount?: components["schemas"]["DiscountInput"];
+            discount: components["schemas"]["DiscountInput"];
             /**
              * Lines
              * @description At least 1 line required.
@@ -4491,7 +4699,7 @@ export interface components {
              * Line Taxes
              * @default []
              */
-            line_taxes?: components["schemas"]["QuoteLineReadTax"][];
+            line_taxes: components["schemas"]["QuoteLineReadTax"][];
         };
         /**
          * QuoteLineReadTax
@@ -4621,13 +4829,13 @@ export interface components {
              * @description Numbering template. Supported placeholders: {{SERIES:VALUE}}, {{SEQUENCE:n}}, {{CUSTOMER_SERIES}}, {{CUSTOMER_SEQUENCE:n}}, {{DATE:format}}.
              * @default {{SERIES:QUO}}-{{SEQUENCE:6}}
              */
-            template?: string;
+            template: string;
             /**
              * Sequence Start
              * @description Starting number used only when the sequence row is first created. Changing this after the first quote has no effect.
              * @default 1
              */
-            sequence_start?: number;
+            sequence_start: number;
             /**
              * Preview
              * @description Read-only: preview of the next quote number (ignored on PUT).
@@ -4738,12 +4946,12 @@ export interface components {
              * Lines
              * @default []
              */
-            lines?: components["schemas"]["QuoteLineRead"][];
+            lines: components["schemas"]["QuoteLineRead"][];
             /**
              * Taxes
              * @default []
              */
-            taxes?: components["schemas"]["QuoteTaxRowRead"][];
+            taxes: components["schemas"]["QuoteTaxRowRead"][];
             /**
              * Created At
              * Format: date-time
@@ -4823,7 +5031,7 @@ export interface components {
              * Amounts Include Vat
              * @default false
              */
-            amounts_include_vat?: boolean;
+            amounts_include_vat: boolean;
             /** Vat Treatment Id */
             vat_treatment_id?: string | null;
             /** Document Vat Rate Id */
@@ -4834,7 +5042,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount?: components["schemas"]["DiscountInput"];
+            discount: components["schemas"]["DiscountInput"];
             /** Notes */
             notes?: string | null;
             /** Warranty Text */
@@ -4899,19 +5107,19 @@ export interface components {
             /** Note */
             note?: string | null;
             /** @default BUSINESS */
-            paid_by?: components["schemas"]["PaidBy"];
+            paid_by: components["schemas"]["PaidBy"];
             /**
              * Business Percentage
              * @description Business-use percentage 0–100.
              * @default 100
              */
-            business_percentage?: number | string;
+            business_percentage: number | string;
             /**
              * Depreciation Years
              * @description Depreciation years; 1 = fully expensed this year.
              * @default 1
              */
-            depreciation_years?: number;
+            depreciation_years: number;
             /**
              * Frequency
              * @description One of: MONTHLY, QUARTERLY, YEARLY.
@@ -4935,7 +5143,7 @@ export interface components {
              * @description Whether the template is active.
              * @default true
              */
-            active?: boolean;
+            active: boolean;
         };
         /**
          * RecurringExpenseListResponse
@@ -5080,42 +5288,42 @@ export interface components {
              * Host
              * @default
              */
-            host?: string;
+            host: string;
             /**
              * Port
              * @default 587
              */
-            port?: number;
+            port: number;
             /**
              * Username
              * @default
              */
-            username?: string;
+            username: string;
             /**
              * Password Set
              * @default false
              */
-            password_set?: boolean;
+            password_set: boolean;
             /**
              * From Email
              * @default
              */
-            from_email?: string;
+            from_email: string;
             /**
              * From Name
              * @default
              */
-            from_name?: string;
+            from_name: string;
             /**
              * Use Tls
              * @default true
              */
-            use_tls?: boolean;
+            use_tls: boolean;
             /**
              * Use Ssl
              * @default false
              */
-            use_ssl?: boolean;
+            use_ssl: boolean;
         };
         /**
          * SmtpSettingsUpdate
@@ -5128,12 +5336,12 @@ export interface components {
              * Port
              * @default 587
              */
-            port?: number;
+            port: number;
             /**
              * Username
              * @default
              */
-            username?: string;
+            username: string;
             /** Password */
             password?: string | null;
             /**
@@ -5145,17 +5353,17 @@ export interface components {
              * From Name
              * @default
              */
-            from_name?: string;
+            from_name: string;
             /**
              * Use Tls
              * @default true
              */
-            use_tls?: boolean;
+            use_tls: boolean;
             /**
              * Use Ssl
              * @default false
              */
-            use_ssl?: boolean;
+            use_ssl: boolean;
         };
         /**
          * UnitListResponse
@@ -5205,7 +5413,7 @@ export interface components {
              * Active
              * @default true
              */
-            active?: boolean;
+            active: boolean;
         };
         /**
          * UserPreferences
@@ -5225,14 +5433,14 @@ export interface components {
              * @default system
              * @enum {string}
              */
-            theme?: "system" | "light" | "dark";
+            theme: "system" | "light" | "dark";
             /**
              * Locale
              * @description UI language preference (interface locale).
              * @default en
              * @enum {string}
              */
-            locale?: "en" | "zh";
+            locale: "en" | "zh";
         };
         /**
          * UserRead
@@ -5253,27 +5461,27 @@ export interface components {
              * Is Active
              * @default true
              */
-            is_active?: boolean;
+            is_active: boolean;
             /**
              * Is Superuser
              * @default false
              */
-            is_superuser?: boolean;
+            is_superuser: boolean;
             /**
              * Is Verified
              * @default false
              */
-            is_verified?: boolean;
+            is_verified: boolean;
             /**
              * Role
              * @default owner
              */
-            role?: string;
+            role: string;
             /**
              * Mfa Enabled
              * @default false
              */
-            mfa_enabled?: boolean;
+            mfa_enabled: boolean;
             /** Company Id */
             company_id?: string | null;
         };
@@ -5338,7 +5546,7 @@ export interface components {
              * Active
              * @default true
              */
-            active?: boolean;
+            active: boolean;
         };
         /**
          * VatTreatmentEffect
@@ -5432,14 +5640,14 @@ export interface components {
              * Requires Icp
              * @default false
              */
-            requires_icp?: boolean;
+            requires_icp: boolean;
             /** Deductible */
             deductible?: boolean | null;
             /**
              * Active
              * @default true
              */
-            active?: boolean;
+            active: boolean;
         };
         /**
          * _AiExtractRequest
@@ -7991,6 +8199,72 @@ export interface operations {
             };
         };
     };
+    send_invoice_email_endpoint_api_v1_invoices__invoice_id__send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailLogRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_invoice_emails_endpoint_api_v1_invoices__invoice_id__emails_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailLogListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_invoice_pdf_api_v1_invoices__invoice_id__pdf_get: {
         parameters: {
             query?: {
@@ -8381,6 +8655,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_quote_email_endpoint_api_v1_quotes__quote_id__send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailLogRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_quote_emails_endpoint_api_v1_quotes__quote_id__emails_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailLogListResponse"];
                 };
             };
             /** @description Validation Error */

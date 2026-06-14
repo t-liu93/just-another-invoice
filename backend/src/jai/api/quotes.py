@@ -25,6 +25,7 @@ from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models._enums import QuoteStatus
 from jai.models.user import User
+from jai.schemas.email_log import DocumentSendRequest, EmailLogListResponse, EmailLogRead
 from jai.schemas.invoice import InvoiceCalculationRead, InvoiceRead
 from jai.schemas.quote import (
     QuoteCalculationRead,
@@ -311,3 +312,173 @@ async def reactivate_quote_endpoint(
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")
     return result
+
+
+# ---------------------------------------------------------------------------
+# Quote email send + log (M9 step 6)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/quotes/{quote_id}/send",
+    response_model=EmailLogRead,
+    status_code=status.HTTP_200_OK,
+)
+async def send_quote_email_endpoint(
+    quote_id: uuid.UUID,
+    body: DocumentSendRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EmailLogRead:
+    """Send a quote email with PDF attachment.
+
+    Renders the PDF immediately (D5 – no cache), resolves the email template
+    for the requested locale (D4), and sends via the configured SMTP (D6 –
+    synchronous, no auto-retry).  Always writes an EmailLog row (SENT or FAILED).
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from jai.models._enums import EmailRelatedType, SettingLevel
+    from jai.models.company import Company
+    from jai.models.customer import Customer
+    from jai.models.quote import Quote
+    from jai.schemas.setting import SETTING_KEY_DOCUMENT_DEFAULTS, DocumentDefaultsSetting
+    from jai.services.email import send_document_email
+    from jai.services.pdf import render_quote_pdf, resolve_document_locale
+    from jai.services.settings import get_setting
+
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    # -- Load quote scoped to company (cross-company → 404) -------------------
+    stmt = (
+        select(Quote)
+        .where(Quote.id == quote_id, Quote.company_id == company_id)
+        .options(selectinload(Quote.lines), selectinload(Quote.taxes))
+    )
+    result = await session.execute(stmt)
+    quote = result.scalar_one_or_none()
+    if quote is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Quote not found.",
+        )
+
+    # -- Load company ---------------------------------------------------------
+    company_result = await session.execute(
+        select(Company).where(Company.id == company_id)
+    )
+    company = company_result.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company not found.",
+        )
+
+    # -- Load customer (with addresses) ---------------------------------------
+    customer_result = await session.execute(
+        select(Customer)
+        .where(Customer.id == quote.customer_id)
+        .options(selectinload(Customer.addresses))
+    )
+    customer = customer_result.scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found.",
+        )
+
+    # -- Resolve locale via D2 chain ------------------------------------------
+    company_default_setting = await get_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=DocumentDefaultsSetting,
+    )
+    company_default_locale: str | None = (
+        company_default_setting.locale if company_default_setting is not None else None
+    )
+    customer_locale: str | None = getattr(customer, "locale", None)
+    resolved_locale = resolve_document_locale(
+        body.locale, customer_locale, company_default_locale
+    )
+
+    # -- Render PDF immediately (D5) ------------------------------------------
+    pdf_bytes, filename = await render_quote_pdf(
+        session, quote_id, company_id, locale=resolved_locale
+    )
+
+    # -- Normalise CC ---------------------------------------------------------
+    cc_list: list[str] | None = None
+    if body.cc:
+        raw_parts = [p.strip() for p in body.cc.split(",") if p.strip()]
+        cc_list = raw_parts if raw_parts else None
+
+    # -- Send email + write log -----------------------------------------------
+    log = await send_document_email(
+        session=session,
+        related_type=EmailRelatedType.QUOTE,
+        doc=quote,
+        company=company,
+        customer=customer,
+        to=str(body.to),
+        cc=cc_list,
+        locale=resolved_locale,
+        subject=body.subject,
+        body=body.body,
+        pdf_bytes=pdf_bytes,
+        filename=filename,
+        creator_id=user.id,
+    )
+
+    await session.commit()
+    return EmailLogRead.model_validate(log)
+
+
+@router.get(
+    "/quotes/{quote_id}/emails",
+    response_model=EmailLogListResponse,
+)
+async def list_quote_emails_endpoint(
+    quote_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EmailLogListResponse:
+    """Return the email send log for a quote (newest first)."""
+    from sqlalchemy import select
+
+    from jai.models._enums import EmailRelatedType
+    from jai.models.email_log import EmailLog
+    from jai.models.quote import Quote
+
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    # Verify quote belongs to company (cross-company → 404).
+    quote_result = await session.execute(
+        select(Quote).where(Quote.id == quote_id, Quote.company_id == company_id)
+    )
+    if quote_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Quote not found.",
+        )
+
+    stmt = (
+        select(EmailLog)
+        .where(
+            EmailLog.company_id == company_id,
+            EmailLog.related_type == EmailRelatedType.QUOTE,
+            EmailLog.related_id == quote_id,
+        )
+        .order_by(EmailLog.created_at.desc())
+    )
+    rows_result = await session.execute(stmt)
+    rows = list(rows_result.scalars().all())
+
+    return EmailLogListResponse(
+        items=[EmailLogRead.model_validate(r) for r in rows],
+        total=len(rows),
+    )

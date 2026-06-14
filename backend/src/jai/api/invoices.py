@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models.user import User
+from jai.schemas.email_log import DocumentSendRequest, EmailLogListResponse, EmailLogRead
 from jai.schemas.invoice import (
     InvoiceCalculationRead,
     InvoiceCalculationRequest,
@@ -287,3 +288,177 @@ async def list_invoice_product_options_endpoint(
     _owner_only(user)
     company_id = _require_company_id(user)
     return await list_invoice_product_options(session, company_id, q=q, limit=limit)
+
+
+# ---------------------------------------------------------------------------
+# Invoice email send + log (M9 step 6)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/invoices/{invoice_id}/send",
+    response_model=EmailLogRead,
+    status_code=status.HTTP_200_OK,
+)
+async def send_invoice_email_endpoint(
+    invoice_id: uuid.UUID,
+    body: DocumentSendRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EmailLogRead:
+    """Send an invoice email with PDF attachment.
+
+    Renders the PDF immediately (D5 – no cache), resolves the email template
+    for the requested locale (D4), and sends via the configured SMTP (D6 –
+    synchronous, no auto-retry).  Always writes an EmailLog row (SENT or FAILED).
+
+    Returns the EmailLog row so the caller can display the send result.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from jai.models._enums import EmailRelatedType, SettingLevel
+    from jai.models.company import Company
+    from jai.models.customer import Customer
+    from jai.models.invoice import Invoice
+    from jai.schemas.setting import SETTING_KEY_DOCUMENT_DEFAULTS, DocumentDefaultsSetting
+    from jai.services.email import send_document_email
+    from jai.services.pdf import render_invoice_pdf, resolve_document_locale
+    from jai.services.settings import get_setting
+
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    # -- Load invoice scoped to company (cross-company → 404) ------------------
+    stmt = (
+        select(Invoice)
+        .where(Invoice.id == invoice_id, Invoice.company_id == company_id)
+        .options(selectinload(Invoice.lines), selectinload(Invoice.taxes))
+    )
+    result = await session.execute(stmt)
+    invoice = result.scalar_one_or_none()
+    if invoice is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found.",
+        )
+
+    # -- Load company ----------------------------------------------------------
+    company_result = await session.execute(
+        select(Company).where(Company.id == company_id)
+    )
+    company = company_result.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company not found.",
+        )
+
+    # -- Load customer (with addresses) ----------------------------------------
+    customer_result = await session.execute(
+        select(Customer)
+        .where(Customer.id == invoice.customer_id)
+        .options(selectinload(Customer.addresses))
+    )
+    customer = customer_result.scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found.",
+        )
+
+    # -- Resolve locale via D2 chain -------------------------------------------
+    company_default_setting = await get_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=DocumentDefaultsSetting,
+    )
+    company_default_locale: str | None = (
+        company_default_setting.locale if company_default_setting is not None else None
+    )
+    customer_locale: str | None = getattr(customer, "locale", None)
+    resolved_locale = resolve_document_locale(
+        body.locale, customer_locale, company_default_locale
+    )
+
+    # -- Render PDF immediately (D5) -------------------------------------------
+    pdf_bytes, filename = await render_invoice_pdf(
+        session, invoice_id, company_id, locale=resolved_locale
+    )
+
+    # -- Normalise CC ----------------------------------------------------------
+    cc_list: list[str] | None = None
+    if body.cc:
+        raw_parts = [p.strip() for p in body.cc.split(",") if p.strip()]
+        cc_list = raw_parts if raw_parts else None
+
+    # -- Send email + write log ------------------------------------------------
+    log = await send_document_email(
+        session=session,
+        related_type=EmailRelatedType.INVOICE,
+        doc=invoice,
+        company=company,
+        customer=customer,
+        to=str(body.to),
+        cc=cc_list,
+        locale=resolved_locale,
+        subject=body.subject,
+        body=body.body,
+        pdf_bytes=pdf_bytes,
+        filename=filename,
+        creator_id=user.id,
+    )
+
+    await session.commit()
+    return EmailLogRead.model_validate(log)
+
+
+@router.get(
+    "/invoices/{invoice_id}/emails",
+    response_model=EmailLogListResponse,
+)
+async def list_invoice_emails_endpoint(
+    invoice_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EmailLogListResponse:
+    """Return the email send log for an invoice (newest first)."""
+    from sqlalchemy import select
+
+    from jai.models._enums import EmailRelatedType
+    from jai.models.email_log import EmailLog
+    from jai.models.invoice import Invoice
+
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    # Verify invoice belongs to company (cross-company → 404).
+    inv_result = await session.execute(
+        select(Invoice).where(
+            Invoice.id == invoice_id, Invoice.company_id == company_id
+        )
+    )
+    if inv_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found.",
+        )
+
+    stmt = (
+        select(EmailLog)
+        .where(
+            EmailLog.company_id == company_id,
+            EmailLog.related_type == EmailRelatedType.INVOICE,
+            EmailLog.related_id == invoice_id,
+        )
+        .order_by(EmailLog.created_at.desc())
+    )
+    rows_result = await session.execute(stmt)
+    rows = list(rows_result.scalars().all())
+
+    return EmailLogListResponse(
+        items=[EmailLogRead.model_validate(r) for r in rows],
+        total=len(rows),
+    )

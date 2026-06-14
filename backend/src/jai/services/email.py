@@ -36,9 +36,11 @@ from __future__ import annotations
 import html
 import logging
 import re
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiosmtplib
 import nh3
@@ -46,8 +48,11 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.config import get_settings
-from jai.models._enums import SettingLevel
+from jai.models._enums import EmailRelatedType, EmailStatus, SettingLevel
 from jai.schemas.setting import SETTING_KEY_SMTP, EmailTemplate, SmtpSettings
+
+if TYPE_CHECKING:
+    from jai.models.email_log import EmailLog
 
 logger = logging.getLogger("jai.email")
 
@@ -158,16 +163,71 @@ async def _send_mail(
     to: str,
     subject: str,
     html_body: str,
+    cc: list[str] | None = None,
+    attachment_bytes: bytes | None = None,
+    attachment_filename: str | None = None,
 ) -> None:
-    """Send a single HTML email using the provided SMTP configuration."""
-    msg = MIMEMultipart("alternative")
+    """Send an HTML email, optionally with CC recipients and a PDF attachment.
+
+    Parameters
+    ----------
+    cfg:
+        Validated SMTP configuration.
+    to:
+        Primary recipient address.
+    subject:
+        Email subject (plain text).
+    html_body:
+        Rendered HTML body.
+    cc:
+        List of CC recipient addresses.  Each address is also added to the
+        SMTP envelope so it is actually delivered (not just header-visible).
+    attachment_bytes:
+        Raw bytes of a PDF attachment.  ``None`` means no attachment.
+    attachment_filename:
+        Filename shown to the recipient (e.g. ``"INV-001.pdf"``).  Ignored
+        when ``attachment_bytes`` is ``None``.
+
+    Notes
+    -----
+    Message structure when attachment is present::
+
+        multipart/mixed
+          └─ multipart/alternative
+               └─ text/html  (body)
+          └─ application/pdf  (attachment)
+
+    When no attachment is present the outer mixed wrapper is omitted and we
+    fall back to a plain ``multipart/alternative`` (keeps it simple for
+    non-document emails such as password-reset and test).
+    """
+    if attachment_bytes is not None:
+        # Full structure: mixed(alternative(html) + pdf)
+        outer = MIMEMultipart("mixed")
+        alt_part = MIMEMultipart("alternative")
+        alt_part.attach(MIMEText(html_body, "html", "utf-8"))
+        outer.attach(alt_part)
+
+        pdf_part = MIMEApplication(attachment_bytes, _subtype="pdf")
+        fname = attachment_filename or "attachment.pdf"
+        pdf_part.add_header("Content-Disposition", "attachment", filename=fname)
+        outer.attach(pdf_part)
+        msg: MIMEMultipart = outer
+    else:
+        # Simple structure: alternative(html) – no attachment wrapper needed.
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
     msg["Subject"] = subject
     msg["From"] = (
         f"{cfg.from_name} <{cfg.from_email}>" if cfg.from_name else cfg.from_email
     )
     msg["To"] = to
+    if cc:
+        msg["Cc"] = ", ".join(cc)
 
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    # Envelope recipients = primary + CC (both must be in the SMTP RCPT TO).
+    recipients = [to] + (cc or [])
 
     if cfg.use_ssl:
         # Implicit TLS (port 465).
@@ -178,6 +238,7 @@ async def _send_mail(
             username=cfg.username or None,
             password=cfg.password or None,
             use_tls=True,
+            recipients=recipients,
         )
     else:
         # STARTTLS (port 587) or plain.
@@ -188,6 +249,7 @@ async def _send_mail(
             username=cfg.username or None,
             password=cfg.password or None,
             start_tls=cfg.use_tls,
+            recipients=recipients,
         )
 
 
@@ -336,3 +398,253 @@ def render_email_template(
     )
 
     return rendered_subject, html_body
+
+
+# ---------------------------------------------------------------------------
+# Document email sending (M9 step 6)
+# ---------------------------------------------------------------------------
+
+
+def _build_template_context(
+    doc_type: str,
+    doc: object,
+    company: object,
+    customer: object,
+) -> dict[str, str]:
+    """Build the placeholder context dict from document / company / customer objects.
+
+    The returned dict contains string values only (all numeric amounts are
+    converted to strings using their stored representation).  ``None`` values
+    are replaced with empty strings to avoid printing "None" in emails.
+
+    Common tokens:  COMPANY_NAME, CUSTOMER_NAME, DATE, DOCUMENT_NUMBER,
+                    TOTAL, CURRENCY.
+    Invoice tokens: INVOICE_NUMBER, DUE_DATE, AMOUNT_DUE.
+    Quote tokens:   QUOTE_NUMBER, VALID_UNTIL.
+    """
+
+    def _s(v: object) -> str:
+        return str(v) if v is not None else ""
+
+    ctx: dict[str, str] = {
+        "COMPANY_NAME": _s(getattr(company, "name", None)),
+        "CUSTOMER_NAME": _s(getattr(customer, "name", None)),
+        "CURRENCY": _s(getattr(doc, "currency", None)),
+        "TOTAL": _s(getattr(doc, "total_incl_vat", None)),
+    }
+
+    if doc_type == "invoice":
+        ctx["DOCUMENT_NUMBER"] = _s(getattr(doc, "invoice_number", None))
+        ctx["INVOICE_NUMBER"] = _s(getattr(doc, "invoice_number", None))
+        ctx["DATE"] = _s(getattr(doc, "invoice_date", None))
+        ctx["DUE_DATE"] = _s(getattr(doc, "due_date", None))
+        ctx["AMOUNT_DUE"] = _s(getattr(doc, "due_amount", None))
+        ctx["QUOTE_NUMBER"] = ""
+        ctx["VALID_UNTIL"] = ""
+    elif doc_type == "quote":
+        ctx["DOCUMENT_NUMBER"] = _s(getattr(doc, "quote_number", None))
+        ctx["QUOTE_NUMBER"] = _s(getattr(doc, "quote_number", None))
+        ctx["DATE"] = _s(getattr(doc, "quote_date", None))
+        ctx["VALID_UNTIL"] = _s(getattr(doc, "valid_until", None))
+        ctx["INVOICE_NUMBER"] = ""
+        ctx["DUE_DATE"] = ""
+        ctx["AMOUNT_DUE"] = ""
+    else:
+        ctx["DOCUMENT_NUMBER"] = ""
+        ctx["INVOICE_NUMBER"] = ""
+        ctx["DATE"] = ""
+        ctx["DUE_DATE"] = ""
+        ctx["AMOUNT_DUE"] = ""
+        ctx["QUOTE_NUMBER"] = ""
+        ctx["VALID_UNTIL"] = ""
+
+    return ctx
+
+
+async def send_document_email(
+    session: AsyncSession,
+    related_type: EmailRelatedType,
+    doc: object,
+    company: object,
+    customer: object,
+    to: str,
+    cc: list[str] | None,
+    locale: str,
+    subject: str | None,
+    body: str | None,
+    pdf_bytes: bytes,
+    filename: str,
+    creator_id: object | None = None,
+) -> EmailLog:
+    """Send a document email with PDF attachment and write an EmailLog row.
+
+    The email is **sent synchronously** (D6 – no queue, no auto-retry).
+    Regardless of whether sending succeeds or fails, a row is written to
+    ``email_log`` with the appropriate status.
+
+    Parameters
+    ----------
+    session:
+        Async DB session (will be flushed but NOT committed here; caller commits).
+    related_type:
+        ``EmailRelatedType.INVOICE`` or ``EmailRelatedType.QUOTE``.
+    doc:
+        ORM Invoice or Quote instance (already loaded, with snapshot fields).
+    company:
+        Company ORM instance.
+    customer:
+        Customer ORM instance.
+    to:
+        Primary recipient email address.
+    cc:
+        Optional list of CC addresses.
+    locale:
+        Resolved document locale (``"en"`` or ``"zh"``).
+    subject:
+        Explicit subject override.  When ``None``, the email template for
+        ``doc_type × locale`` is resolved and rendered.
+    body:
+        Explicit body override (plain text + placeholders).  When ``None``,
+        the email template body is used.  Either way the body goes through the
+        ``render_email_template`` pipeline (placeholder substitution + nh3 +
+        nl2br + HTML shell) so it is always safe.
+    pdf_bytes:
+        Pre-rendered PDF bytes to attach.
+    filename:
+        Attachment filename shown to the recipient.
+    creator_id:
+        ``User.id`` of the authenticated user who triggered the send, or
+        ``None`` if not available.
+
+    Returns
+    -------
+    EmailLog
+        The newly created (and session-flushed) log row.
+
+    Raises
+    ------
+    HTTPException(400)
+        If SMTP is not configured.  The caller should not log a FAILED row
+        for a pre-condition failure – we raise before touching email_log so
+        the frontend gets a clear actionable error.
+    """
+    from datetime import UTC, datetime
+
+    from fastapi import HTTPException
+    from fastapi import status as http_status
+
+    from jai.models.email_log import EmailLog
+
+    # -- Pre-condition: SMTP must be configured --------------------------------
+    cfg = await _get_smtp_config(session)
+    if not _configured(cfg):
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "SMTP is not configured.  Please set up SMTP settings before "
+                "sending emails."
+            ),
+        )
+    assert cfg is not None  # narrowing for type-checker
+
+    # -- Resolve doc_type string -----------------------------------------------
+    doc_type = "invoice" if related_type == EmailRelatedType.INVOICE else "quote"
+
+    # -- Resolve template + render subject/body --------------------------------
+    # 1. Load company-level email templates (with built-in fallback).
+    from jai.schemas.setting import (
+        DEFAULT_EMAIL_TEMPLATES,
+        SETTING_KEY_EMAIL_TEMPLATES,
+        EmailTemplate,
+        EmailTemplatesSetting,
+    )
+    from jai.services.settings import get_setting
+
+    templates_setting = await get_setting(
+        session,
+        SETTING_KEY_EMAIL_TEMPLATES,
+        level=SettingLevel.COMPANY,
+        scope_id=getattr(company, "id", None),
+        value_type=EmailTemplatesSetting,
+    )
+    if templates_setting is None:
+        templates_setting = DEFAULT_EMAIL_TEMPLATES
+
+    locale_map = (
+        templates_setting.invoice
+        if doc_type == "invoice"
+        else templates_setting.quote
+    )
+    stored_template: EmailTemplate = (
+        locale_map.en if locale == "en" else locale_map.zh
+    )
+
+    # 2. If caller supplied an explicit subject or body, build a temporary
+    #    EmailTemplate from them (so the same render pipeline is always used).
+    if subject is not None or body is not None:
+        render_tmpl = EmailTemplate(
+            subject=subject if subject is not None else stored_template.subject,
+            body=body if body is not None else stored_template.body,
+        )
+    else:
+        render_tmpl = stored_template
+
+    # 3. Build placeholder context and render.
+    ctx = _build_template_context(doc_type, doc, company, customer)
+    rendered_subject, html_body = render_email_template(render_tmpl, ctx)
+
+    # -- Attempt to send -------------------------------------------------------
+    doc_id: object = getattr(doc, "id", None)
+    company_id: object = getattr(company, "id", None)
+    error_msg: str | None = None
+    send_status = EmailStatus.SENT
+    sent_at: datetime | None = None
+
+    try:
+        await _send_mail(
+            cfg=cfg,
+            to=to,
+            subject=rendered_subject,
+            html_body=html_body,
+            cc=cc,
+            attachment_bytes=pdf_bytes,
+            attachment_filename=filename,
+        )
+        sent_at = datetime.now(tz=UTC)
+    except Exception as exc:
+        send_status = EmailStatus.FAILED
+        # Sanitise the error message so SMTP credentials are never logged.
+        # We include only the exception type and a cleaned message; we
+        # explicitly strip any occurrences of the password value.
+        raw_error = str(exc)
+        password_val = cfg.password or ""
+        username_val = cfg.username or ""
+        safe_error = raw_error
+        if password_val:
+            safe_error = safe_error.replace(password_val, "***")
+        if username_val:
+            safe_error = safe_error.replace(username_val, "***")
+        error_msg = f"{type(exc).__name__}: {safe_error}"
+        logger.warning("Failed to send document email to %s: %s", to, error_msg)
+
+    # -- Write EmailLog row (always, success or failure) -----------------------
+    log = EmailLog(
+        id=__import__("uuid").uuid4(),
+        company_id=company_id,
+        related_type=related_type,
+        related_id=doc_id,
+        to_email=to,
+        cc=", ".join(cc) if cc else None,
+        subject=rendered_subject,
+        body_snapshot=html_body,
+        attachment_filename=filename,
+        locale=locale,
+        status=send_status,
+        error_message=error_msg,
+        creator_id=creator_id,
+        sent_at=sent_at,
+    )
+    session.add(log)
+    await session.flush()
+
+    return log

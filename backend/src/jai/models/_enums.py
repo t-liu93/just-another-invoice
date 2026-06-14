@@ -129,3 +129,25 @@ class PaidBy(enum.StrEnum):
 
     PRIVATE = "PRIVATE"
     BUSINESS = "BUSINESS"
+
+
+class EmailRelatedType(enum.StrEnum):
+    """Which document type an email_log row relates to (M9 step 6).
+
+    Uses a generic ``(related_type, related_id)`` pair instead of multiple
+    nullable FKs (red-line 6).
+    """
+
+    INVOICE = "INVOICE"
+    QUOTE = "QUOTE"
+
+
+class EmailStatus(enum.StrEnum):
+    """Send-attempt status for an email_log row (M9 step 6).
+
+    ``SENT``   – aiosmtplib accepted the message without error.
+    ``FAILED`` – sending raised an exception; ``error_message`` has details.
+    """
+
+    SENT = "SENT"
+    FAILED = "FAILED"
