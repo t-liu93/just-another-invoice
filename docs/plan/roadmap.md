@@ -210,6 +210,12 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **（follow-on）⭐ AI 供货价单识别 → 灌入产品目录**：**复用本里程碑的视觉模型管道**，把供应商发的供货价格单（图 / PDF / Excel）→ 自动识别 → 灌进 **M4 的产品/材料目录**（给 M6.5 的成本核算供数）；排在 M8 AI 基建落地之后。
 - **🟢 部署自测点**：上传一张票据照片，AI 自动填好开支字段，保存归类；建一条周期性开支看自动生成。
 
+### M8.5 · 开支记账字段补全（对齐作者 NL 记账 Excel）｜本路线图新增（M8 数据模型补全，不新增算钱）
+- **目标**：给开支补三个**纯记录**字段，让数据模型反映作者的荷兰个体户记账 Excel——**付款来源**（私人/公司账户）、**业务使用比例**、**折旧年数**。
+- **依赖 / 位置**：在 **M8** 开支线之上做 additive 字段扩展；排在 **M8 之后、M9 之前**。**不新增算钱**——当年 Actual Expense / 可退 VAT 按年 / 季度聚合 / BTW 格子等派生口径全部顺延 **M10**（依赖「在报哪一年」，属报表引擎职责）。
+- **关键内容**：`paid_by`（PRIVATE/BUSINESS 指示）、`business_percentage`（0–100）、`depreciation_years`（≥1）三列加到 `expense`（+ `recurring_expense` parity）；编辑器/列表 UI + i18n；契约改 → `npm run codegen`。`deductible` 语义不变（= 能否退 VAT）；个人抬头不可退 VAT 由录入法处理（Net 填 Gross、VAT 改 0），不新建模。详见 `milestones/M8.5.md`（D1–D9 已冻结）。
+- **🟢 部署自测点**：新建开支可填私人/公司、业务%、折旧年并持久化；M8 期旧开支迁移回填默认（Business/100/1）；范围校验（%∈[0,100]、年≥1）；列表可见三字段；CI 绿 + `schema.d.ts` 无漂移。
+
 ### M9 · 输出：PDF（邮件底座已在 M1）｜对应 P5
 - **目标**：能把单据交付给客户。
 - **关键内容**：**PDF 生成**（一套模板，Jinja2 + WeasyPrint 候选；用户输入清洗）+ 下载（无公开链接，手动发）；**复用 M1 的 SMTP 底座**，加单据**邮件正文模板/占位符** + **Email log**（无已读回执）+ 把 PDF 作附件发出；收款收据 PDF（低优）。
@@ -313,6 +319,7 @@ docs/
 | M7 | 收款 | 🟢 完成（2026-06-13；orchestrator 5 步，每步盲审+返工收敛；ruff/mypy/单测 404/集成 641/codegen 无漂移/build 全绿；人工 walkthrough 自测点 1–8 通过，#9 单币种 UI 待 FX 前端落地后补、隔离/cascade 由集成测试覆盖）。收款 sub-cent 边界（3 位总额不可按分收满）顺延 M7.5 |
 | M7.5 | 货币舍入口径修正（落到「分」） | 🟢 完成（2026-06-13；orchestrator 3 步逐步盲审收敛，步骤2 一处 docstring fixup、步骤1/3 零 finding；**行级到分**、`F2026-009`→`3865.16`；ruff/mypy/单测 426/集成 644（+3 F2026-009 收满回归）全绿；零迁移/零契约/无 codegen；payment/costing/estimate 服务代码零改动；作者人工 walkthrough 自测点 1–3 通过、无 finding） |
 | M8 | 开支（含 AI 填单 + AI 供货价单识别，可与单据线并行） | 🟢 完成（2026-06-14；orchestrator 5 步逐步盲审收敛 [expense+分存 / storage 收据 / 周期开支 / AI 票据填单 / 前端收尾]；末轮 walkthrough refinements 单列一轮压进同一收尾 commit [可抵扣随分类联动 / 收据 bind-mount uid1000 / AI 探针 64×64 / 注入当前日期 / 摘要写 note 跟随界面语言 / 选率自动算 VAT 后端端点 / 提示词「默认常驻+自定义追加」]；ruff/mypy/单测 599/集成/build/无漂移全绿；自测点 1–5 人工通过、7 集成覆盖、8 通过，6 周期性开支作者暂不用未走（不影响验收）、9 远端 CI 待确认。AI 走 OpenAI 兼容 Chat Completions（`httpx` 自构造、非 SDK；base_url/model/key/提示词 用户自填 + 多模态测试；PDF 用 pypdfium2 栅格化成图统一走 image_url）。**follow-on 未做**：AI 供货价单 → M4 目录） |
+| M8.5 | 开支记账字段补全（付款来源 / 业务% / 折旧年，对齐 NL 记账 Excel） | ⬜ 待实现（`milestones/M8.5.md` 设计**已定稿/冻结** 2026-06-14：3 个**纯存储** additive 字段 [`paid_by` / `business_percentage` / `depreciation_years`]，`expense` + `recurring_expense` parity；**不新增算钱**——当年摊销 / 可退 VAT 按年 / 季度 / BTW 全顺延 M10；2 步 [后端字段+迁移 0021 / 前端+i18n]；D1–D9 与作者逐列对照 Excel 共定） |
 | M9 | PDF（邮件底座在 M1） | ⬜（`milestones/M9.md` 骨架/预研已落，未冻结，进入时 JIT 补全） |
 | M10 | 报表 / 仪表盘（含 VAT 申报） | ⬜ |
 | M11 | 收尾 / GA 前体检 | ⬜ |
