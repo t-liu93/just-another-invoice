@@ -1,0 +1,385 @@
+"""PDF rendering service – M9 step 1.
+
+Public API
+----------
+- ``build_invoice_html``   – pure function: assemble Jinja2 context + render template.
+- ``html_to_pdf``          – thin WeasyPrint wrapper (lazily imported; D8).
+- ``render_invoice_pdf``   – DB-backed orchestrator: load invoice, build HTML, render PDF.
+
+Architecture decisions (from M9 D1–D8)
+---------------------------------------
+D1: WeasyPrint + Jinja2.  Font stack: Noto Sans / Noto Sans CJK SC (Docker runtime).
+D5: Immediate rendering on every request – no on-disk cache.
+D7: Custom url_fetcher blocks all non-data URIs (SSRF prevention).
+    Logo is inlined as a data: URI from binary_asset.content (never a URL).
+D8: build_*_html is a pure function with no system-library deps (default pytest).
+    html_to_pdf imports WeasyPrint lazily so unit tests run without pango/cairo.
+
+Red-line compliance
+-------------------
+1. Amounts come from DB snapshots – never recalculated.
+2. company_id always injected by caller; cross-company → 404.
+7. Jinja2 autoescape ON; url_fetcher blocks http/https/file.
+"""
+
+from __future__ import annotations
+
+import base64
+import logging
+import re
+import unicodedata
+import urllib.parse
+import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger("jai.pdf")
+
+# ---------------------------------------------------------------------------
+# Template environment (autoescape ON – red-line 7)
+# ---------------------------------------------------------------------------
+
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "pdf"
+_CSS_PATH = _TEMPLATES_DIR / "base.css"
+
+_jinja_env = Environment(
+    loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+    autoescape=select_autoescape(["html", "htm"]),
+    keep_trailing_newline=True,
+)
+
+# ---------------------------------------------------------------------------
+# i18n label table (backend-only; not reusing vue-i18n)
+# ---------------------------------------------------------------------------
+
+PDF_LABELS: dict[str, dict[str, str]] = {
+    "en": {
+        "invoice": "Invoice",
+        "invoice_number": "Invoice #",
+        "reference": "Reference",
+        "date": "Invoice Date",
+        "due_date": "Due Date",
+        "currency": "Currency",
+        "bill_to": "BILL TO",
+        "vat_id": "VAT ID",
+        "coc": "KvK",
+        "item": "Item",
+        "description": "Description",
+        "quantity": "Qty",
+        "unit": "Unit",
+        "unit_price": "Unit Price",
+        "amount": "Amount (excl. VAT)",
+        "vat": "VAT",
+        "subtotal": "Subtotal",
+        "discount": "Discount",
+        "vat_total": "VAT",
+        "total": "Total (incl. VAT)",
+        "amount_due": "Amount Due",
+        "notes": "Notes",
+        "payment_terms": "Payment Terms",
+        "bank_details": "Bank Details",
+        "terms": "Terms & Conditions",
+        "warranty": "Warranty",
+    },
+    "zh": {
+        "invoice": "发票",
+        "invoice_number": "发票号",
+        "reference": "参考号",
+        "date": "开票日期",
+        "due_date": "到期日期",
+        "currency": "币种",
+        "bill_to": "账单收件人",
+        "vat_id": "增值税号",
+        "coc": "工商号",
+        "item": "项目",
+        "description": "描述",
+        "quantity": "数量",
+        "unit": "单位",
+        "unit_price": "单价",
+        "amount": "金额（不含税）",
+        "vat": "增值税",
+        "subtotal": "小计",
+        "discount": "折扣",
+        "vat_total": "增值税合计",
+        "total": "合计（含税）",
+        "amount_due": "应付款",
+        "notes": "备注",
+        "payment_terms": "付款条款",
+        "bank_details": "银行信息",
+        "terms": "条款与条件",
+        "warranty": "质保说明",
+    },
+}
+
+# Fallback locale for unknown locale values
+_DEFAULT_LOCALE = "en"
+
+
+def _get_labels(locale: str) -> dict[str, str]:
+    """Return the label dict for *locale*, falling back to English."""
+    return PDF_LABELS.get(locale, PDF_LABELS[_DEFAULT_LOCALE])
+
+
+# ---------------------------------------------------------------------------
+# RFC 6266 / RFC 5987 compliant Content-Disposition builder
+# ---------------------------------------------------------------------------
+
+# Characters unsafe in the quoted-string token of Content-Disposition filename.
+# We strip C0/C1 control characters and DEL, and replace " and \ to prevent
+# header injection or quote-boundary breakage.
+_UNSAFE_CHARS_RE = re.compile(r'[\x00-\x1f\x7f-\x9f"\\]')
+
+
+def _ascii_fallback(name: str) -> str:
+    """Produce a latin-1-safe ASCII fallback filename.
+
+    1. NFKD-normalise so accented chars decompose.
+    2. Strip non-ASCII codepoints (covers CJK, emoji, accented residue …).
+    3. Replace remaining unsafe chars (control chars, ``"``, ``\\``) with ``_``.
+    4. Collapse to a non-empty string.
+    """
+    normalised = unicodedata.normalize("NFKD", name)
+    ascii_only = normalised.encode("ascii", errors="ignore").decode("ascii")
+    safe = _UNSAFE_CHARS_RE.sub("_", ascii_only)
+    return safe or "invoice"
+
+
+def build_content_disposition(filename: str) -> str:
+    """Return a RFC 6266 / RFC 5987 ``Content-Disposition`` header value.
+
+    Produces::
+
+        attachment; filename="<ascii-safe>"; filename*=UTF-8''<percent-encoded>
+
+    The ``filename=`` token is an ASCII/latin-1 safe fallback for older clients.
+    The ``filename*=`` token carries the full UTF-8 filename percent-encoded per
+    RFC 5987, and takes precedence in RFC 6266-compliant user-agents.
+
+    The returned string is always latin-1 encodable (safe for ASGI header bytes).
+    """
+    ascii_name = _ascii_fallback(filename)
+    # percent-encode the full original filename for filename* (RFC 5987 §3.2)
+    # urllib.parse.quote encodes everything except unreserved chars by default.
+    encoded_name = urllib.parse.quote(filename, safe="")
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+
+
+# ---------------------------------------------------------------------------
+# SSRF-safe url_fetcher (D7)
+# ---------------------------------------------------------------------------
+
+
+def _safe_url_fetcher(url: str) -> dict[str, Any]:
+    """WeasyPrint url_fetcher that only allows data: URIs.
+
+    Any attempt to fetch http/https/file/ftp or any other scheme raises
+    ValueError, preventing SSRF and local file reads.  Logo assets must be
+    inlined as data: URIs before calling html_to_pdf.
+    """
+    if url.startswith("data:"):
+        # Let WeasyPrint handle data URIs natively via its default fetcher.
+        from weasyprint.urls import default_url_fetcher
+
+        return default_url_fetcher(url)  # type: ignore[no-any-return]
+    raise ValueError(
+        f"URL scheme not allowed in PDF rendering (SSRF prevention): {url!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Core rendering functions
+# ---------------------------------------------------------------------------
+
+
+def build_invoice_html(
+    invoice: Any,
+    company: Any,
+    customer: Any,
+    locale: str,
+    logo_data_uri: str | None,
+) -> str:
+    """Render invoice HTML from ORM objects.
+
+    This is a **pure function** – no I/O, no DB, no WeasyPrint.
+    Amounts are read directly from snapshot fields; nothing is recalculated
+    (red-line 1).  Jinja2 autoescape is ON (red-line 7).
+
+    Parameters
+    ----------
+    invoice:
+        ``Invoice`` ORM instance (with ``.lines`` and ``.taxes`` preloaded).
+    company:
+        ``Company`` ORM instance.
+    customer:
+        ``Customer`` ORM instance (with ``.addresses`` preloaded).
+    locale:
+        ``"en"`` or ``"zh"``.  Unknown values fall back to ``"en"``.
+    logo_data_uri:
+        A ``data:<mime>;base64,...`` string, or ``None`` if no logo is set.
+        **Must never be a URL** (D7).
+
+    Returns
+    -------
+    str
+        Rendered HTML string (UTF-8).
+    """
+    from jai.models._enums import AddressType
+
+    labels = _get_labels(locale)
+
+    # -- Resolve billing address ----------------------------------------------
+    billing_address: Any = None
+    if hasattr(customer, "addresses"):
+        for addr in customer.addresses:
+            if addr.type == AddressType.BILLING:
+                billing_address = addr
+                break
+
+    # -- Read CSS inline so WeasyPrint receives a self-contained HTML ---------
+    css_text = _CSS_PATH.read_text(encoding="utf-8")
+
+    # -- Build template context -----------------------------------------------
+    context: dict[str, Any] = {
+        "locale": locale if locale in PDF_LABELS else _DEFAULT_LOCALE,
+        "labels": labels,
+        "invoice": invoice,
+        "company": company,
+        "customer": customer,
+        "billing_address": billing_address,
+        "logo_data_uri": logo_data_uri,
+        "css": css_text,
+    }
+
+    template = _jinja_env.get_template("invoice.html")
+    return template.render(**context)
+
+
+def html_to_pdf(html: str) -> bytes:
+    """Convert an HTML string to PDF bytes using WeasyPrint.
+
+    WeasyPrint is **lazily imported** inside this function so that default
+    pytest unit tests (which test ``build_invoice_html``) don't require
+    pango/cairo to be installed (D8).
+
+    The custom ``_safe_url_fetcher`` is wired in to block all non-data URIs
+    (D7 – SSRF prevention).
+
+    Parameters
+    ----------
+    html:
+        Fully rendered HTML string (e.g. from ``build_invoice_html``).
+
+    Returns
+    -------
+    bytes
+        Raw PDF bytes starting with ``%PDF-``.
+    """
+    # Lazy import – keeps the module importable without system PDF libs (D8).
+    from weasyprint import HTML
+
+    doc = HTML(string=html, url_fetcher=_safe_url_fetcher)
+    pdf_bytes: bytes = doc.write_pdf()
+    return pdf_bytes
+
+
+async def render_invoice_pdf(
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    company_id: uuid.UUID,
+    locale: str = "en",
+) -> tuple[bytes, str]:
+    """Load an invoice from the DB, render it as PDF, and return (bytes, filename).
+
+    Steps
+    -----
+    1. Load Invoice (with lines + taxes via selectinload) scoped to company_id.
+    2. Load Company and Customer.
+    3. Inline logo as data URI from binary_asset.content (never a URL).
+    4. Call build_invoice_html → html_to_pdf.
+    5. Return (pdf_bytes, "<invoice_number>.pdf").
+
+    Raises
+    ------
+    HTTPException(404)
+        If the invoice doesn't exist or belongs to a different company (red-line 2).
+    """
+    from fastapi import HTTPException, status
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from jai.models.binary_asset import BinaryAsset
+    from jai.models.company import Company
+    from jai.models.customer import Customer
+    from jai.models.invoice import Invoice
+
+    # -- Load invoice scoped to company (red-line 2) --------------------------
+    stmt = (
+        select(Invoice)
+        .where(Invoice.id == invoice_id, Invoice.company_id == company_id)
+        .options(
+            selectinload(Invoice.lines),
+            selectinload(Invoice.taxes),
+        )
+    )
+    result = await session.execute(stmt)
+    invoice = result.scalar_one_or_none()
+    if invoice is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found.",
+        )
+
+    # -- Load company ---------------------------------------------------------
+    company_stmt = select(Company).where(Company.id == company_id)
+    company_result = await session.execute(company_stmt)
+    company = company_result.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found.",
+        )
+
+    # -- Load customer (with addresses) ---------------------------------------
+    from sqlalchemy.orm import selectinload as _sil
+
+
+    customer_stmt = (
+        select(Customer)
+        .where(Customer.id == invoice.customer_id)
+        .options(_sil(Customer.addresses))
+    )
+    customer_result = await session.execute(customer_stmt)
+    customer = customer_result.scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found.",
+        )
+
+    # -- Inline logo as data: URI (D7 – never a URL) -------------------------
+    logo_data_uri: str | None = None
+    if company.logo_id is not None:
+        asset_stmt = select(BinaryAsset).where(BinaryAsset.id == company.logo_id)
+        asset_result = await session.execute(asset_stmt)
+        asset = asset_result.scalar_one_or_none()
+        if asset is not None:
+            b64 = base64.b64encode(asset.content).decode("ascii")
+            logo_data_uri = f"data:{asset.mime_type};base64,{b64}"
+
+    # -- Build HTML + render PDF ----------------------------------------------
+    html = build_invoice_html(
+        invoice=invoice,
+        company=company,
+        customer=customer,
+        locale=locale,
+        logo_data_uri=logo_data_uri,
+    )
+    pdf_bytes = html_to_pdf(html)
+
+    filename = f"{invoice.invoice_number}.pdf"
+    return pdf_bytes, filename

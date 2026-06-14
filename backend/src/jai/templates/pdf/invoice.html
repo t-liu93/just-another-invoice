@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+<meta charset="utf-8">
+<title>{{ labels.invoice }} {{ invoice.invoice_number }}</title>
+<style>
+{{ css }}
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<div class="doc-header">
+    <div class="company-block">
+        {% if logo_data_uri %}
+        <img class="company-logo" src="{{ logo_data_uri }}" alt="">
+        {% endif %}
+        <div class="company-name">{{ company.name }}</div>
+        <div class="company-meta">
+            {% if company.street %}
+            {{ company.street }}{% if company.house_number %} {{ company.house_number }}{% if company.house_number_addition %}{{ company.house_number_addition }}{% endif %}{% endif %}<br>
+            {% endif %}
+            {% if company.postal_code or company.city %}
+            {{ company.postal_code }}{% if company.postal_code and company.city %} {% endif %}{{ company.city }}<br>
+            {% endif %}
+            {% if company.country_code %}{{ company.country_code }}<br>{% endif %}
+            {% if company.vat_id %}{{ labels.vat_id }}: {{ company.vat_id }}<br>{% endif %}
+            {% if company.coc_number %}{{ labels.coc }}: {{ company.coc_number }}<br>{% endif %}
+            {% if company.email %}{{ company.email }}<br>{% endif %}
+            {% if company.phone %}{{ company.phone }}<br>{% endif %}
+            {% if company.website %}{{ company.website }}{% endif %}
+        </div>
+    </div>
+
+    <div class="doc-title-block">
+        <div class="doc-type-label">{{ labels.invoice|upper }}</div>
+        <table class="doc-meta-table">
+            <tbody>
+            <tr>
+                <td class="label">{{ labels.invoice_number }}</td>
+                <td class="value">{{ invoice.invoice_number }}</td>
+            </tr>
+            {% if invoice.reference_number %}
+            <tr>
+                <td class="label">{{ labels.reference }}</td>
+                <td class="value">{{ invoice.reference_number }}</td>
+            </tr>
+            {% endif %}
+            <tr>
+                <td class="label">{{ labels.date }}</td>
+                <td class="value">{{ invoice.invoice_date }}</td>
+            </tr>
+            {% if invoice.due_date %}
+            <tr>
+                <td class="label">{{ labels.due_date }}</td>
+                <td class="value">{{ invoice.due_date }}</td>
+            </tr>
+            {% endif %}
+            <tr>
+                <td class="label">{{ labels.currency }}</td>
+                <td class="value">{{ invoice.currency }}</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── Billing address ──────────────────────────────────────────────────── -->
+<div class="billing-section">
+    <div class="billing-label">{{ labels.bill_to }}</div>
+    <div class="billing-name">{{ customer.name }}</div>
+    {% if billing_address %}
+    <div class="billing-address">
+        {% if billing_address.street %}
+        {{ billing_address.street }}{% if billing_address.house_number %} {{ billing_address.house_number }}{% if billing_address.house_number_addition %}{{ billing_address.house_number_addition }}{% endif %}{% endif %}<br>
+        {% endif %}
+        {% if billing_address.postal_code or billing_address.city %}
+        {{ billing_address.postal_code }}{% if billing_address.postal_code and billing_address.city %} {% endif %}{{ billing_address.city }}<br>
+        {% endif %}
+        {% if billing_address.country_code %}{{ billing_address.country_code }}{% endif %}
+    </div>
+    {% endif %}
+    {% if customer.vat_id %}
+    <div class="billing-address">{{ labels.vat_id }}: {{ customer.vat_id }}</div>
+    {% endif %}
+</div>
+
+<hr class="divider">
+
+<!-- ── Line items ───────────────────────────────────────────────────────── -->
+<table class="items-table">
+    <colgroup>
+        <col class="col-name">
+        <col class="col-desc">
+        <col class="col-qty">
+        <col class="col-unit">
+        <col class="col-uprice">
+        <col class="col-subtotal">
+        <col class="col-vat">
+    </colgroup>
+    <thead>
+        <tr>
+            <th>{{ labels.item }}</th>
+            <th>{{ labels.description }}</th>
+            <th class="right">{{ labels.quantity }}</th>
+            <th>{{ labels.unit }}</th>
+            <th class="right">{{ labels.unit_price }}</th>
+            <th class="right">{{ labels.amount }}</th>
+            <th class="right">{{ labels.vat }}</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for line in invoice.lines %}
+    <tr>
+        <td>
+            <div class="item-name">{{ line.name }}</div>
+        </td>
+        <td>
+            {% if line.description %}
+            <div class="item-desc">{{ line.description }}</div>
+            {% endif %}
+        </td>
+        <td class="right">{{ line.quantity }}</td>
+        <td>{{ line.unit_name or "" }}</td>
+        <td class="right">{{ line.unit_price }}</td>
+        <td class="right">{{ line.subtotal_excl_vat }}</td>
+        <td class="right">{% if line.vat_rate_label %}{{ line.vat_rate_label }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<!-- ── Totals ───────────────────────────────────────────────────────────── -->
+<div class="totals-wrapper">
+    <table class="totals-table">
+        <tbody>
+        <tr>
+            <td class="label">{{ labels.subtotal }}</td>
+            <td class="amount">{{ invoice.subtotal_excl_vat }}</td>
+        </tr>
+        {% if invoice.document_discount_amount %}
+        <tr>
+            <td class="label">{{ labels.discount }}</td>
+            <td class="amount">-{{ invoice.document_discount_amount }}</td>
+        </tr>
+        {% endif %}
+        <!-- Tax rows -->
+        {% for tax in invoice.taxes %}
+        <tr class="tax-row">
+            <td class="label">{{ labels.vat }} {{ tax.vat_rate_label }} ({{ tax.vat_rate_percent }}%)</td>
+            <td class="amount">{{ tax.tax_amount }}</td>
+        </tr>
+        {% endfor %}
+        {% if not invoice.taxes %}
+        <!-- LINE mode: aggregate VAT from lines -->
+        {% set vat_groups = {} %}
+        {% for line in invoice.lines %}
+            {% if line.vat_rate_label %}
+            {# collect unique labels - template just shows per-line totals #}
+            {% endif %}
+        {% endfor %}
+        <tr class="tax-row">
+            <td class="label">{{ labels.vat_total }}</td>
+            <td class="amount">{{ invoice.vat_total }}</td>
+        </tr>
+        {% endif %}
+        <tr class="total-row">
+            <td class="label">{{ labels.total }}</td>
+            <td class="amount">{{ invoice.total_incl_vat }}</td>
+        </tr>
+        {% if invoice.due_amount != invoice.total_incl_vat %}
+        <tr class="due-row">
+            <td class="label">{{ labels.amount_due }}</td>
+            <td class="amount">{{ invoice.due_amount }}</td>
+        </tr>
+        {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- ── Content blocks ───────────────────────────────────────────────────── -->
+<div class="content-blocks">
+{% if invoice.notes %}
+<div class="content-block">
+    <div class="content-block-title">{{ labels.notes }}</div>
+    <div class="content-block-body">{{ invoice.notes }}</div>
+</div>
+{% endif %}
+{% if invoice.payment_terms_text %}
+<div class="content-block">
+    <div class="content-block-title">{{ labels.payment_terms }}</div>
+    <div class="content-block-body">{{ invoice.payment_terms_text }}</div>
+</div>
+{% endif %}
+{% if invoice.bank_text %}
+<div class="content-block">
+    <div class="content-block-title">{{ labels.bank_details }}</div>
+    <div class="content-block-body">{{ invoice.bank_text }}</div>
+</div>
+{% endif %}
+{% if invoice.terms_text %}
+<div class="content-block">
+    <div class="content-block-title">{{ labels.terms }}</div>
+    <div class="content-block-body">{{ invoice.terms_text }}</div>
+</div>
+{% endif %}
+{% if invoice.warranty_text %}
+<div class="content-block">
+    <div class="content-block-title">{{ labels.warranty }}</div>
+    <div class="content-block-body">{{ invoice.warranty_text }}</div>
+</div>
+{% endif %}
+</div>
+
+<!-- ── Footer ───────────────────────────────────────────────────────────── -->
+<div class="doc-footer">
+    {{ company.name }}
+    {% if company.vat_id %} · {{ labels.vat_id }}: {{ company.vat_id }}{% endif %}
+    {% if company.coc_number %} · {{ labels.coc }}: {{ company.coc_number }}{% endif %}
+    {% if company.email %} · {{ company.email }}{% endif %}
+</div>
+
+</body>
+</html>

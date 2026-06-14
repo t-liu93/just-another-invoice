@@ -28,6 +28,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # DATABASE_URL is NOT hardcoded — it is assembled at runtime from POSTGRES_*
 # env vars (see jai.config.Settings).
 FROM python:3.12-slim-bookworm AS runtime
+# WeasyPrint system libraries (D1 – M9 PDF rendering) + Noto fonts for
+# full Unicode/CJK coverage.  Cleaned in the same layer to keep image size down.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        libffi8 \
+        libcairo2 \
+        shared-mime-info \
+        fonts-noto-core \
+        fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
