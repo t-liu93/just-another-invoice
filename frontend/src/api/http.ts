@@ -146,10 +146,74 @@ export function uploadFile<T>(
  * - The filename is extracted from the `Content-Disposition` response header
  *   when present; otherwise falls back to `fallbackFilename`.
  */
+/**
+ * Extract the filename from a ``Content-Disposition`` header, e.g.:
+ *   attachment; filename="INV-2025-001.pdf"
+ *   attachment; filename*=UTF-8''INV-2025-001.pdf
+ * Falls back to ``fallbackFilename`` when no filename is present.
+ */
+function filenameFromContentDisposition(
+  cd: string | null,
+  fallbackFilename: string,
+): string {
+  if (cd) {
+    const utf8Match = cd.match(/filename\*=UTF-8''([^;]+)/i)
+    if (utf8Match) {
+      return decodeURIComponent(utf8Match[1])
+    }
+    const plainMatch = cd.match(/filename="?([^";]+)"?/i)
+    if (plainMatch) {
+      return plainMatch[1].trim()
+    }
+  }
+  return fallbackFilename
+}
+
+/**
+ * Trigger a browser save dialog for an already-fetched blob.
+ */
+export function saveBlob(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+/**
+ * Fetch a binary resource (e.g. PDF) and trigger a browser download.
+ *
+ * - Uses `credentials: 'include'` so the session cookie is sent.
+ * - On non-2xx responses, reads the body as JSON/text and throws `ApiError`.
+ * - The filename is extracted from the `Content-Disposition` response header
+ *   when present; otherwise falls back to `fallbackFilename`.
+ */
 export async function downloadBlob(
   url: string,
   fallbackFilename: string = 'download',
 ): Promise<void> {
+  const { blob, filename } = await fetchBlob(url, fallbackFilename)
+  saveBlob(blob, filename)
+}
+
+/**
+ * Fetch a binary resource (e.g. PDF) and return its blob plus the filename
+ * advertised by the backend in `Content-Disposition`.
+ *
+ * Unlike `downloadBlob`, this does NOT trigger a save dialog — the caller
+ * decides what to do (e.g. render it inline via `URL.createObjectURL`).  The
+ * caller owns the returned blob's lifecycle (and any object URL it creates).
+ */
+export async function fetchBlob(
+  url: string,
+  fallbackFilename: string = 'download',
+): Promise<{ blob: Blob; filename: string }> {
   const res = await fetch(url, { credentials: 'include' })
 
   if (!res.ok) {
@@ -163,33 +227,9 @@ export async function downloadBlob(
   }
 
   const blob = await res.blob()
-
-  // Extract filename from Content-Disposition header, e.g.:
-  //   attachment; filename="INV-2025-001.pdf"
-  //   attachment; filename*=UTF-8''INV-2025-001.pdf
-  let filename = fallbackFilename
-  const cd = res.headers.get('Content-Disposition')
-  if (cd) {
-    const utf8Match = cd.match(/filename\*=UTF-8''([^;]+)/i)
-    if (utf8Match) {
-      filename = decodeURIComponent(utf8Match[1])
-    } else {
-      const plainMatch = cd.match(/filename="?([^";]+)"?/i)
-      if (plainMatch) {
-        filename = plainMatch[1].trim()
-      }
-    }
-  }
-
-  const objectUrl = URL.createObjectURL(blob)
-  try {
-    const a = document.createElement('a')
-    a.href = objectUrl
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  } finally {
-    URL.revokeObjectURL(objectUrl)
-  }
+  const filename = filenameFromContentDisposition(
+    res.headers.get('Content-Disposition'),
+    fallbackFilename,
+  )
+  return { blob, filename }
 }

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>{{ labels.quote }} {{ quote.quote_number }}</title>
 <style>
-{{ css }}
+{{ css | safe }}
 </style>
 </head>
 <body>
@@ -95,7 +95,6 @@
 <table class="items-table">
     <colgroup>
         <col class="col-name">
-        <col class="col-desc">
         <col class="col-qty">
         <col class="col-unit">
         <col class="col-uprice">
@@ -105,7 +104,6 @@
     <thead>
         <tr>
             <th>{{ labels.item }}</th>
-            <th>{{ labels.description }}</th>
             <th class="right">{{ labels.quantity }}</th>
             <th>{{ labels.unit }}</th>
             <th class="right">{{ labels.unit_price }}</th>
@@ -118,17 +116,13 @@
     <tr>
         <td>
             <div class="item-name">{{ line.name }}</div>
+            {% if line.description %}<div class="item-desc">{{ line.description }}</div>{% endif %}
         </td>
-        <td>
-            {% if line.description %}
-            <div class="item-desc">{{ line.description }}</div>
-            {% endif %}
-        </td>
-        <td class="right">{{ line.quantity }}</td>
+        <td class="right">{{ line.quantity | money2 }}</td>
         <td>{{ line.unit_name or "" }}</td>
-        <td class="right">{{ line.unit_price }}</td>
-        <td class="right">{{ line.subtotal_excl_vat }}</td>
-        <td class="right">{% if line.vat_rate_label %}{{ line.vat_rate_label }}{% endif %}</td>
+        <td class="right">{{ line.unit_price | money2 }}</td>
+        <td class="right">{{ line.subtotal_excl_vat | money2 }}</td>
+        <td class="right nowrap">{% if line.vat_rate_label %}{{ line.vat_rate_label }}{% endif %}</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -140,31 +134,31 @@
         <tbody>
         <tr>
             <td class="label">{{ labels.subtotal }}</td>
-            <td class="amount">{{ quote.subtotal_excl_vat }}</td>
+            <td class="amount">{{ quote.subtotal_excl_vat | money2 }}</td>
         </tr>
         {% if quote.document_discount_amount %}
         <tr>
             <td class="label">{{ labels.discount }}</td>
-            <td class="amount">-{{ quote.document_discount_amount }}</td>
+            <td class="amount">-{{ quote.document_discount_amount | money2 }}</td>
         </tr>
         {% endif %}
         <!-- Tax rows -->
         {% for tax in quote.taxes %}
         <tr class="tax-row">
-            <td class="label">{{ labels.vat }} {{ tax.vat_rate_label }} ({{ tax.vat_rate_percent }}%)</td>
-            <td class="amount">{{ tax.tax_amount }}</td>
+            <td class="label">{{ labels.vat }} {{ tax.vat_rate_label }} ({{ tax.vat_rate_percent | pct }}%)</td>
+            <td class="amount">{{ tax.tax_amount | money2 }}</td>
         </tr>
         {% endfor %}
         {% if not quote.taxes %}
         <!-- LINE mode: show aggregate VAT from snapshot -->
         <tr class="tax-row">
             <td class="label">{{ labels.vat_total }}</td>
-            <td class="amount">{{ quote.vat_total }}</td>
+            <td class="amount">{{ quote.vat_total | money2 }}</td>
         </tr>
         {% endif %}
         <tr class="total-row">
             <td class="label">{{ labels.total }}</td>
-            <td class="amount">{{ quote.total_incl_vat }}</td>
+            <td class="amount">{{ quote.total_incl_vat | money2 }}</td>
         </tr>
         </tbody>
     </table>

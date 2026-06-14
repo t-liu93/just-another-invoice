@@ -940,6 +940,7 @@
   },
   "common": {
     "cancel": "取消",
+    "close": "关闭",
     "discountNone": "无折扣",
     "discountPercentage": "百分比 (%)",
     "discountFixed": "固定金额"
@@ -1071,7 +1072,9 @@
     "downloadFailed": "下载 PDF 失败。",
     "localeDefault": "跟随默认语言",
     "localeEn": "英文",
-    "localeZh": "中文"
+    "localeZh": "中文",
+    "preview": "预览",
+    "previewFailed": "加载预览失败。"
   },
   "sendDialog": {
     "title": "发送邮件",

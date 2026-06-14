@@ -134,7 +134,7 @@ def _make_customer(
 
 
 def test_build_payment_receipt_html_amounts_match_snapshots() -> None:
-    """Amount values in rendered HTML must equal payment and invoice snapshot fields.
+    """Amount values in rendered HTML must equal payment and invoice snapshot fields (2 dp).
 
     - payment.amount (this payment amount) must appear.
     - invoice.total_incl_vat (invoice total snapshot) must appear.
@@ -151,18 +151,17 @@ def test_build_payment_receipt_html_amounts_match_snapshots() -> None:
 
     html = build_payment_receipt_html(payment, invoice, company, customer, "en", None)
 
-    # payment.amount snapshot
-    assert "60.500" in html, "payment.amount not in HTML"
-    # invoice.total_incl_vat snapshot
-    assert "121.000" in html, "invoice.total_incl_vat not in HTML"
-    # invoice.due_amount snapshot
-    assert "60.500" in html, "invoice.due_amount not in HTML"
-    # paid_total = 121.000 - 60.500 = 60.500 (must also appear)
-    assert "60.500" in html, "paid_total not in HTML"
+    # money2 filter formats to 2 dp
+    # payment.amount 60.500 → "60.50"
+    assert "60.50" in html, "payment.amount (2dp) not in HTML"
+    # invoice.total_incl_vat 121.000 → "121.00"
+    assert "121.00" in html, "invoice.total_incl_vat (2dp) not in HTML"
+    # paid_total = 121.000 - 60.500 = 60.500 → "60.50"
+    assert "60.50" in html, "paid_total (2dp) not in HTML"
 
 
 def test_build_payment_receipt_html_paid_total_is_total_minus_due() -> None:
-    """paid_total must equal total_incl_vat - due_amount from invoice snapshots."""
+    """paid_total must equal total_incl_vat - due_amount from invoice snapshots (2 dp display)."""
     payment = _make_payment(amount="75.000")
     invoice = _make_invoice(
         total_incl_vat="121.000",
@@ -173,12 +172,12 @@ def test_build_payment_receipt_html_paid_total_is_total_minus_due() -> None:
 
     html = build_payment_receipt_html(payment, invoice, company, customer, "en", None)
 
-    # paid_total = 121.000 - 46.000 = 75.000
-    assert "75.000" in html, "paid_total (= total - due = 75.000) not in HTML"
-    # invoice total also present
-    assert "121.000" in html, "invoice.total_incl_vat not in HTML"
-    # due amount also present
-    assert "46.000" in html, "invoice.due_amount not in HTML"
+    # paid_total = 121.000 - 46.000 = 75.000 → "75.00"
+    assert "75.00" in html, "paid_total (= total - due = 75.00) not in HTML"
+    # invoice total: 121.000 → "121.00"
+    assert "121.00" in html, "invoice.total_incl_vat (2dp) not in HTML"
+    # due amount: 46.000 → "46.00"
+    assert "46.00" in html, "invoice.due_amount (2dp) not in HTML"
 
 
 def test_build_payment_receipt_html_fully_paid_zero_due() -> None:
@@ -194,9 +193,9 @@ def test_build_payment_receipt_html_fully_paid_zero_due() -> None:
 
     html = build_payment_receipt_html(payment, invoice, company, customer, "en", None)
 
-    # paid_total = 121.000 - 0 = 121.000
-    assert "121.000" in html, "full payment amount not in HTML"
-    assert "0.000" in html, "due_amount (zero) not in HTML"
+    # paid_total = 121.000 - 0 = 121.000 → "121.00"
+    assert "121.00" in html, "full payment amount (2dp) not in HTML"
+    assert "0.00" in html, "due_amount (zero, 2dp) not in HTML"
 
 
 def test_build_payment_receipt_html_invoice_number_shown() -> None:
@@ -472,3 +471,44 @@ def test_build_payment_receipt_html_note_shown() -> None:
 
     html = build_payment_receipt_html(payment, invoice, company, customer, "en", None)
     assert "Advance payment for Q3 services" in html
+
+
+# ---------------------------------------------------------------------------
+# Test: CSS not escaped (task A – css|safe fix applies to receipt.html too)
+# ---------------------------------------------------------------------------
+
+
+def test_build_payment_receipt_html_css_not_escaped() -> None:
+    """CSS injected via css|safe must not be HTML-escaped in receipt template."""
+    payment = _make_payment()
+    invoice = _make_invoice()
+    company = _make_company()
+    customer = _make_customer()
+
+    html = build_payment_receipt_html(payment, invoice, company, customer, "en", None)
+
+    assert 'font-family: "Noto Sans"' in html, (
+        "font-family with literal quotes not found – CSS may have been HTML-escaped"
+    )
+    assert "&#34;" not in html, "HTML entity &#34; found – CSS was incorrectly escaped"
+
+
+# ---------------------------------------------------------------------------
+# Test: amounts displayed as 2 decimal places (task C)
+# ---------------------------------------------------------------------------
+
+
+def test_build_payment_receipt_html_amounts_two_decimal() -> None:
+    """Receipt amounts must display as 2 dp (money2 filter)."""
+    payment = _make_payment(amount="60.500")
+    invoice = _make_invoice(total_incl_vat="121.000", due_amount="60.500")
+    company = _make_company()
+    customer = _make_customer()
+
+    html = build_payment_receipt_html(payment, invoice, company, customer, "en", None)
+
+    assert "60.50" in html
+    assert "121.00" in html
+    # Ensure 3-decimal forms are not present in the amounts section
+    assert "60.500" not in html
+    assert "121.000" not in html

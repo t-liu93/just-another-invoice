@@ -58,6 +58,7 @@ declare module 'vue' {
     NTabs: typeof import('naive-ui')['NTabs']
     NTag: typeof import('naive-ui')['NTag']
     NText: typeof import('naive-ui')['NText']
+    PdfPreviewDialog: typeof import('./components/PdfPreviewDialog.vue')['default']
     PreferenceSettings: typeof import('./components/settings/PreferenceSettings.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

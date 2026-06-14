@@ -184,7 +184,7 @@ def _make_customer(
 
 
 def test_build_quote_html_amounts_match_snapshots() -> None:
-    """Amount values in rendered HTML must equal the quote snapshot fields."""
+    """Amount values in rendered HTML must equal the quote snapshot fields (2 dp display)."""
     quote = _make_quote(
         subtotal_excl_vat="850.000",
         vat_total="178.500",
@@ -196,9 +196,10 @@ def test_build_quote_html_amounts_match_snapshots() -> None:
 
     html = build_quote_html(quote, company, customer, "en", None)
 
-    assert "850.000" in html, "subtotal_excl_vat not in HTML"
-    assert "178.500" in html, "vat tax_amount not in HTML"
-    assert "1028.500" in html, "total_incl_vat not in HTML"
+    # money2 filter formats to 2 dp
+    assert "850.00" in html, "subtotal_excl_vat (2dp) not in HTML"
+    assert "178.50" in html, "vat tax_amount (2dp) not in HTML"
+    assert "1028.50" in html, "total_incl_vat (2dp) not in HTML"
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +410,8 @@ def test_build_quote_html_nonzero_discount_shown() -> None:
 
     html = build_quote_html(quote, company, customer, "en", None)
     assert "Discount" in html
-    assert "15.000" in html
+    # money2 filter formats 15.000 → "15.00"
+    assert "15.00" in html
 
 
 # ---------------------------------------------------------------------------
@@ -429,4 +431,122 @@ def test_pdf_labels_en_and_zh_have_same_keys() -> None:
     """EN and ZH label dictionaries must have the same set of keys (including quote keys)."""
     assert set(PDF_LABELS["en"].keys()) == set(PDF_LABELS["zh"].keys()), (
         "EN and ZH label tables have different keys"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test: CSS not escaped (task A – css|safe fix applies to quote.html too)
+# ---------------------------------------------------------------------------
+
+
+def test_build_quote_html_css_not_escaped() -> None:
+    """CSS injected via css|safe must not be HTML-escaped in quote template."""
+    quote = _make_quote()
+    company = _make_company()
+    customer = _make_customer()
+
+    html = build_quote_html(quote, company, customer, "en", None)
+
+    assert 'font-family: "Noto Sans"' in html, (
+        "font-family with literal quotes not found – CSS may have been HTML-escaped"
+    )
+    assert "&#34;" not in html, "HTML entity &#34; found – CSS was incorrectly escaped"
+
+
+# ---------------------------------------------------------------------------
+# Test: line amounts displayed as 2 decimal places (task C)
+# ---------------------------------------------------------------------------
+
+
+def test_build_quote_html_line_amounts_two_decimal() -> None:
+    """Quote line quantity / unit_price / subtotal_excl_vat must display as 2 dp."""
+    line = _make_quote_line(
+        quantity="2.000",
+        unit_price="50.000",
+        subtotal_excl_vat="100.000",
+    )
+    quote = _make_quote(lines=[line], subtotal_excl_vat="100.000", total_incl_vat="121.000")
+    company = _make_company()
+    customer = _make_customer()
+
+    html = build_quote_html(quote, company, customer, "en", None)
+
+    assert "2.00" in html
+    assert "50.00" in html
+    assert "100.00" in html
+    assert "121.00" in html
+
+
+# ---------------------------------------------------------------------------
+# Test: table structure matches invoice layout (no standalone Description column)
+# ---------------------------------------------------------------------------
+
+
+def test_build_quote_html_no_description_column() -> None:
+    """Quote table must NOT have a standalone Description column header."""
+    quote = _make_quote()
+    company = _make_company()
+    customer = _make_customer()
+
+    html = build_quote_html(quote, company, customer, "en", None)
+
+    # The Description header column must be gone; description is inside the Item cell
+    assert "<th>Description</th>" not in html
+    assert "col-desc" not in html
+
+
+def test_build_quote_html_item_desc_inside_item_cell() -> None:
+    """item-desc div must appear inside the same cell as item-name (not a separate td)."""
+    line = _make_quote_line(name="Widget A", description="Multi-line\ndescription here")
+    quote = _make_quote(lines=[line])
+    company = _make_company()
+    customer = _make_customer()
+
+    html = build_quote_html(quote, company, customer, "en", None)
+
+    # Search only inside <body> to skip CSS block which also mentions "item-name"
+    body_start = html.find("<body>")
+    assert body_start != -1, "<body> tag not found"
+    body = html[body_start:]
+
+    # item-name must appear before item-desc in body
+    name_pos = body.find("item-name")
+    desc_pos = body.find("item-desc")
+    assert name_pos != -1, "item-name class not found in HTML body"
+    assert desc_pos != -1, "item-desc class not found in HTML body"
+    assert name_pos < desc_pos, "item-name must appear before item-desc"
+
+    # There must be no </td> between item-name and item-desc (same cell)
+    between = body.find("</td>", name_pos, desc_pos)
+    assert between == -1, (
+        "Found </td> between item-name and item-desc – they are in separate cells"
+    )
+
+
+def test_build_quote_html_vat_cell_has_nowrap() -> None:
+    """VAT label cell in the items table must carry the 'nowrap' CSS class."""
+    line = _make_quote_line(vat_rate_label="Standard NL21")
+    quote = _make_quote(lines=[line])
+    company = _make_company()
+    customer = _make_customer()
+
+    html = build_quote_html(quote, company, customer, "en", None)
+
+    assert "nowrap" in html, "'nowrap' class not found in rendered quote HTML"
+    assert "Standard NL21" in html
+
+
+def test_build_quote_html_six_columns() -> None:
+    """Quote items table must have exactly 6 columns: Item/Qty/Unit/UnitPrice/Amount/VAT."""
+    quote = _make_quote()
+    company = _make_company()
+    customer = _make_customer()
+
+    html = build_quote_html(quote, company, customer, "en", None)
+
+    # Count <col ...> tags inside the items-table colgroup
+    import re
+    col_tags = re.findall(r'<col\s+class="col-[^"]*">', html)
+    assert len(col_tags) == 6, (
+        f"Expected 6 <col> tags in items-table, found {len(col_tags)}: {col_tags}"
     )

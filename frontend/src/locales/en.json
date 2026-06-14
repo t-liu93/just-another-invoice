@@ -940,6 +940,7 @@
   },
   "common": {
     "cancel": "Cancel",
+    "close": "Close",
     "discountNone": "None",
     "discountPercentage": "Percentage (%)",
     "discountFixed": "Fixed amount"
@@ -1071,7 +1072,9 @@
     "downloadFailed": "Failed to download PDF.",
     "localeDefault": "Follow default language",
     "localeEn": "English",
-    "localeZh": "Chinese"
+    "localeZh": "Chinese",
+    "preview": "Preview",
+    "previewFailed": "Failed to load preview."
   },
   "sendDialog": {
     "title": "Send Email",

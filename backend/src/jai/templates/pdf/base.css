@@ -148,14 +148,14 @@ body {
     table-layout: fixed;
 }
 
-/* Column widths */
-.items-table .col-name      { width: 35%; }
-.items-table .col-desc      { width: 18%; }
+/* Column widths – invoice and quote share the same 6-column layout */
+/* Description is embedded inside the Item cell (item-name + item-desc) */
+.items-table .col-name      { width: 43%; }
 .items-table .col-qty       { width: 9%; }
 .items-table .col-unit      { width: 7%; }
 .items-table .col-uprice    { width: 13%; }
 .items-table .col-subtotal  { width: 13%; }
-.items-table .col-vat       { width: 5%; }
+.items-table .col-vat       { width: 15%; }
 
 thead {
     display: table-header-group;
@@ -193,8 +193,14 @@ thead {
     font-size: 8pt;
     color: #555;
     margin-top: 0.5mm;
+    white-space: pre-line;
     word-wrap: break-word;
     overflow-wrap: break-word;
+}
+
+/* VAT label cell – prevent wrapping for labels like "Standard NL21" */
+.items-table tbody td.nowrap {
+    white-space: nowrap;
 }
 
 .items-table tbody td.right {

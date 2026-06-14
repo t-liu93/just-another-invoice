@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>{{ labels.receipt }} {{ invoice.invoice_number }}</title>
 <style>
-{{ css }}
+{{ css | safe }}
 /* Receipt-specific overrides */
 .receipt-details-table {
     width: 100%;
@@ -162,19 +162,19 @@
         <tbody>
         <tr>
             <td class="label">{{ labels.total }}</td>
-            <td class="amount">{{ invoice.total_incl_vat }}</td>
+            <td class="amount">{{ invoice.total_incl_vat | money2 }}</td>
         </tr>
         <tr class="highlight-row">
             <td class="label">{{ labels.amount_paid }}</td>
-            <td class="amount">{{ payment.amount }}</td>
+            <td class="amount">{{ payment.amount | money2 }}</td>
         </tr>
         <tr>
             <td class="label">{{ labels.amount_paid_total }}</td>
-            <td class="amount">{{ paid_total }}</td>
+            <td class="amount">{{ paid_total | money2 }}</td>
         </tr>
         <tr>
             <td class="label">{{ labels.receipt_amount_due }}</td>
-            <td class="amount">{{ invoice.due_amount }}</td>
+            <td class="amount">{{ invoice.due_amount | money2 }}</td>
         </tr>
         </tbody>
     </table>

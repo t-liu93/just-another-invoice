@@ -9,11 +9,12 @@ import {
   NDivider, NInputNumber, NSelect, NSwitch, NTag, NDatePicker,
   NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown,
 } from 'naive-ui'
-import { AddOutline, TrashOutline, DocumentTextOutline, DownloadOutline, MailOutline } from '@vicons/ionicons5'
+import { AddOutline, TrashOutline, DocumentTextOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
 import InvoicePaymentPanel from '../../components/InvoicePaymentPanel.vue'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
+import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import EmailLogPanel from '../../components/EmailLogPanel.vue'
 import { useInvoicesStore } from '../../stores/invoices'
 import type { InvoicePaymentsResponse } from '../../stores/payments'
@@ -505,6 +506,29 @@ function handlePdfLocaleSelect(key: string) {
   }
 }
 
+// ---- PDF preview (in-app modal) ----
+const previewShow = ref(false)
+const previewSrc = ref<string | null>(null)
+const previewFallback = ref('invoice.pdf')
+
+function openPreview(locale?: 'en' | 'zh') {
+  if (!existingInvoice.value) return
+  const id = existingInvoice.value.id
+  previewSrc.value = locale
+    ? `/api/v1/invoices/${id}/pdf?locale=${locale}`
+    : `/api/v1/invoices/${id}/pdf`
+  previewFallback.value = `${existingInvoice.value.invoice_number}.pdf`
+  previewShow.value = true
+}
+
+function handlePreviewLocaleSelect(key: string) {
+  if (key === 'default') {
+    openPreview()
+  } else {
+    openPreview(key as 'en' | 'zh')
+  }
+}
+
 // ---- Send dialog ----
 const sendDialogShow = ref(false)
 
@@ -547,6 +571,18 @@ function handleSent(_log: EmailLogRead) {
                 <n-text depth="3" style="font-size: 13px">
                   {{ t('invoices.due') }}: {{ existingInvoice.currency }} {{ fmtMoney(existingInvoice.due_amount) }}
                 </n-text>
+
+                <!-- PDF preview dropdown (default / en / zh) -->
+                <n-dropdown
+                  :options="pdfLocaleOptions"
+                  trigger="click"
+                  @select="handlePreviewLocaleSelect"
+                >
+                  <n-button size="small">
+                    <template #icon><n-icon><EyeOutline /></n-icon></template>
+                    {{ t('pdf.preview') }}
+                  </n-button>
+                </n-dropdown>
 
                 <!-- PDF download dropdown (default / en / zh) -->
                 <n-dropdown
@@ -1035,6 +1071,13 @@ function handleSent(_log: EmailLogRead) {
       :customer-email="selectedCustomer?.email ?? null"
       :customer-locale="selectedCustomer?.locale ?? null"
       @sent="handleSent"
+    />
+
+    <!-- PDF preview dialog -->
+    <PdfPreviewDialog
+      v-model:show="previewShow"
+      :src="previewSrc"
+      :fallback-filename="previewFallback"
     />
   </div>
 </template>

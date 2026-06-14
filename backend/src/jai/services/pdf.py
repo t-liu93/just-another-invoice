@@ -34,6 +34,7 @@ import re
 import unicodedata
 import urllib.parse
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -56,6 +57,46 @@ _jinja_env = Environment(
     autoescape=select_autoescape(["html", "htm"]),
     keep_trailing_newline=True,
 )
+
+# ---------------------------------------------------------------------------
+# Jinja2 display filters (display only – red-line 1: no recalculation)
+# ---------------------------------------------------------------------------
+
+
+def _filter_money2(value: Any) -> str:
+    """Format a monetary value to exactly 2 decimal places (display only).
+
+    Uses ROUND_HALF_UP – same rounding rule as the pricing pipeline.
+    Safe for None / empty: returns "0.00".
+    Never recalculates; purely formats the snapshot value for display.
+    """
+    if value is None:
+        return "0.00"
+    try:
+        d = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return str(d)
+    except Exception:
+        return "0.00"
+
+
+def _filter_pct(value: Any) -> str:
+    """Format a VAT percentage, stripping insignificant trailing zeros.
+
+    Examples: 21.000 → '21', 9.000 → '9', 21.500 → '21.5', None → '0'.
+    """
+    if value is None:
+        return "0"
+    try:
+        d = Decimal(str(value)).normalize()
+        # normalize() can produce scientific notation for very small/large numbers;
+        # convert back to a plain string representation.
+        return format(d, "f")
+    except Exception:
+        return str(value)
+
+
+_jinja_env.filters["money2"] = _filter_money2
+_jinja_env.filters["pct"] = _filter_pct
 
 # ---------------------------------------------------------------------------
 # i18n label table (backend-only; not reusing vue-i18n)

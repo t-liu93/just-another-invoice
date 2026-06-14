@@ -23,10 +23,11 @@ import {
   NInputNumber, NSelect, NInput, NDatePicker, NAlert, NSpin,
   NDivider, NIcon, NEmpty, NDropdown,
 } from 'naive-ui'
-import { AddOutline, CreateOutline, TrashOutline, DownloadOutline } from '@vicons/ionicons5'
+import { AddOutline, CreateOutline, TrashOutline, DownloadOutline, EyeOutline } from '@vicons/ionicons5'
 import { usePaymentsStore } from '../stores/payments'
 import type { InvoicePaymentsResponse, PaymentRead } from '../stores/payments'
 import { get, downloadBlob } from '../api/http'
+import PdfPreviewDialog from './PdfPreviewDialog.vue'
 import type { components } from '../api/schema'
 import { localDateStr } from '../utils/date'
 
@@ -104,6 +105,28 @@ function handleReceiptLocaleSelect(key: string) {
     handleDownloadReceipt(id)
   } else {
     handleDownloadReceipt(id, locale as 'en' | 'zh')
+  }
+}
+
+// ---- Receipt PDF preview (in-app modal) ----
+const receiptPreviewShow = ref(false)
+const receiptPreviewSrc = ref<string | null>(null)
+const receiptPreviewFallback = ref('receipt.pdf')
+
+function openReceiptPreview(paymentId: string, locale?: 'en' | 'zh') {
+  receiptPreviewSrc.value = locale
+    ? `/api/v1/payments/${paymentId}/receipt-pdf?locale=${locale}`
+    : `/api/v1/payments/${paymentId}/receipt-pdf`
+  receiptPreviewFallback.value = `receipt-${paymentId}.pdf`
+  receiptPreviewShow.value = true
+}
+
+function handleReceiptPreviewLocaleSelect(key: string) {
+  const [id, locale] = key.split(':')
+  if (locale === 'default') {
+    openReceiptPreview(id)
+  } else {
+    openReceiptPreview(id, locale as 'en' | 'zh')
   }
 }
 
@@ -353,6 +376,21 @@ function handleDelete(payment: PaymentRead) {
                 </n-text>
               </div>
               <n-space size="small" :wrap-item="false" class="payment-item-actions">
+                <!-- Receipt PDF preview dropdown (always visible, not gated by canRecord) -->
+                <n-dropdown
+                  :options="receiptPdfLocaleOptions(payment.id)"
+                  trigger="click"
+                  @select="handleReceiptPreviewLocaleSelect"
+                >
+                  <n-button
+                    size="small"
+                    quaternary
+                    circle
+                    :title="t('pdf.preview')"
+                  >
+                    <template #icon><n-icon><EyeOutline /></n-icon></template>
+                  </n-button>
+                </n-dropdown>
                 <!-- Receipt PDF download dropdown (always visible, not gated by canRecord) -->
                 <n-dropdown
                   :options="receiptPdfLocaleOptions(payment.id)"
@@ -468,6 +506,13 @@ function handleDelete(payment: PaymentRead) {
 
     </n-spin>
   </n-card>
+
+  <!-- Receipt PDF preview dialog -->
+  <PdfPreviewDialog
+    v-model:show="receiptPreviewShow"
+    :src="receiptPreviewSrc"
+    :fallback-filename="receiptPreviewFallback"
+  />
 </template>
 
 <style scoped>

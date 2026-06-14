@@ -7,10 +7,11 @@ import {
   NButton, NSpace, NInput, NDataTable, NAlert, NSpin,
   NPagination, NSelect, NTag, NDropdown,
 } from 'naive-ui'
-import { AddOutline, SearchOutline, CreateOutline, TrashOutline, DownloadOutline, MailOutline } from '@vicons/ionicons5'
+import { AddOutline, SearchOutline, CreateOutline, TrashOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
+import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import { useQuotesStore } from '../../stores/quotes'
 import type { QuoteListItem } from '../../stores/quotes'
 import { get, downloadBlob } from '../../api/http'
@@ -80,6 +81,28 @@ function handlePdfLocaleSelect(key: string) {
     handleDownloadPdf(id)
   } else {
     handleDownloadPdf(id, locale as 'en' | 'zh')
+  }
+}
+
+// PDF preview (in-app modal)
+const previewShow = ref(false)
+const previewSrc = ref<string | null>(null)
+const previewFallback = ref('quote.pdf')
+
+function openPreview(id: string, locale?: 'en' | 'zh') {
+  previewSrc.value = locale
+    ? `/api/v1/quotes/${id}/pdf?locale=${locale}`
+    : `/api/v1/quotes/${id}/pdf`
+  previewFallback.value = `quote-${id}.pdf`
+  previewShow.value = true
+}
+
+function handlePreviewLocaleSelect(key: string) {
+  const [id, locale] = key.split(':')
+  if (locale === 'default') {
+    openPreview(id)
+  } else {
+    openPreview(id, locale as 'en' | 'zh')
   }
 }
 
@@ -238,7 +261,7 @@ const columns = computed(() => [
   {
     title: t('quotes.actions'),
     key: 'actions',
-    width: 148,
+    width: 188,
     align: 'center' as const,
     render(row: QuoteListItem) {
       const canDelete = row.status !== 'ACCEPTED'
@@ -253,6 +276,25 @@ const columns = computed(() => [
             onClick: () => handleEdit(row.id),
           },
           () => h(NIcon, null, { default: () => h(CreateOutline) }),
+        ),
+        // PDF preview dropdown
+        h(
+          NDropdown,
+          {
+            options: pdfLocaleOptions(row.id),
+            trigger: 'click',
+            onSelect: handlePreviewLocaleSelect,
+          },
+          () => h(
+            NButton,
+            {
+              size: 'small',
+              quaternary: true,
+              circle: true,
+              title: t('pdf.preview'),
+            },
+            () => h(NIcon, null, { default: () => h(EyeOutline) }),
+          ),
         ),
         // PDF download dropdown
         h(
@@ -403,6 +445,13 @@ const columns = computed(() => [
       :customer-email="sendDialogCustomerEmail"
       :customer-locale="sendDialogCustomerLocale"
       @sent="handleSent"
+    />
+
+    <!-- PDF preview dialog -->
+    <PdfPreviewDialog
+      v-model:show="previewShow"
+      :src="previewSrc"
+      :fallback-filename="previewFallback"
     />
   </div>
 </template>
