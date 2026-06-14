@@ -2,6 +2,7 @@
 
 All tests use mocks — no running PostgreSQL required.  Verifies:
 - SVG sanitization (red-line 7) including external reference stripping
+- ``_inline_svg_styles`` style inlining (SVG logo colour-preservation fix)
 - Upload validation (mime whitelist, size limit)
 - Company logo service logic (set / clear / get) with mocked DB
 """
@@ -17,6 +18,7 @@ import pytest
 from jai.services.assets import (
     MAX_UPLOAD_BYTES,
     AssetValidationError,
+    _inline_svg_styles,
     clear_company_logo,
     get_company_logo,
     sanitize_svg,
@@ -247,6 +249,265 @@ class TestSanitizeSvg:
         raw = _minimal_svg('<rect fill="url(data:image/svg+xml;base64,PHN2Zy8+)" width="10"/>')
         result = sanitize_svg(raw)
         assert b"data:image" not in result
+
+
+# ---------------------------------------------------------------------------
+# _inline_svg_styles — CSS style inlining (SVG logo colour-preservation)
+# ---------------------------------------------------------------------------
+
+
+class TestInlineSvgStyles:
+    """Tests for the ``_inline_svg_styles`` pre-processor.
+
+    This function converts ``<style>`` CSS class rules to inline presentation
+    attributes so logo colours survive the subsequent ``<style>``-stripping
+    ``nh3`` pass.  It must satisfy red-line 7: no external ``url()`` values
+    may survive, and the output must contain no ``<style>`` elements.
+    """
+
+    # ------------------------------------------------------------------
+    # Helper SVG builders
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _svg_with_style(style_css: str, body: str = "") -> str:
+        """Return an SVG string with a ``<style>`` block and optional body."""
+        return (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+            f"<defs><style>{style_css}</style></defs>"
+            f"{body}"
+            f"</svg>"
+        )
+
+    # ------------------------------------------------------------------
+    # Basic inlining
+    # ------------------------------------------------------------------
+
+    def test_simple_class_fill_inlined(self) -> None:
+        """A single class fill rule is inlined onto matched elements."""
+        svg = self._svg_with_style(
+            ".red { fill: #ff0000; }",
+            '<circle class="red" cx="50" cy="50" r="40"/>',
+        )
+        result = _inline_svg_styles(svg)
+        assert 'fill="#ff0000"' in result
+
+    def test_style_element_removed_after_inlining(self) -> None:
+        """``<style>`` is removed from the output after inlining."""
+        svg = self._svg_with_style(
+            ".a { fill: blue; }",
+            '<rect class="a" width="10" height="10"/>',
+        )
+        result = _inline_svg_styles(svg)
+        assert "<style" not in result
+
+    def test_no_style_returns_unchanged(self) -> None:
+        """SVG without ``<style>`` is returned unchanged (no round-trip)."""
+        svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="red"/></svg>'
+        result = _inline_svg_styles(svg)
+        # Content must be identical (or at least semantically equivalent).
+        assert 'fill="red"' in result
+        assert "<style" not in result
+
+    # ------------------------------------------------------------------
+    # Illustrator/Figma-style logo (the real-world bug scenario)
+    # ------------------------------------------------------------------
+
+    def test_illustrator_logo_cls_classes_inlined(self) -> None:
+        """Illustrator-export cls-N classes are fully inlined.
+
+        Replicates the favicon.svg structure:
+        - ``.cls-2 { fill: #3a3a3a }``                → dark grey circle
+        - ``.cls-3 { stroke-dasharray:…; fill:none; stroke:#fff }`` → dashed circle
+        - ``.cls-4 { fill:none; stroke:#fff }``        → white-border circle
+        """
+        style_css = (
+            ".cls-1{fill:#f9f9fa;}"
+            ".cls-2{fill:#3a3a3a;}"
+            ".cls-3{stroke-dasharray:0 0 4 12;stroke-linecap:round;stroke-width:4px;}"
+            ".cls-3,.cls-4{fill:none;stroke:#fff;stroke-miterlimit:10;}"
+            ".cls-4{stroke-width:7px;}"
+        )
+        body = (
+            '<circle class="cls-2" cx="50" cy="50" r="40"/>'
+            '<circle class="cls-3" cx="50" cy="50" r="35"/>'
+            '<circle class="cls-4" cx="50" cy="50" r="30"/>'
+            '<rect class="cls-1" width="10" height="10"/>'
+        )
+        svg = self._svg_with_style(style_css, body)
+        result = _inline_svg_styles(svg)
+
+        # cls-2 → dark grey fill
+        assert 'fill="#3a3a3a"' in result
+        # cls-1 → light grey fill
+        assert 'fill="#f9f9fa"' in result
+        # cls-3 → stroke-dasharray inlined
+        assert "stroke-dasharray" in result
+        assert "stroke-linecap" in result
+        # cls-3 and cls-4 → fill:none and white stroke
+        assert 'stroke="#fff"' in result
+        # cls-4 → stroke-width:7px
+        assert "stroke-width" in result
+        # No <style> in output
+        assert "<style" not in result
+
+    # ------------------------------------------------------------------
+    # Grouped selectors and multi-class elements
+    # ------------------------------------------------------------------
+
+    def test_grouped_selector_applies_to_all(self) -> None:
+        """A grouped selector ``.a,.b { fill: green }`` matches both classes."""
+        svg = self._svg_with_style(
+            ".a,.b { fill: green; }",
+            '<rect class="a" width="5" height="5"/>'
+            '<rect class="b" width="5" height="5"/>',
+        )
+        result = _inline_svg_styles(svg)
+        assert result.count('fill="green"') == 2
+
+    def test_multi_class_element_matches_multiple_rules(self) -> None:
+        """An element with two classes gets attrs from both matching rules."""
+        svg = self._svg_with_style(
+            ".x { fill: red; } .y { stroke: blue; }",
+            '<rect class="x y" width="5" height="5"/>',
+        )
+        result = _inline_svg_styles(svg)
+        assert 'fill="red"' in result
+        assert 'stroke="blue"' in result
+
+    def test_later_rule_overrides_earlier_same_prop(self) -> None:
+        """Later rules for the same element + property win (cascade order)."""
+        svg = self._svg_with_style(
+            ".a { fill: red; } .a { fill: blue; }",
+            '<rect class="a" width="5" height="5"/>',
+        )
+        result = _inline_svg_styles(svg)
+        # The second rule wins → blue
+        assert 'fill="blue"' in result
+        # red must not appear as fill (it was overridden)
+        assert 'fill="red"' not in result
+
+    # ------------------------------------------------------------------
+    # SSRF safety: external url() values must be discarded
+    # ------------------------------------------------------------------
+
+    def test_external_url_fill_discarded(self) -> None:
+        """A ``fill: url(https://...)`` declaration is NOT inlined as an attribute.
+
+        The external URL must not appear on any element's presentation attribute
+        after inlining.  (Residual ``<style>`` text with the URL is harmless here
+        because the subsequent ``nh3`` pass always strips ``<style>`` blocks.)
+        """
+        svg = self._svg_with_style(
+            ".evil { fill: url(https://evil.example/x.svg#p); }",
+            '<rect class="evil" width="5" height="5"/>',
+        )
+        result = _inline_svg_styles(svg)
+        # The URL must NOT appear as a presentation attribute on any element.
+        assert 'fill="url(https' not in result
+        assert 'fill="url(http' not in result
+
+    def test_external_url_stroke_discarded(self) -> None:
+        """A ``stroke: url(http://...)`` declaration is NOT inlined as an attribute."""
+        svg = self._svg_with_style(
+            ".bad { stroke: url(http://evil.example/s.svg); }",
+            '<rect class="bad" width="5" height="5"/>',
+        )
+        result = _inline_svg_styles(svg)
+        # The URL must NOT appear as a presentation attribute on any element.
+        assert 'stroke="url(http' not in result
+        assert 'stroke="url(https' not in result
+
+    def test_local_url_fragment_fill_preserved(self) -> None:
+        """A ``fill: url(#localGrad)`` declaration is safe and is inlined."""
+        svg = self._svg_with_style(
+            ".grad { fill: url(#myGrad); }",
+            '<rect class="grad" width="5" height="5"/>',
+        )
+        result = _inline_svg_styles(svg)
+        assert 'fill="url(#myGrad)"' in result
+
+    # ------------------------------------------------------------------
+    # Robustness: malformed input must not raise
+    # ------------------------------------------------------------------
+
+    def test_malformed_svg_returns_original(self) -> None:
+        """Malformed XML returns original string without raising."""
+        bad_svg = "<svg><defs><style>.a{fill:red}</style></defs><circle class='a'"  # unclosed
+        result = _inline_svg_styles(bad_svg)
+        # Must return the original string unchanged
+        assert result == bad_svg
+
+    def test_malformed_css_does_not_raise(self) -> None:
+        """Malformed CSS inside ``<style>`` does not raise; safe rules still apply."""
+        svg = self._svg_with_style(
+            "@keyframes spin { }  .ok { fill: purple; }",
+            '<rect class="ok" width="5" height="5"/>',
+        )
+        # Should not raise; .ok rule may or may not be applied depending on parser
+        result = _inline_svg_styles(svg)
+        assert isinstance(result, str)
+
+    def test_empty_style_block_no_raise(self) -> None:
+        """An empty ``<style>`` block does not raise or corrupt the SVG."""
+        svg = self._svg_with_style(
+            "",
+            '<rect fill="red" width="5" height="5"/>',
+        )
+        result = _inline_svg_styles(svg)
+        assert isinstance(result, str)
+        assert "<style" not in result or 'fill="red"' in result
+
+    # ------------------------------------------------------------------
+    # End-to-end: sanitize_svg must preserve inlined attrs + strip <style>
+    # ------------------------------------------------------------------
+
+    def test_sanitize_svg_preserves_inlined_fill_and_stroke(self) -> None:
+        """Full ``sanitize_svg`` pipeline: inlined attrs survive ``nh3``."""
+        style_css = (
+            ".cls-2{fill:#3a3a3a;}"
+            ".cls-3{stroke-dasharray:0 0 4 12;stroke-linecap:round;}"
+            ".cls-3,.cls-4{fill:none;stroke:#fff;stroke-miterlimit:10;}"
+        )
+        body = (
+            '<circle class="cls-2" cx="50" cy="50" r="40"/>'
+            '<circle class="cls-3" cx="50" cy="50" r="35"/>'
+            '<circle class="cls-4" cx="50" cy="50" r="30"/>'
+        )
+        raw = self._svg_with_style(style_css, body).encode()
+        result = sanitize_svg(raw)
+
+        # Colours must survive the full pipeline
+        assert b'fill="#3a3a3a"' in result
+        assert b'fill="none"' in result
+        assert b'stroke="#fff"' in result
+        # stroke-dasharray and stroke-linecap must NOT be stripped by nh3
+        assert b"stroke-dasharray" in result
+        assert b"stroke-linecap" in result
+        assert b"stroke-miterlimit" in result
+        # No <style> in final output
+        assert b"<style" not in result
+
+    def test_sanitize_svg_ssrf_still_blocked_after_inlining(self) -> None:
+        """External url() in CSS is NOT inlined; SSRF protection intact."""
+        style_css = ".evil { fill: url(https://evil.example/x.svg#p); stroke: red; }"
+        body = '<rect class="evil" width="10" height="10"/>'
+        raw = self._svg_with_style(style_css, body).encode()
+        result = sanitize_svg(raw)
+        assert b"evil.example" not in result
+        assert b"url(https" not in result
+        # stroke:red was safe and should be inlined
+        assert b'stroke="red"' in result
+
+    def test_sanitize_svg_script_still_stripped(self) -> None:
+        """``<script>`` is still stripped when ``<style>`` inlining is present."""
+        style_css = ".a { fill: green; }"
+        body = '<rect class="a" width="5"/><script>alert(1)</script>'
+        raw = self._svg_with_style(style_css, body).encode()
+        result = sanitize_svg(raw)
+        assert b"<script" not in result
+        assert b"alert" not in result
+        assert b'fill="green"' in result
 
 
 # ---------------------------------------------------------------------------

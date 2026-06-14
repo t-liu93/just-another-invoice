@@ -12,12 +12,20 @@ Design notes
 ------------
 - Mime whitelist: PNG, JPEG, WebP, SVG (red-line 7: SVG is sanitized).
 - Size limit: 512 KB.
-- SVG sanitization uses ``nh3`` (Ammonia bindings) to strip ``<script>``,
-  event handlers (``on*``), and dangerous content.  Post-processing passes
-  strip external URL references:
-  (1) ``href``/``xlink:href`` with non-local schemes;
-  (2) ``url(https://...)`` etc. in paint attributes (``fill``, ``stroke``);
-  (3) ``style`` attribute excluded from allow-list (CSS ``url()`` risk).
+- SVG sanitization uses a two-step approach (red-line 7):
+  (0) Pre-processing: ``_inline_svg_styles`` inlines CSS ``<style>`` rules as
+      presentation attributes on matched elements, then removes ``<style>``
+      elements.  This preserves colours/strokes defined only in CSS classes
+      (common in Illustrator/Figma exports) while keeping the output free of
+      ``<style>`` blocks.  Only safe paint/stroke/opacity attributes are
+      inlined; any value containing an external ``url(...)`` is discarded.
+  (1) ``nh3`` (Ammonia) strips ``<script>``, ``<style>`` (belt-and-suspenders),
+      event handlers (``on*``), unapproved tags/attributes, and comments.
+  (2) Post-processing strips ``href``/``xlink:href`` attributes that
+      reference non-local URLs (preventing SSRF via external references).
+  (3) Post-processing strips external ``url()`` references from paint
+      attributes (``fill``, ``stroke``), keeping only ``url(#id)``.
+  (4) ``style`` attribute excluded from allow-list (CSS ``url()`` risk).
   This fully satisfies red-line 7 (XSS/SSRF prevention).
 - ``company.logo_id`` is managed here; the FK ``ON DELETE SET NULL`` ensures
   the company row stays valid when a binary_asset is deleted.
@@ -26,9 +34,12 @@ Design notes
 from __future__ import annotations
 
 import re
+import xml.etree.ElementTree as ET
 from typing import Any
 
+import cssselect2
 import nh3
+import tinycss2
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.models.binary_asset import BinaryAsset
@@ -44,6 +55,28 @@ MAX_UPLOAD_BYTES: int = 512 * 1024
 #: Allowed MIME types for logo uploads.
 ALLOWED_MIME_TYPES: frozenset[str] = frozenset(
     {"image/png", "image/jpeg", "image/webp", "image/svg+xml"}
+)
+
+#: SVG XML namespace URI.
+_SVG_NS: str = "http://www.w3.org/2000/svg"
+
+#: Safe CSS presentation attributes that may be inlined from ``<style>`` rules.
+#: This whitelist excludes anything that could embed external references or
+#: execute code.  ``url()`` values are additionally filtered at runtime.
+_SAFE_INLINE_ATTRS: frozenset[str] = frozenset(
+    {
+        "fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-linecap",
+        "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "fill-opacity",
+        "fill-rule", "clip-rule", "opacity", "color", "stop-color", "stop-opacity",
+    }
+)
+
+#: Detects external ``url()`` references (anything that is not ``url(#...)``)
+#: in CSS declaration values.  Used to discard SSRF-risky values during style
+#: inlining.
+_CSS_EXT_URL_RE: re.Pattern[str] = re.compile(
+    r"url\s*\(\s*(?!#)",
+    re.IGNORECASE,
 )
 
 #: SVG-specific tags that ``nh3`` should allow.
@@ -74,6 +107,19 @@ _SVG_CLEAN_TAGS: frozenset[str] = frozenset(
 #: because CSS ``url()`` can reference external resources (SSRF risk).
 #: ``href``/``xlink:href`` are allowed on ``use``/``image`` but a
 #: post-processing step strips non-local (``#id``) references.
+#:
+#: The full set of safe paint/stroke/opacity presentation attributes is
+#: included here so that ``_inline_svg_styles`` inlined values survive the
+#: subsequent ``nh3`` pass without being stripped.
+_SHAPE_PAINT_ATTRS: frozenset[str] = frozenset(
+    {
+        "fill", "fill-opacity", "fill-rule",
+        "stroke", "stroke-width", "stroke-dasharray", "stroke-linecap",
+        "stroke-linejoin", "stroke-miterlimit", "stroke-opacity",
+        "clip-rule", "opacity", "color",
+    }
+)
+
 _SVG_CLEAN_ATTRS: dict[str, frozenset[str]] = {
     "*": frozenset(
         {
@@ -87,23 +133,26 @@ _SVG_CLEAN_ATTRS: dict[str, frozenset[str]] = {
             "width", "height", "x", "y",
         }
     ),
-    "g": frozenset({"transform"}),
-    "path": frozenset({"d", "transform", "fill", "stroke", "stroke-width"}),
-    "circle": frozenset({"cx", "cy", "r", "fill", "stroke", "stroke-width", "transform"}),
-    "ellipse": frozenset({"cx", "cy", "rx", "ry", "fill", "stroke", "stroke-width", "transform"}),
-    "line": frozenset({"x1", "y1", "x2", "y2", "stroke", "stroke-width", "transform"}),
+    "g": frozenset({"transform"} | _SHAPE_PAINT_ATTRS),
+    "path": frozenset({"d", "transform"} | _SHAPE_PAINT_ATTRS),
+    "circle": frozenset({"cx", "cy", "r", "transform"} | _SHAPE_PAINT_ATTRS),
+    "ellipse": frozenset({"cx", "cy", "rx", "ry", "transform"} | _SHAPE_PAINT_ATTRS),
+    "line": frozenset({"x1", "y1", "x2", "y2", "transform"} | _SHAPE_PAINT_ATTRS),
     "rect": frozenset(
-        {"x", "y", "width", "height", "rx", "ry", "fill", "stroke", "stroke-width", "transform"}
+        {"x", "y", "width", "height", "rx", "ry", "transform"} | _SHAPE_PAINT_ATTRS
     ),
-    "polygon": frozenset({"points", "fill", "stroke", "stroke-width", "transform"}),
-    "polyline": frozenset({"points", "fill", "stroke", "stroke-width", "transform"}),
+    "polygon": frozenset({"points", "transform"} | _SHAPE_PAINT_ATTRS),
+    "polyline": frozenset({"points", "transform"} | _SHAPE_PAINT_ATTRS),
     "text": frozenset(
         {
             "x", "y", "dx", "dy", "font-size", "font-family",
-            "text-anchor", "dominant-baseline", "fill", "transform",
+            "text-anchor", "dominant-baseline", "transform",
         }
+        | _SHAPE_PAINT_ATTRS
     ),
-    "tspan": frozenset({"x", "y", "dx", "dy", "font-size", "font-family", "fill"}),
+    "tspan": frozenset(
+        {"x", "y", "dx", "dy", "font-size", "font-family"} | _SHAPE_PAINT_ATTRS
+    ),
     "use": frozenset({"href", "xlink:href", "x", "y", "width", "height", "transform"}),
     "image": frozenset({"href", "xlink:href", "x", "y", "width", "height", "transform"}),
     "linearGradient": frozenset({"id", "x1", "y1", "x2", "y2"}),
@@ -140,6 +189,127 @@ class AssetValidationError(ValueError):
 # SVG sanitization (unit-testable without DB)
 # ---------------------------------------------------------------------------
 
+# Register the SVG namespace so ET serialises without "ns0:" prefixes.
+ET.register_namespace("", _SVG_NS)
+ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
+
+
+def _inline_svg_styles(svg_text: str) -> str:
+    """Inline CSS ``<style>`` rules as presentation attributes on SVG elements.
+
+    Many vector-editing tools (Illustrator, Figma, Inkscape) export SVGs
+    where all colour/stroke information lives in a ``<style>`` block as CSS
+    class rules (e.g. ``.cls-2 { fill: #3a3a3a }``), with elements carrying
+    only ``class="cls-N"`` attributes and no inline ``fill``/``stroke``.
+    When the subsequent ``nh3`` pass strips ``<style>`` (as required by
+    red-line 7), all those elements fall back to the SVG default
+    (``fill: black``), producing a solid-black silhouette.
+
+    This pre-processing pass resolves that by "compiling" each CSS rule into
+    equivalent presentation attributes on every matched element **before**
+    ``nh3`` runs, so the output is both style-free and correctly coloured.
+
+    Safety
+    ------
+    - Only attributes in ``_SAFE_INLINE_ATTRS`` are inlined.
+    - Any declaration whose serialised value contains an external ``url(...)``
+      (i.e. anything other than ``url(#local-id)``) is silently discarded,
+      preventing SSRF.
+    - ``<style>`` elements are removed from the tree after inlining; ``nh3``
+      also removes them (belt-and-suspenders).
+    - The entire function is wrapped in a broad ``except`` block: any parse
+      or matching error returns the original text unchanged, so this pass
+      degrades gracefully on malformed or unusual SVGs.
+
+    Parameters
+    ----------
+    svg_text:
+        Raw SVG as a Unicode string.
+
+    Returns
+    -------
+    SVG string with ``<style>`` rules inlined as presentation attributes and
+    ``<style>`` elements removed, or the original string if processing fails.
+    """
+    try:
+        root = ET.fromstring(svg_text)  # noqa: S314 — input will be sanitised by nh3 next
+
+        # Collect all <style> text, whether namespaced or not.
+        style_texts: list[str] = []
+        for elem in root.iter():
+            if elem.tag in (f"{{{_SVG_NS}}}style", "style"):
+                if elem.text:
+                    style_texts.append(elem.text)
+
+        if not style_texts:
+            return svg_text  # Nothing to inline; skip the round-trip.
+
+        combined_css = " ".join(style_texts)
+
+        # Parse CSS into rules; skip whitespace/comment tokens.
+        rules = tinycss2.parse_stylesheet(
+            combined_css, skip_whitespace=True, skip_comments=True
+        )
+
+        # Build (selector_str, {prop: value}) list in source order so that
+        # later / more specific rules correctly override earlier ones.
+        decl_rules: list[tuple[str, dict[str, str]]] = []
+        for rule in rules:
+            if rule.type != "qualified-rule":
+                continue
+            selector_str = tinycss2.serialize(rule.prelude).strip()
+            if not selector_str:
+                continue
+            decls = tinycss2.parse_declaration_list(
+                rule.content, skip_whitespace=True
+            )
+            props: dict[str, str] = {}
+            for decl in decls:
+                if decl.type != "declaration":
+                    continue
+                name = decl.name.lower()
+                if name not in _SAFE_INLINE_ATTRS:
+                    continue
+                value = tinycss2.serialize(decl.value).strip()
+                # Discard any value that references an external URL (SSRF).
+                if _CSS_EXT_URL_RE.search(value):
+                    continue
+                props[name] = value
+            if props:
+                decl_rules.append((selector_str, props))
+
+        if not decl_rules:
+            return svg_text  # No safe rules to apply.
+
+        # Use cssselect2 to match selectors against the SVG DOM.
+        wrapper = cssselect2.ElementWrapper.from_xml_root(root)
+
+        for selector_str, props in decl_rules:
+            try:
+                matches = wrapper.query_all(selector_str)
+            except Exception:  # noqa: BLE001 — unsupported selector etc.
+                continue
+            for match in matches:
+                elem = match.etree_element
+                for prop, val in props.items():
+                    # CSS rules override existing presentation attributes
+                    # (mirrors browser cascade behaviour).
+                    elem.set(prop, val)
+
+        # Remove <style> elements from the tree (nh3 will also remove them).
+        parent_map = {child: parent for parent in root.iter() for child in parent}
+        for elem in list(root.iter()):
+            if elem.tag in (f"{{{_SVG_NS}}}style", "style"):
+                parent = parent_map.get(elem)
+                if parent is not None:
+                    parent.remove(elem)
+
+        return ET.tostring(root, encoding="unicode")
+
+    except Exception:  # noqa: BLE001 — malformed SVG, namespace issues, etc.
+        # Fail open: return the original text so the nh3 pass still runs.
+        return svg_text
+
 
 def _strip_external_hrefs(svg_text: str) -> str:
     """Remove external URL references from href/xlink:href attributes.
@@ -165,7 +335,11 @@ def _strip_external_paint_urls(svg_text: str) -> str:
 def sanitize_svg(raw: bytes) -> bytes:
     """Sanitize SVG content by stripping dangerous elements/attributes.
 
-    Two-pass approach:
+    Four-pass approach:
+    0. Pre-processing (``_inline_svg_styles``): CSS ``<style>`` rules are
+       inlined as presentation attributes so that logo colours survive the
+       subsequent ``<style>``-stripping step.  Only safe paint/stroke/opacity
+       attributes are inlined; external ``url()`` values are discarded.
     1. ``nh3`` (Ammonia) strips ``<script>``, ``<style>``, event handlers
        (``on*``), unapproved tags/attributes, and comments.
     2. Post-processing strips ``href``/``xlink:href`` attributes that
@@ -186,6 +360,10 @@ def sanitize_svg(raw: bytes) -> bytes:
     Sanitized SVG bytes.
     """
     text_content = raw.decode("utf-8", errors="replace")
+
+    # Pass 0: inline <style> CSS rules as presentation attributes so colours
+    # are preserved after nh3 strips the <style> block.
+    text_content = _inline_svg_styles(text_content)
 
     # Pass 1: nh3 structural sanitization.
     cleaned = nh3.clean(
