@@ -251,6 +251,25 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 
 ---
 
+## 4.y 路线图之外（vNext）· PDF 文档/抬头模板自定义（仅备忘，不在 M0–M11）
+
+> **状态**：作者 2026-06-14 M9 walkthrough 提出、明确**顺延**。M9 的 OUT「自定义 / 多套 PDF 模板 → 顺延（一套模板族 + CSS 接口）」在此细化。**现在不预留 schema**，将来都是 additive。
+
+- **是什么**：把发票/报价 PDF 模板做成**设置里可编辑**，**仿 M9 的 email 模板**——纯文本 + `{{ }}` 占位符（如 `{{COMPANY_NAME}}` / `{{EMAIL}}` / `{{ADDRESS}}` / `{{LEGAL_NAME}}` …），且这些块的**位置 / 顺序可自由调整**。**主要针对抬头**（公司身份块），例如可选加一句「Trade name of <legal name>」，有时加、有时不加。
+- **已有可复用**：typed 设置 + 三层 locale 解析链 + 设置面板（齿轮可展开面板）+ 占位符引擎，都是 M9 email 模板那套现成基建（doc_type × locale）。
+- **大头是安全（红线 7）**：用户输入进 PDF = XSS/SSRF 面，需沿用 / 加强清洗——参考 2026-06-14 修过的 `{{ css | safe }}` 字体转义与 SVG `<style>` 内联清洗两处坑；正文走「纯文本 + 显式占位符 + 转义」而非任意 HTML/CSS。外加模板编辑器 UI + 预览 + 无值回退内置默认。
+- **粒度**：按单据类型（invoice / quote）× 语言（EN / ZH）分别配，沿用 email 模板结构。
+
+## 4.z 路线图之外（vNext）· 客户地址自由文本块（仅备忘，不在 M0–M11）
+
+> **状态**：作者 2026-06-14 M9 walkthrough 提出、明确**顺延**。
+
+- **是什么**：在客户**结构化地址**（街道 / 门牌 / 邮编 / 省 / 市 / 国家）**下方**，加一个**自由输入文本框**。
+- **场景**：**双语客户**——结构化格子按现有字段填拉丁 / 英文地址；自由文本框里**整段再抄一遍另一种文字**（如中文）的完整地址。
+- **落地草图（真做时）**：`address`（或 customer）模型加一个 additive 文本列（红线 10：`text`）+ schema + 客户编辑器 UI + 发票 / 报价 PDF 在结构化地址块下渲染该自由文本（保留换行、autoescape）。范围有界，但横跨 模型 + UI + PDF 多处。
+
+---
+
 ## 5. 每个原子步骤的模板 + Definition of Done
 
 > 细化里程碑时，每个原子步骤都按这个模板拆（见 `milestones/_TEMPLATE.md`）。**单人开发不强制 PR**：自测 + CI 绿即可合 `main`；想做人工 review 时再开分支/PR。
@@ -320,7 +339,7 @@ docs/
 | M7.5 | 货币舍入口径修正（落到「分」） | 🟢 完成（2026-06-13；orchestrator 3 步逐步盲审收敛，步骤2 一处 docstring fixup、步骤1/3 零 finding；**行级到分**、`F2026-009`→`3865.16`；ruff/mypy/单测 426/集成 644（+3 F2026-009 收满回归）全绿；零迁移/零契约/无 codegen；payment/costing/estimate 服务代码零改动；作者人工 walkthrough 自测点 1–3 通过、无 finding） |
 | M8 | 开支（含 AI 填单 + AI 供货价单识别，可与单据线并行） | 🟢 完成（2026-06-14；orchestrator 5 步逐步盲审收敛 [expense+分存 / storage 收据 / 周期开支 / AI 票据填单 / 前端收尾]；末轮 walkthrough refinements 单列一轮压进同一收尾 commit [可抵扣随分类联动 / 收据 bind-mount uid1000 / AI 探针 64×64 / 注入当前日期 / 摘要写 note 跟随界面语言 / 选率自动算 VAT 后端端点 / 提示词「默认常驻+自定义追加」]；ruff/mypy/单测 599/集成/build/无漂移全绿；自测点 1–5 人工通过、7 集成覆盖、8 通过，6 周期性开支作者暂不用未走（不影响验收）、9 远端 CI 待确认。AI 走 OpenAI 兼容 Chat Completions（`httpx` 自构造、非 SDK；base_url/model/key/提示词 用户自填 + 多模态测试；PDF 用 pypdfium2 栅格化成图统一走 image_url）。**follow-on 未做**：AI 供货价单 → M4 目录） |
 | M8.5 | 开支记账字段补全（付款来源 / 业务% / 折旧年，对齐 NL 记账 Excel） | 🟢 完成（2026-06-14；orchestrator 2 步逐步盲审收敛，两步**零 finding / 零返工**；3 个**纯存储** additive 字段 [`paid_by` / `business_percentage` / `depreciation_years`]，`expense` + `recurring_expense` parity，迁移 0021 NOT NULL+server_default 自动回填；**不新增算钱**——当年摊销 / 可退 VAT 按年 / 季度 / BTW 全顺延 M10；ruff/mypy/单测 626[+27]/集成切片 79[+19]/build/无 codegen 漂移全绿；作者人工 walkthrough：后端/迁移/契约/周期 parity 通过，旧数据迁移回填因已删旧数据+未上线略过实测、walkthrough 发现的**前端展示问题统一留 GA 前前端翻新处理**；D1–D9 与作者逐列对照 Excel 共定） |
-| M9 | PDF（邮件底座在 M1） | ⬜ 未实现（设计已冻结 2026-06-14：`milestones/M9.md` 8 原子步骤 + D1–D8 决策共定；WeasyPrint + 客户级 locale + 收据 PDF 低优 + 公司级可编辑邮件模板） |
+| M9 | PDF（邮件底座在 M1） | 🟢 完成（2026-06-14；orchestrator 8 步逐步盲审收敛，步骤 1/4/5 各 1 轮返工[Content-Disposition RFC6266 filename / 收据标签键 / 集成缺建公司]、步骤 2/3/6/7 零 finding，每步一 commit；WeasyPrint+Jinja，发票/报价/收据 PDF 按 locale 下载[解析链 override>customer>company>en]、公司级可编辑邮件模板+占位符引擎、email_log 发送[附件+抄送, SENT/FAILED 脱敏]、迁移 0022 customer.locale / 0023 email_log、前端下载+发送对话框+Email log；ruff/mypy/默认 760/集成 785/build/i18n EN-ZH 对称 1001/docker build+镜像内中文 PDF 渲染 全绿。**作者人工 walkthrough 通过**，walkthrough 提出并已修[均 Opus 盲审无 finding、各自 commit]：① PDF 应用内预览[`0f75310`，同 commit 含发票/报价版式：删 Description 列+Item 加粗描述下挂+全 2 位小数 money2/pct+`css\|safe` 字体修复] ② SVG logo `<style>` 类内联清洗[`4cfd369`，class-styled logo 不再纯黑，**需重新上传 logo**] ③ 多页每页页脚[`b9090ae`]；改后默认 802/PDF 集成 138 全绿。**顺延**：完整 PDF 抬头模板自定义→§4.y、客户地址自由文本块→§4.z、公开链接/unique_hash、已读回执、收据邮件/多笔汇总收据、PDF 缓存/队列、NL 语言 PDF、VAT 报表→M10、渐变 SVG logo 不支持） |
 | M10 | 报表 / 仪表盘（含 VAT 申报） | ⬜ |
 | M11 | 收尾 / GA 前体检 | ⬜ |
 
