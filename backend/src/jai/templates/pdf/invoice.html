@@ -9,6 +9,14 @@
 </head>
 <body>
 
+<!-- ── Footer (running element – must appear before body content) ───────── -->
+<div class="doc-footer">
+    {{ company.name }}
+    {% if company.vat_id %} · {{ labels.vat_id }}: {{ company.vat_id }}{% endif %}
+    {% if company.coc_number %} · {{ labels.coc }}: {{ company.coc_number }}{% endif %}
+    {% if company.email %} · {{ company.email }}{% endif %}
+</div>
+
 <!-- ── Header ──────────────────────────────────────────────────────────── -->
 <div class="doc-header">
     <div class="company-block">
@@ -200,13 +208,6 @@
 {% endif %}
 </div>
 
-<!-- ── Footer ───────────────────────────────────────────────────────────── -->
-<div class="doc-footer">
-    {{ company.name }}
-    {% if company.vat_id %} · {{ labels.vat_id }}: {{ company.vat_id }}{% endif %}
-    {% if company.coc_number %} · {{ labels.coc }}: {{ company.coc_number }}{% endif %}
-    {% if company.email %} · {{ company.email }}{% endif %}
-</div>
 
 </body>
 </html>
