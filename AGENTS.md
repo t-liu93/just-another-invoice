@@ -53,6 +53,7 @@
 - **Definition of Done**（每步全过）：`ruff` + `mypy --strict` + `pytest` 绿；改了契约则重生成 `schema.d.ts` 且无漂移；前端能 `build`；**算钱/编号/汇率等逻辑必须有单测**；`docker build` 通过；不违反任何红线。
 
 ## 实现 / Review 简报
+- **简报只留磁盘、永不进版本管理（硬要求）**：`review-notes/` 已被 `.gitignore`（`review-notes/*`）忽略，所有简报/报告**只作为本地文件存在**，作者随时能在工作区看到即可。**严禁 `git add -f` 或以任何方式把 `review-notes/` 下的文件提交进 git**（一旦 track，gitignore 就失效、会污染历史；本项目已为此清过一次历史）。写简报 = 直接用文件工具写到磁盘，**不 add、不 commit**。
 - **实现简报（每步）**：每一轮 implementation 完成后（planning 不算），都要在 `review-notes/` 下用中文写实现简报，内容至少包括：(a) 本轮实现内容；(b) 自动化测试结果；(c) 人工 walkthrough 步骤。orchestrator 模式下命名 `review-notes/M<x>-step<n>-impl.md`。
 - **里程碑级实现报告（milestone 末）**：整个 milestone 全部步骤跑完后，额外出一份 `review-notes/M<x>-report.md` —— ① 内容详尽；② 面向作者可读；③ 含**完整的本 milestone 人工 walkthrough 步骤**（把各 `M<x>.md` 的「🟢 部署自测点」整合串讲）。这是作者人工 walkthrough 的输入。
 - **人工 walkthrough 时机**：自 M7 起**逐步不再人工走**（逐步门 = 自动化测试绿 + 盲审无 finding）；人工 walkthrough **收敛到 milestone 末一次**，作者对着上面的里程碑级报告走。**默认启动方式**：开发态 Compose（`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`），不默认拆成分别手动起前后端。
