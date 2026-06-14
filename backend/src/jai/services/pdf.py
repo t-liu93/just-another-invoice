@@ -1,12 +1,14 @@
-"""PDF rendering service – M9 step 1 / step 3.
+"""PDF rendering service – M9 step 1 / step 3 / step 4.
 
 Public API
 ----------
-- ``build_invoice_html``   – pure function: assemble Jinja2 context + render template.
-- ``build_quote_html``     – pure function: assemble Jinja2 context + render quote template.
-- ``html_to_pdf``          – thin WeasyPrint wrapper (lazily imported; D8).
-- ``render_invoice_pdf``   – DB-backed orchestrator: load invoice, build HTML, render PDF.
-- ``render_quote_pdf``     – DB-backed orchestrator: load quote, build HTML, render PDF.
+- ``build_invoice_html``          – pure function: assemble Jinja2 context + render template.
+- ``build_quote_html``            – pure function: assemble Jinja2 context + render quote template.
+- ``build_payment_receipt_html``  – pure function: assemble Jinja2 context + render receipt.
+- ``html_to_pdf``                 – thin WeasyPrint wrapper (lazily imported; D8).
+- ``render_invoice_pdf``          – DB-backed orchestrator: load invoice, build HTML, render PDF.
+- ``render_quote_pdf``            – DB-backed orchestrator: load quote, build HTML, render PDF.
+- ``render_payment_receipt_pdf``  – DB-backed orchestrator: load payment, build HTML, render PDF.
 
 Architecture decisions (from M9 D1–D8)
 ---------------------------------------
@@ -93,6 +95,14 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "quote_date": "Quote Date",
         "valid_until": "Valid Until",
         "status": "Status",
+        # Receipt-specific labels (M9 step 4)
+        "receipt": "Receipt",
+        "payment_date": "Payment Date",
+        "payment_method": "Payment Method",
+        "amount_paid": "Amount Paid",
+        "amount_paid_total": "Amount Paid (Total)",
+        "receipt_amount_due": "Amount Due",
+        "paid_status": "Paid Status",
     },
     "zh": {
         "invoice": "发票",
@@ -127,6 +137,14 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "quote_date": "报价日期",
         "valid_until": "有效期至",
         "status": "状态",
+        # Receipt-specific labels (M9 step 4)
+        "receipt": "收据",
+        "payment_date": "收款日期",
+        "payment_method": "收款方式",
+        "amount_paid": "本次收款",
+        "amount_paid_total": "已收款合计",
+        "receipt_amount_due": "未收款",
+        "paid_status": "收款状态",
     },
 }
 
@@ -544,6 +562,236 @@ def build_quote_html(
 
     template = _jinja_env.get_template("quote.html")
     return template.render(**context)
+
+
+# ---------------------------------------------------------------------------
+# Payment receipt rendering (M9 step 4)
+# ---------------------------------------------------------------------------
+
+
+def build_payment_receipt_html(
+    payment: Any,
+    invoice: Any,
+    company: Any,
+    customer: Any,
+    locale: str,
+    logo_data_uri: str | None,
+) -> str:
+    """Render payment receipt HTML from ORM objects.
+
+    This is a **pure function** – no I/O, no DB, no WeasyPrint.
+    Amounts are read directly from snapshot fields; nothing is recalculated
+    (red-line 1).  Jinja2 autoescape is ON (red-line 7).
+
+    Snapshot fields used:
+    - ``payment.amount``              – this payment's amount (snapshot).
+    - ``payment.payment_date``        – date of this payment.
+    - ``payment.payment_method_name`` – name snapshot (FK SET NULL safe).
+    - ``payment.currency``            – currency of this payment.
+    - ``payment.reference``           – optional reference (escaped).
+    - ``payment.note``                – optional note (escaped).
+    - ``invoice.invoice_number``      – related invoice identifier.
+    - ``invoice.total_incl_vat``      – invoice total (snapshot).
+    - ``invoice.due_amount``          – current amount due (snapshot).
+    - ``invoice.paid_status``         – current paid status (snapshot).
+
+    The "amount paid total" (= total − due) is derived from invoice snapshots
+    only, **not recalculated** from summing payment rows.
+
+    Parameters
+    ----------
+    payment:
+        ``Payment`` ORM instance.
+    invoice:
+        ``Invoice`` ORM instance for the related invoice.
+    company:
+        ``Company`` ORM instance.
+    customer:
+        ``Customer`` ORM instance (with ``.addresses`` preloaded).
+    locale:
+        ``"en"`` or ``"zh"``.  Unknown values fall back to ``"en"``.
+    logo_data_uri:
+        A ``data:<mime>;base64,...`` string, or ``None`` if no logo is set.
+        **Must never be a URL** (D7).
+
+    Returns
+    -------
+    str
+        Rendered HTML string (UTF-8).
+    """
+    from decimal import Decimal
+
+    from jai.models._enums import AddressType
+
+    labels = _get_labels(locale)
+
+    # -- Resolve billing address ----------------------------------------------
+    billing_address: Any = None
+    if hasattr(customer, "addresses"):
+        for addr in customer.addresses:
+            if addr.type == AddressType.BILLING:
+                billing_address = addr
+                break
+
+    # -- Read CSS inline so WeasyPrint receives a self-contained HTML ---------
+    css_text = _CSS_PATH.read_text(encoding="utf-8")
+
+    # -- Derive "paid total" from invoice snapshots (red-line 1: no re-sum) --
+    # total_incl_vat and due_amount are both snapshot fields on invoice.
+    # paid_total = total - due is a simple derived read-only value from the
+    # same snapshots; we compute it here in Python (not in the template layer)
+    # to keep arithmetic out of Jinja2.
+    total_incl_vat: Any = invoice.total_incl_vat
+    due_amount: Any = invoice.due_amount
+    paid_total = Decimal(str(total_incl_vat)) - Decimal(str(due_amount))
+
+    # -- Build template context (amounts from snapshots, not recalculated) ----
+    context: dict[str, Any] = {
+        "locale": locale if locale in PDF_LABELS else _DEFAULT_LOCALE,
+        "labels": labels,
+        "payment": payment,
+        "invoice": invoice,
+        "company": company,
+        "customer": customer,
+        "billing_address": billing_address,
+        "logo_data_uri": logo_data_uri,
+        "paid_total": paid_total,
+        "css": css_text,
+    }
+
+    template = _jinja_env.get_template("receipt.html")
+    return template.render(**context)
+
+
+async def render_payment_receipt_pdf(
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    company_id: uuid.UUID,
+    locale: str | None = None,
+) -> tuple[bytes, str]:
+    """Load a payment from the DB, render a receipt PDF, and return (bytes, filename).
+
+    Steps
+    -----
+    1. Load Payment scoped to company_id (cross-company → 404).
+    2. Load related Invoice.
+    3. Load Company and Customer (with addresses).
+    4. Resolve document locale via ``resolve_document_locale`` (D2 chain).
+    5. Inline logo as data URI from binary_asset.content (never a URL).
+    6. Call build_payment_receipt_html → html_to_pdf.
+    7. Return (pdf_bytes, "receipt-<invoice_number>-<payment_date>.pdf").
+
+    Parameters
+    ----------
+    locale:
+        Explicit locale override (``"en"`` / ``"zh"``).  When ``None``, the
+        locale is resolved from the D2 chain: customer.locale →
+        company-default setting → ``"en"``.
+
+    Raises
+    ------
+    HTTPException(404)
+        If the payment doesn't exist or belongs to a different company (red-line 2).
+    """
+    from fastapi import HTTPException, status
+    from sqlalchemy import select
+
+    from jai.models.binary_asset import BinaryAsset
+    from jai.models.company import Company
+    from jai.models.customer import Customer
+    from jai.models.invoice import Invoice
+    from jai.models.payment import Payment
+
+    # -- Load payment scoped to company (red-line 2) --------------------------
+    payment_stmt = select(Payment).where(
+        Payment.id == payment_id, Payment.company_id == company_id
+    )
+    payment_result = await session.execute(payment_stmt)
+    payment = payment_result.scalar_one_or_none()
+    if payment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found.",
+        )
+
+    # -- Load related invoice -------------------------------------------------
+    invoice_stmt = select(Invoice).where(Invoice.id == payment.invoice_id)
+    invoice_result = await session.execute(invoice_stmt)
+    invoice = invoice_result.scalar_one_or_none()
+    if invoice is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found.",
+        )
+
+    # -- Load company ---------------------------------------------------------
+    company_stmt = select(Company).where(Company.id == company_id)
+    company_result = await session.execute(company_stmt)
+    company = company_result.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found.",
+        )
+
+    # -- Load customer (with addresses) ---------------------------------------
+    from sqlalchemy.orm import selectinload as _sil
+
+    customer_stmt = (
+        select(Customer)
+        .where(Customer.id == invoice.customer_id)
+        .options(_sil(Customer.addresses))
+    )
+    customer_result = await session.execute(customer_stmt)
+    customer = customer_result.scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found.",
+        )
+
+    # -- Resolve locale via D2 chain ------------------------------------------
+    from jai.models._enums import SettingLevel
+    from jai.schemas.setting import SETTING_KEY_DOCUMENT_DEFAULTS, DocumentDefaultsSetting
+    from jai.services.settings import get_setting
+
+    company_default_setting = await get_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=DocumentDefaultsSetting,
+    )
+    company_default_locale: str | None = (
+        company_default_setting.locale if company_default_setting is not None else None
+    )
+    customer_locale: str | None = getattr(customer, "locale", None)
+    resolved_locale = resolve_document_locale(locale, customer_locale, company_default_locale)
+
+    # -- Inline logo as data: URI (D7 – never a URL) -------------------------
+    logo_data_uri: str | None = None
+    if company.logo_id is not None:
+        asset_stmt = select(BinaryAsset).where(BinaryAsset.id == company.logo_id)
+        asset_result = await session.execute(asset_stmt)
+        asset = asset_result.scalar_one_or_none()
+        if asset is not None:
+            b64 = base64.b64encode(asset.content).decode("ascii")
+            logo_data_uri = f"data:{asset.mime_type};base64,{b64}"
+
+    # -- Build HTML + render PDF ----------------------------------------------
+    html = build_payment_receipt_html(
+        payment=payment,
+        invoice=invoice,
+        company=company,
+        customer=customer,
+        locale=resolved_locale,
+        logo_data_uri=logo_data_uri,
+    )
+    pdf_bytes = html_to_pdf(html)
+
+    # Filename: receipt-<invoice_number>-<payment_date>.pdf
+    filename = f"receipt-{invoice.invoice_number}-{payment.payment_date}.pdf"
+    return pdf_bytes, filename
 
 
 async def render_quote_pdf(

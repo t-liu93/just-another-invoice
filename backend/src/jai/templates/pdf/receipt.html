@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+<meta charset="utf-8">
+<title>{{ labels.receipt }} {{ invoice.invoice_number }}</title>
+<style>
+{{ css }}
+/* Receipt-specific overrides */
+.receipt-details-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5em 0;
+}
+.receipt-details-table td {
+    padding: 0.4em 0.6em;
+    vertical-align: top;
+}
+.receipt-details-table .label {
+    width: 40%;
+    color: #555;
+    font-size: 0.9em;
+}
+.receipt-details-table .value {
+    font-weight: 600;
+    color: #111;
+}
+.receipt-summary-table {
+    margin-left: auto;
+    border-collapse: collapse;
+    min-width: 280px;
+}
+.receipt-summary-table td {
+    padding: 0.4em 0.8em;
+    white-space: nowrap;
+}
+.receipt-summary-table .label {
+    color: #555;
+    font-size: 0.9em;
+    text-align: right;
+    padding-right: 1.5em;
+}
+.receipt-summary-table .amount {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.receipt-summary-table tr.highlight-row td {
+    font-weight: 700;
+    font-size: 1.05em;
+    border-top: 2px solid #222;
+    border-bottom: 2px solid #222;
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
+}
+.receipt-notice {
+    margin: 2em 0 1em 0;
+    font-size: 0.85em;
+    color: #666;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 1em;
+}
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<div class="doc-header">
+    <div class="company-block">
+        {% if logo_data_uri %}
+        <img class="company-logo" src="{{ logo_data_uri }}" alt="">
+        {% endif %}
+        <div class="company-name">{{ company.name }}</div>
+        <div class="company-meta">
+            {% if company.street %}
+            {{ company.street }}{% if company.house_number %} {{ company.house_number }}{% if company.house_number_addition %}{{ company.house_number_addition }}{% endif %}{% endif %}<br>
+            {% endif %}
+            {% if company.postal_code or company.city %}
+            {{ company.postal_code }}{% if company.postal_code and company.city %} {% endif %}{{ company.city }}<br>
+            {% endif %}
+            {% if company.country_code %}{{ company.country_code }}<br>{% endif %}
+            {% if company.vat_id %}{{ labels.vat_id }}: {{ company.vat_id }}<br>{% endif %}
+            {% if company.coc_number %}{{ labels.coc }}: {{ company.coc_number }}<br>{% endif %}
+            {% if company.email %}{{ company.email }}<br>{% endif %}
+            {% if company.phone %}{{ company.phone }}<br>{% endif %}
+            {% if company.website %}{{ company.website }}{% endif %}
+        </div>
+    </div>
+
+    <div class="doc-title-block">
+        <div class="doc-type-label">{{ labels.receipt|upper }}</div>
+        <table class="doc-meta-table">
+            <tbody>
+            <tr>
+                <td class="label">{{ labels.invoice_number }}</td>
+                <td class="value">{{ invoice.invoice_number }}</td>
+            </tr>
+            <tr>
+                <td class="label">{{ labels.payment_date }}</td>
+                <td class="value">{{ payment.payment_date }}</td>
+            </tr>
+            <tr>
+                <td class="label">{{ labels.currency }}</td>
+                <td class="value">{{ payment.currency }}</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── Billing address ──────────────────────────────────────────────────── -->
+<div class="billing-section">
+    <div class="billing-label">{{ labels.bill_to }}</div>
+    <div class="billing-name">{{ customer.name }}</div>
+    {% if billing_address %}
+    <div class="billing-address">
+        {% if billing_address.street %}
+        {{ billing_address.street }}{% if billing_address.house_number %} {{ billing_address.house_number }}{% if billing_address.house_number_addition %}{{ billing_address.house_number_addition }}{% endif %}{% endif %}<br>
+        {% endif %}
+        {% if billing_address.postal_code or billing_address.city %}
+        {{ billing_address.postal_code }}{% if billing_address.postal_code and billing_address.city %} {% endif %}{{ billing_address.city }}<br>
+        {% endif %}
+        {% if billing_address.country_code %}{{ billing_address.country_code }}{% endif %}
+    </div>
+    {% endif %}
+    {% if customer.vat_id %}
+    <div class="billing-address">{{ labels.vat_id }}: {{ customer.vat_id }}</div>
+    {% endif %}
+</div>
+
+<hr class="divider">
+
+<!-- ── Payment details ──────────────────────────────────────────────────── -->
+<table class="receipt-details-table">
+    <tbody>
+    <tr>
+        <td class="label">{{ labels.payment_date }}</td>
+        <td class="value">{{ payment.payment_date }}</td>
+    </tr>
+    {% if payment.payment_method_name %}
+    <tr>
+        <td class="label">{{ labels.payment_method }}</td>
+        <td class="value">{{ payment.payment_method_name }}</td>
+    </tr>
+    {% endif %}
+    {% if payment.reference %}
+    <tr>
+        <td class="label">{{ labels.reference }}</td>
+        <td class="value">{{ payment.reference }}</td>
+    </tr>
+    {% endif %}
+    {% if payment.note %}
+    <tr>
+        <td class="label">{{ labels.notes }}</td>
+        <td class="value">{{ payment.note }}</td>
+    </tr>
+    {% endif %}
+    </tbody>
+</table>
+
+<!-- ── Summary ──────────────────────────────────────────────────────────── -->
+<div class="totals-wrapper">
+    <table class="receipt-summary-table">
+        <tbody>
+        <tr>
+            <td class="label">{{ labels.total }}</td>
+            <td class="amount">{{ invoice.total_incl_vat }}</td>
+        </tr>
+        <tr class="highlight-row">
+            <td class="label">{{ labels.amount_paid }}</td>
+            <td class="amount">{{ payment.amount }}</td>
+        </tr>
+        <tr>
+            <td class="label">{{ labels.amount_paid_total }}</td>
+            <td class="amount">{{ paid_total }}</td>
+        </tr>
+        <tr>
+            <td class="label">{{ labels.receipt_amount_due }}</td>
+            <td class="amount">{{ invoice.due_amount }}</td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- ── Footer ───────────────────────────────────────────────────────────── -->
+<div class="doc-footer">
+    {{ company.name }}
+    {% if company.vat_id %} · {{ labels.vat_id }}: {{ company.vat_id }}{% endif %}
+    {% if company.coc_number %} · {{ labels.coc }}: {{ company.coc_number }}{% endif %}
+    {% if company.email %} · {{ company.email }}{% endif %}
+</div>
+
+</body>
+</html>

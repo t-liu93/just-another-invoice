@@ -1,4 +1,4 @@
-"""PDF download endpoints – M9 step 1 / step 2 / step 3.
+"""PDF download endpoints – M9 step 1 / step 2 / step 3 / step 4.
 
 Endpoints
 ---------
@@ -16,6 +16,13 @@ GET /api/v1/quotes/{id}/pdf?locale=en|zh
     - Same locale resolution, same auth guards.
     - No due_amount / paid_status rendered (quotes have no payment dimension).
     - No cost/margin fields rendered (client-facing zero-leakage).
+
+GET /api/v1/payments/{id}/receipt-pdf?locale=en|zh
+    Download a payment receipt as a PDF file.
+    - Single payment → one receipt (D3).
+    - Same locale resolution, same auth guards.
+    - Receipt is download-only; no email sending (D3).
+    - Amounts taken from payment and invoice snapshots, never recalculated.
 """
 
 from __future__ import annotations
@@ -129,6 +136,63 @@ async def download_quote_pdf(
     pdf_bytes, filename = await render_quote_pdf(
         session=session,
         quote_id=quote_id,
+        company_id=company_id,
+        locale=locale,
+    )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": build_content_disposition(filename),
+        },
+    )
+
+
+@router.get(
+    "/payments/{payment_id}/receipt-pdf",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Payment receipt PDF download.",
+        }
+    },
+)
+async def download_payment_receipt_pdf(
+    payment_id: uuid.UUID,
+    locale: Literal["en", "zh"] | None = Query(
+        default=None,
+        description=(
+            "Document language. When omitted the D2 resolution chain is used: "
+            "customer.locale → company default → 'en'."
+        ),
+    ),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Render and download a payment receipt as PDF.
+
+    Produces a single-payment receipt (D3).  The receipt shows:
+    - Company header + customer billing address.
+    - Related invoice number.
+    - Payment date, amount, and payment method (from snapshot).
+    - Invoice total, amount paid (total), and amount due (from invoice snapshots).
+
+    Amounts come exclusively from DB snapshots – never recalculated (red-line 1).
+    Receipt is download-only; no email sending (D3).
+
+    ``locale`` controls the language of static labels.  When omitted the D2
+    resolution chain is used: customer.locale → company-level default → 'en'.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    from jai.services.pdf import build_content_disposition, render_payment_receipt_pdf
+
+    pdf_bytes, filename = await render_payment_receipt_pdf(
+        session=session,
+        payment_id=payment_id,
         company_id=company_id,
         locale=locale,
     )
