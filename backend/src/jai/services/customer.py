@@ -22,7 +22,7 @@ Design notes
 from __future__ import annotations
 
 import uuid
-from typing import Literal
+from typing import Literal, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,6 +71,7 @@ def _to_read(customer: Customer, addresses: list[Address] | None = None) -> Cust
         vat_id=customer.vat_id,
         currency=customer.currency,
         invoice_prefix=customer.invoice_prefix,
+        locale=cast(Literal["en", "zh"] | None, customer.locale),
         extra=customer.extra if customer.extra else {},
         addresses=[_address_to_read(a) for a in addrs],
         created_at=customer.created_at,
@@ -213,6 +214,7 @@ async def create_customer(
         vat_id=data.vat_id,
         currency=data.currency,
         invoice_prefix=data.invoice_prefix,
+        locale=data.locale,
         extra=data.extra,
     )
     session.add(customer)
@@ -241,6 +243,7 @@ async def update_customer(
     customer.vat_id = data.vat_id
     customer.currency = data.currency
     customer.invoice_prefix = data.invoice_prefix
+    customer.locale = data.locale
     customer.extra = data.extra
     await session.flush()
     await session.refresh(customer)

@@ -18,12 +18,15 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 from jai.schemas.address import AddressRead, AddressWrite
 from jai.schemas.company import _validate_currency
+
+#: Allowed locale values for customer.locale (None = follow company default).
+_CUSTOMER_LOCALE_VALUES = frozenset({"en", "zh"})
 
 #: Simple email regex – not RFC 5322 complete, but catches obvious mistakes.
 _BASIC_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -43,6 +46,13 @@ class CustomerWrite(BaseModel):
     invoice_prefix: str | None = Field(
         default=None,
         description="Customer series prefix for {{CUSTOMER_SERIES}} in numbering templates.",
+    )
+    locale: Literal["en", "zh"] | None = Field(
+        default=None,
+        description=(
+            "Per-customer default document language for PDF/email output. "
+            "'en' = English, 'zh' = Chinese, null = follow company default."
+        ),
     )
     extra: dict[str, Any] = Field(default_factory=dict)
     addresses: list[AddressWrite] = Field(default_factory=list)
@@ -88,6 +98,7 @@ class CustomerRead(BaseModel):
     vat_id: str | None = None
     currency: str | None = None
     invoice_prefix: str | None = None
+    locale: Literal["en", "zh"] | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
     addresses: list[AddressRead] = Field(default_factory=list)
     created_at: datetime

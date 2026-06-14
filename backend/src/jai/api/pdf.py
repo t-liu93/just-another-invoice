@@ -1,10 +1,11 @@
-"""PDF download endpoints – M9 step 1.
+"""PDF download endpoints – M9 step 1 / step 2.
 
 Endpoints
 ---------
 GET /api/v1/invoices/{id}/pdf?locale=en|zh
     Download an invoice as a PDF file.
-    - locale defaults to "en" (smart default / resolve_document_locale is step 2).
+    - locale is optional; when omitted the D2 resolution chain is used:
+        customer.locale → company default → "en".
     - Returns application/pdf with Content-Disposition: attachment.
     - company_id is injected from the authenticated user (red-line 2).
     - Cross-company or missing invoice → 404.
@@ -14,6 +15,7 @@ GET /api/v1/invoices/{id}/pdf?locale=en|zh
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
@@ -40,7 +42,13 @@ router = APIRouter(prefix="/api/v1", tags=["pdf"])
 )
 async def download_invoice_pdf(
     invoice_id: uuid.UUID,
-    locale: str = Query(default="en", pattern="^(en|zh)$"),
+    locale: Literal["en", "zh"] | None = Query(
+        default=None,
+        description=(
+            "Document language. When omitted the D2 resolution chain is used: "
+            "customer.locale → company default → 'en'."
+        ),
+    ),
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
@@ -49,9 +57,8 @@ async def download_invoice_pdf(
     ``locale`` controls the language of static labels (Invoice, Date, Due Date,
     etc.).  User-entered content (names, descriptions, notes) is rendered as-is.
 
-    The smart locale-resolution chain (customer.locale → company default → "en")
-    is wired in step 2; for now the caller must supply the locale explicitly,
-    defaulting to "en".
+    When ``locale`` is omitted the smart locale-resolution chain (D2) is used:
+    customer.locale → company-level default → "en".
     """
     _owner_only(user)
     company_id = _require_company_id(user)

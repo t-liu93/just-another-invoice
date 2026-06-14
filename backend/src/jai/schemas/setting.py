@@ -48,6 +48,9 @@ SETTING_KEY_USER_PREFERENCES: str = "user.preferences"
 #: AI / receipt-extraction configuration (GLOBAL level, env fallback).
 SETTING_KEY_AI: str = "ai"
 
+#: Company-level default document locale (used for PDF/email language resolution).
+SETTING_KEY_DOCUMENT_DEFAULTS: str = "document.default_locale"
+
 
 # ---------------------------------------------------------------------------
 # Onboarding state (GLOBAL level)
@@ -350,3 +353,43 @@ class AiTestResult(BaseModel):
     ok: bool
     multimodal: bool
     detail: str
+
+
+# ---------------------------------------------------------------------------
+# Document default locale (COMPANY level, M9 step 2)
+# ---------------------------------------------------------------------------
+
+
+class DocumentDefaultsSetting(BaseModel):
+    """Company-level default locale for PDF / email document rendering.
+
+    Stored at ``COMPANY`` level with key ``SETTING_KEY_DOCUMENT_DEFAULTS``
+    (``"document.default_locale"``).
+
+    ``locale`` is the fallback language when neither the export request nor the
+    customer record specifies an explicit locale.  Defaults to ``"en"``.
+
+    Resolution chain (D2): export override → customer.locale → this setting → "en".
+    """
+
+    locale: Literal["en", "zh"] = Field(
+        default="en",
+        description="Default document language: 'en' (English) or 'zh' (Chinese).",
+    )
+
+
+class DocumentDefaultsRead(BaseModel):
+    """Response body for ``GET /api/v1/settings/document-defaults``."""
+
+    locale: Literal["en", "zh"] = Field(
+        default="en",
+        description="Current company-level default document language.",
+    )
+
+
+class DocumentDefaultsUpdate(BaseModel):
+    """Request body for ``PUT /api/v1/settings/document-defaults``."""
+
+    locale: Literal["en", "zh"] = Field(
+        description="New default document language: 'en' or 'zh'.",
+    )

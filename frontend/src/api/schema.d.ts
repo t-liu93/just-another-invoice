@@ -608,6 +608,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/document-defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Defaults
+         * @description Return the company-level default document language.
+         *
+         *     Used as the third step of the D2 locale resolution chain
+         *     (export override → customer.locale → *this* → "en").
+         */
+        get: operations["get_document_defaults_api_v1_settings_document_defaults_get"];
+        /**
+         * Update Document Defaults
+         * @description Update the company-level default document language.
+         *
+         *     ``locale`` must be ``"en"`` or ``"zh"``; other values are rejected with 422.
+         */
+        put: operations["update_document_defaults_api_v1_settings_document_defaults_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vat-rates": {
         parameters: {
             query?: never;
@@ -975,6 +1004,32 @@ export interface paths {
          *     Returns only id/name/unit/default_vat_rate_id – never cost/margin/supplier.
          */
         get: operations["list_invoice_product_options_endpoint_api_v1_invoice_product_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Invoice Pdf
+         * @description Render and download an invoice as PDF.
+         *
+         *     ``locale`` controls the language of static labels (Invoice, Date, Due Date,
+         *     etc.).  User-entered content (names, descriptions, notes) is rendered as-is.
+         *
+         *     When ``locale`` is omitted the smart locale-resolution chain (D2) is used:
+         *     customer.locale → company-level default → "en".
+         */
+        get: operations["download_invoice_pdf_api_v1_invoices__invoice_id__pdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2081,6 +2136,8 @@ export interface components {
             currency?: string | null;
             /** Invoice Prefix */
             invoice_prefix?: string | null;
+            /** Locale */
+            locale?: ("en" | "zh") | null;
             /** Extra */
             extra?: {
                 [key: string]: unknown;
@@ -2124,6 +2181,11 @@ export interface components {
              * @description Customer series prefix for {{CUSTOMER_SERIES}} in numbering templates.
              */
             invoice_prefix?: string | null;
+            /**
+             * Locale
+             * @description Per-customer default document language for PDF/email output. 'en' = English, 'zh' = Chinese, null = follow company default.
+             */
+            locale?: ("en" | "zh") | null;
             /** Extra */
             extra?: {
                 [key: string]: unknown;
@@ -2151,6 +2213,31 @@ export interface components {
          * @enum {string}
          */
         DiscountType: "NONE" | "PERCENTAGE" | "FIXED";
+        /**
+         * DocumentDefaultsRead
+         * @description Response body for ``GET /api/v1/settings/document-defaults``.
+         */
+        DocumentDefaultsRead: {
+            /**
+             * Locale
+             * @description Current company-level default document language.
+             * @default en
+             * @enum {string}
+             */
+            locale?: "en" | "zh";
+        };
+        /**
+         * DocumentDefaultsUpdate
+         * @description Request body for ``PUT /api/v1/settings/document-defaults``.
+         */
+        DocumentDefaultsUpdate: {
+            /**
+             * Locale
+             * @description New default document language: 'en' or 'zh'.
+             * @enum {string}
+             */
+            locale: "en" | "zh";
+        };
         /**
          * DocumentTemplateLineRead
          * @description Single line returned as part of a DocumentTemplateRead.
@@ -6297,6 +6384,59 @@ export interface operations {
             };
         };
     };
+    get_document_defaults_api_v1_settings_document_defaults_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentDefaultsRead"];
+                };
+            };
+        };
+    };
+    update_document_defaults_api_v1_settings_document_defaults_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentDefaultsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentDefaultsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_vat_rates_endpoint_api_v1_vat_rates_get: {
         parameters: {
             query?: never;
@@ -7647,6 +7787,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductInvoiceOptionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_invoice_pdf_api_v1_invoices__invoice_id__pdf_get: {
+        parameters: {
+            query?: {
+                /** @description Document language. When omitted the D2 resolution chain is used: customer.locale → company default → 'en'. */
+                locale?: ("en" | "zh") | null;
+            };
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoice PDF download. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
                 };
             };
             /** @description Validation Error */

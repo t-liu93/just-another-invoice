@@ -126,6 +126,51 @@ def _get_labels(locale: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Locale resolution chain (D2 – M9 step 2)
+# ---------------------------------------------------------------------------
+
+
+def resolve_document_locale(
+    override: str | None,
+    customer_locale: str | None,
+    company_default: str | None,
+) -> str:
+    """Resolve the document language following the D2 priority chain.
+
+    Resolution order (each step falls through to the next when the value is
+    ``None`` or not a recognised locale):
+
+    1. ``override``        – explicit locale from the export / send-email request.
+    2. ``customer_locale`` – per-customer default (``customer.locale``).
+    3. ``company_default`` – company-level default locale setting.
+    4. ``"en"``            – hard-coded fallback.
+
+    Parameters
+    ----------
+    override:
+        Locale supplied by the caller (e.g. query-param ``locale=zh``).
+        ``None`` means "not supplied".
+    customer_locale:
+        Value of ``customer.locale`` on the related customer ORM instance.
+        ``None`` means the customer has no explicit preference.
+    company_default:
+        Value of the ``document.default_locale`` company setting (read from
+        ``DocumentDefaultsSetting.locale``).  ``None`` if the setting has
+        never been written.
+
+    Returns
+    -------
+    str
+        ``"en"`` or ``"zh"``.  Always a recognised value – never ``None``.
+    """
+    _valid = frozenset(PDF_LABELS)
+    for candidate in (override, customer_locale, company_default):
+        if candidate and candidate in _valid:
+            return candidate
+    return _DEFAULT_LOCALE
+
+
+# ---------------------------------------------------------------------------
 # RFC 6266 / RFC 5987 compliant Content-Disposition builder
 # ---------------------------------------------------------------------------
 
@@ -291,7 +336,7 @@ async def render_invoice_pdf(
     session: AsyncSession,
     invoice_id: uuid.UUID,
     company_id: uuid.UUID,
-    locale: str = "en",
+    locale: str | None = None,
 ) -> tuple[bytes, str]:
     """Load an invoice from the DB, render it as PDF, and return (bytes, filename).
 
@@ -299,9 +344,17 @@ async def render_invoice_pdf(
     -----
     1. Load Invoice (with lines + taxes via selectinload) scoped to company_id.
     2. Load Company and Customer.
-    3. Inline logo as data URI from binary_asset.content (never a URL).
-    4. Call build_invoice_html → html_to_pdf.
-    5. Return (pdf_bytes, "<invoice_number>.pdf").
+    3. Resolve document locale via ``resolve_document_locale`` (D2 chain).
+    4. Inline logo as data URI from binary_asset.content (never a URL).
+    5. Call build_invoice_html → html_to_pdf.
+    6. Return (pdf_bytes, "<invoice_number>.pdf").
+
+    Parameters
+    ----------
+    locale:
+        Explicit locale override (``"en"`` / ``"zh"``).  When ``None``, the
+        locale is resolved from the D2 chain: customer.locale →
+        company-default setting → ``"en"``.
 
     Raises
     ------
@@ -361,6 +414,27 @@ async def render_invoice_pdf(
             detail="Customer not found.",
         )
 
+    # -- Resolve locale via D2 chain (step 2) ---------------------------------
+    # When locale is None (no explicit override), we read the company-level
+    # document default and fall through: override → customer.locale →
+    # company default → "en".
+    from jai.models._enums import SettingLevel
+    from jai.schemas.setting import SETTING_KEY_DOCUMENT_DEFAULTS, DocumentDefaultsSetting
+    from jai.services.settings import get_setting
+
+    company_default_setting = await get_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=DocumentDefaultsSetting,
+    )
+    company_default_locale: str | None = (
+        company_default_setting.locale if company_default_setting is not None else None
+    )
+    customer_locale: str | None = getattr(customer, "locale", None)
+    resolved_locale = resolve_document_locale(locale, customer_locale, company_default_locale)
+
     # -- Inline logo as data: URI (D7 – never a URL) -------------------------
     logo_data_uri: str | None = None
     if company.logo_id is not None:
@@ -376,7 +450,7 @@ async def render_invoice_pdf(
         invoice=invoice,
         company=company,
         customer=customer,
-        locale=locale,
+        locale=resolved_locale,
         logo_data_uri=logo_data_uri,
     )
     pdf_bytes = html_to_pdf(html)

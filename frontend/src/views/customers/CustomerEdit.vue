@@ -5,13 +5,14 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useMessage, NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert, NDivider } from 'naive-ui'
+import { useMessage, NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert, NDivider, NSelect } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
 import AddressFieldsForm, { type AddressModel } from '../../components/AddressFieldsForm.vue'
 import { useCustomersStore } from '../../stores/customers'
 import type { components } from '../../api/schema'
 
 type AddressWrite = components['schemas']['AddressWrite']
+type CustomerLocale = 'en' | 'zh' | null
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +35,7 @@ const website = ref<string | null>(null)
 const vatId = ref<string | null>(null)
 const currency = ref<string | null>(null)
 const invoicePrefix = ref<string | null>(null)
+const locale = ref<CustomerLocale>(null)
 
 // Address models.
 const billingAddress = ref<AddressModel>({})
@@ -71,6 +73,7 @@ onMounted(async () => {
       vatId.value = customer.vat_id ?? null
       currency.value = customer.currency ?? null
       invoicePrefix.value = customer.invoice_prefix ?? null
+      locale.value = (customer.locale as CustomerLocale) ?? null
 
       // Populate address fields from existing data.
       for (const addr of customer.addresses ?? []) {
@@ -111,6 +114,7 @@ async function handleSave() {
       vat_id: vatId.value?.trim() || null,
       currency: currency.value?.trim() || null,
       invoice_prefix: invoicePrefix.value?.trim() || null,
+      locale: locale.value,
       addresses: buildAddressesPayload(),
     }
     if (isEdit.value) {
@@ -198,6 +202,22 @@ function handleCancel() {
                   />
                   <n-text depth="3" style="margin-left: 8px; font-size: 12px">
                     {{ t('customers.invoicePrefixHint') }}
+                  </n-text>
+                </n-form-item>
+
+                <n-form-item :label="t('customers.documentLocale')">
+                  <n-select
+                    v-model:value="locale"
+                    :options="[
+                      { label: 'English', value: 'en' },
+                      { label: '中文', value: 'zh' },
+                    ]"
+                    :placeholder="t('customers.documentLocaleDefault')"
+                    clearable
+                    style="max-width: 240px"
+                  />
+                  <n-text depth="3" style="margin-left: 8px; font-size: 12px">
+                    {{ t('customers.documentLocaleHint') }}
                   </n-text>
                 </n-form-item>
 

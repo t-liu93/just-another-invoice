@@ -29,6 +29,7 @@ from jai.models._enums import SettingLevel
 from jai.models.user import User
 from jai.schemas.setting import (
     SETTING_KEY_AI,
+    SETTING_KEY_DOCUMENT_DEFAULTS,
     SETTING_KEY_INVOICE_NUMBERING,
     SETTING_KEY_QUOTE_DEFAULT_VALID_DAYS,
     SETTING_KEY_QUOTE_NUMBERING,
@@ -38,6 +39,9 @@ from jai.schemas.setting import (
     AiSettingsRead,
     AiSettingsUpdate,
     AiTestResult,
+    DocumentDefaultsRead,
+    DocumentDefaultsSetting,
+    DocumentDefaultsUpdate,
     InvoiceNumberingConfig,
     InvoiceNumberSequenceRead,
     InvoiceNumberSequenceWrite,
@@ -763,3 +767,62 @@ async def test_ai_settings(
     )
 
     return await test_ai_config(probe_cfg)
+
+
+# ---------------------------------------------------------------------------
+# Document default locale (COMPANY level, owner-only) – M9 step 2
+# ---------------------------------------------------------------------------
+
+
+@router.get("/document-defaults", response_model=DocumentDefaultsRead)
+async def get_document_defaults(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentDefaultsRead:
+    """Return the company-level default document language.
+
+    Used as the third step of the D2 locale resolution chain
+    (export override → customer.locale → *this* → "en").
+    """
+    _owner_only(user)
+    if user.company_id is None:
+        return DocumentDefaultsRead(locale="en")
+
+    raw = await get_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+        value_type=DocumentDefaultsSetting,
+    )
+    locale_val = raw.locale if raw is not None else "en"
+    return DocumentDefaultsRead(locale=locale_val)
+
+
+@router.put("/document-defaults", response_model=DocumentDefaultsRead)
+async def update_document_defaults(
+    body: DocumentDefaultsUpdate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentDefaultsRead:
+    """Update the company-level default document language.
+
+    ``locale`` must be ``"en"`` or ``"zh"``; other values are rejected with 422.
+    """
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile must be created first.",
+        )
+
+    value = DocumentDefaultsSetting(locale=body.locale)
+    await set_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        value,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+    )
+    await session.commit()
+    return DocumentDefaultsRead(locale=body.locale)

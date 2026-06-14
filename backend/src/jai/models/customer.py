@@ -74,6 +74,13 @@ class Customer(Base):
         comment="Customer series prefix used in {{CUSTOMER_SERIES}} placeholder.",
     )
 
+    # -- Document locale (M9 step 2) -------------------------------------------
+    locale: Mapped[str | None] = mapped_column(
+        String(5),
+        nullable=True,
+        comment="Per-customer document language ('en'/'zh'); NULL = follow company default.",
+    )
+
     # -- Long-tail (JSONB, red-line 12 adjacent) --------------------------------
     extra: Mapped[dict[str, Any]] = mapped_column(
         JSONB,

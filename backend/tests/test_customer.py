@@ -49,6 +49,7 @@ def _make_customer_orm(**overrides: object) -> SimpleNamespace:
         "vat_id": None,
         "currency": None,
         "invoice_prefix": None,
+        "locale": None,
         "extra": {},
         "addresses": [],
         "created_at": datetime.now(UTC),
@@ -663,3 +664,74 @@ class TestDeleteCustomer:
         await delete_customer(session, orm)
         session.delete.assert_called_once_with(orm)
         session.flush.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# CustomerWrite locale field validation (M9 step 2)
+# ---------------------------------------------------------------------------
+
+
+class TestCustomerWriteLocale:
+    """Tests for the ``locale`` field added in M9 step 2."""
+
+    def test_locale_none_by_default(self) -> None:
+        """locale defaults to None (follow company default)."""
+        cw = CustomerWrite(name="X")
+        assert cw.locale is None
+
+    def test_locale_en_accepted(self) -> None:
+        """locale='en' is valid."""
+        cw = CustomerWrite(name="X", locale="en")
+        assert cw.locale == "en"
+
+    def test_locale_zh_accepted(self) -> None:
+        """locale='zh' is valid."""
+        cw = CustomerWrite(name="X", locale="zh")
+        assert cw.locale == "zh"
+
+    def test_locale_none_explicit(self) -> None:
+        """locale=None is valid (means 'follow company default')."""
+        cw = CustomerWrite(name="X", locale=None)
+        assert cw.locale is None
+
+    def test_locale_invalid_value_rejected(self) -> None:
+        """Non-allowed locale values raise ValidationError."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            CustomerWrite(name="X", locale="fr")  # type: ignore[arg-type]
+
+    def test_locale_invalid_de_rejected(self) -> None:
+        """'de' is not an allowed locale."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            CustomerWrite(name="X", locale="de")  # type: ignore[arg-type]
+
+
+class TestCustomerReadLocale:
+    """Tests for locale field in CustomerRead (M9 step 2)."""
+
+    def test_locale_in_read_response(self) -> None:
+        """CustomerRead includes locale field with correct value."""
+        from datetime import UTC, datetime
+        cr = CustomerRead(
+            id=uuid.uuid4(),
+            name="Acme",
+            locale="zh",
+            addresses=[],
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        assert cr.locale == "zh"
+
+    def test_locale_none_in_read_response(self) -> None:
+        """CustomerRead locale can be None."""
+        from datetime import UTC, datetime
+        cr = CustomerRead(
+            id=uuid.uuid4(),
+            name="Acme",
+            locale=None,
+            addresses=[],
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        assert cr.locale is None

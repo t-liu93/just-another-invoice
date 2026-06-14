@@ -183,7 +183,8 @@
       "categoryTheme": "主题",
       "categoryAi": "AI",
       "categoryDictionary": "字典",
-      "comingSoon": "敬请期待"
+      "comingSoon": "敬请期待",
+      "categoryDocumentDefaults": "文档默认"
     },
     "ai": {
       "title": "AI 设置",
@@ -230,6 +231,14 @@
       "defaultValidDaysHint": "新建报价时自动预填。",
       "defaultValidDaysSaveSuccess": "默认有效天数已保存。",
       "defaultValidDaysSaveFailed": "保存失败。"
+    },
+    "documentDefaults": {
+      "title": "文档默认设置",
+      "locale": "默认语言",
+      "localeHint": "当客户未设置专属语言时，PDF 和邮件输出所用的后备语言。",
+      "save": "保存",
+      "saveSuccess": "文档默认设置已保存。",
+      "saveFailed": "保存文档默认设置失败。"
     }
   },
   "vat": {
@@ -339,7 +348,10 @@
     "sortByCreatedAt": "最新优先",
     "invoicePrefix": "发票前缀",
     "invoicePrefixPlaceholder": "如：ACME",
-    "invoicePrefixHint": "对应编号模板中的 {{CUSTOMER_SERIES}} 占位符。"
+    "invoicePrefixHint": "对应编号模板中的 {{CUSTOMER_SERIES}} 占位符。",
+    "documentLocale": "文档语言",
+    "documentLocaleDefault": "跟随公司默认",
+    "documentLocaleHint": "PDF 和邮件的输出语言，仅针对此客户。留空则跟随公司级默认设置。"
   },
   "dict": {
     "active": "启用",
@@ -427,7 +439,21 @@
     "nameRequired": "名称不能为空。",
     "sku": "SKU",
     "skuPlaceholder": "如：SP330",
-    "category": "品类",
+    "category": {
+      "add": "新建品类",
+      "edit": "编辑品类",
+      "delete": "删除",
+      "deleteConfirm": "删除此品类？该品类下的产品将保留，但品类关联会被清除。",
+      "deleteSuccess": "品类已删除。",
+      "deleteFailed": "删除品类失败。",
+      "saveSuccess": "品类已保存。",
+      "saveFailed": "保存品类失败。",
+      "name": "名称",
+      "namePlaceholder": "如：太阳能面板",
+      "nameRequired": "名称不能为空。",
+      "defaultMargin": "默认 Margin",
+      "defaultMarginPlaceholder": "如：30"
+    },
     "categoryPlaceholder": "选择品类",
     "unit": "单位",
     "unitPlaceholder": "选择单位",
@@ -464,21 +490,6 @@
       "resultErrors": "{n} 行存在错误：",
       "resultErrorRow": "第 {row} 行",
       "importFailed": "导入失败，请重试。"
-    },
-    "category": {
-      "add": "新建品类",
-      "edit": "编辑品类",
-      "delete": "删除",
-      "deleteConfirm": "删除此品类？该品类下的产品将保留，但品类关联会被清除。",
-      "deleteSuccess": "品类已删除。",
-      "deleteFailed": "删除品类失败。",
-      "saveSuccess": "品类已保存。",
-      "saveFailed": "保存品类失败。",
-      "name": "名称",
-      "namePlaceholder": "如：太阳能面板",
-      "nameRequired": "名称不能为空。",
-      "defaultMargin": "默认 Margin",
-      "defaultMarginPlaceholder": "如：30"
     }
   },
   "invoices": {

@@ -470,3 +470,103 @@ def test_build_invoice_html_nonzero_discount_shown() -> None:
     html = build_invoice_html(invoice, company, customer, "en", None)
     assert "Discount" in html
     assert "10.000" in html
+
+
+# ---------------------------------------------------------------------------
+# resolve_document_locale – D2 priority chain (M9 step 2)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveDocumentLocale:
+    """Unit tests for the D2 locale resolution chain.
+
+    Priority: override > customer.locale > company_default > "en".
+    Each tier is tested individually to ensure correct fallthrough.
+    """
+
+    def setup_method(self) -> None:
+        from jai.services.pdf import resolve_document_locale
+
+        self._resolve = resolve_document_locale
+
+    # -- Tier 1: override wins ------------------------------------------------
+
+    def test_override_en_wins_over_all(self) -> None:
+        """Explicit override beats customer and company default."""
+        result = self._resolve("en", "zh", "zh")
+        assert result == "en"
+
+    def test_override_zh_wins_over_all(self) -> None:
+        """Explicit zh override beats customer and company default."""
+        result = self._resolve("zh", "en", "en")
+        assert result == "zh"
+
+    # -- Tier 2: customer.locale when override is None -------------------------
+
+    def test_customer_locale_used_when_no_override(self) -> None:
+        """customer.locale is used when override is None."""
+        result = self._resolve(None, "zh", "en")
+        assert result == "zh"
+
+    def test_customer_locale_en_when_no_override(self) -> None:
+        """customer.locale='en' is used when override is None."""
+        result = self._resolve(None, "en", "zh")
+        assert result == "en"
+
+    # -- Tier 3: company default when override and customer are None -----------
+
+    def test_company_default_used_when_override_and_customer_none(self) -> None:
+        """company_default is used when both override and customer.locale are None."""
+        result = self._resolve(None, None, "zh")
+        assert result == "zh"
+
+    def test_company_default_en_when_override_and_customer_none(self) -> None:
+        """company_default='en' is used when override and customer are None."""
+        result = self._resolve(None, None, "en")
+        assert result == "en"
+
+    # -- Tier 4: fallback to "en" when all are None ---------------------------
+
+    def test_all_none_falls_back_to_en(self) -> None:
+        """When all three inputs are None, the result is 'en'."""
+        result = self._resolve(None, None, None)
+        assert result == "en"
+
+    # -- Edge cases: invalid values are treated as None ----------------------
+
+    def test_invalid_override_falls_through_to_customer(self) -> None:
+        """An unrecognised override locale is skipped; customer.locale is used."""
+        result = self._resolve("fr", "zh", "en")
+        assert result == "zh"
+
+    def test_invalid_customer_locale_falls_through_to_company(self) -> None:
+        """An unrecognised customer locale is skipped; company default is used."""
+        result = self._resolve(None, "de", "zh")
+        assert result == "zh"
+
+    def test_invalid_company_default_falls_through_to_en(self) -> None:
+        """An unrecognised company default is skipped; 'en' is the final fallback."""
+        result = self._resolve(None, None, "es")
+        assert result == "en"
+
+    # -- Full chain verification -----------------------------------------------
+
+    def test_full_chain_priority_override_wins(self) -> None:
+        """Full four-tier chain: override 'zh' wins even when customer='en'."""
+        result = self._resolve("zh", "en", "en")
+        assert result == "zh"
+
+    def test_full_chain_priority_customer_wins_when_no_override(self) -> None:
+        """Full chain: customer='zh' wins when override is None."""
+        result = self._resolve(None, "zh", "en")
+        assert result == "zh"
+
+    def test_full_chain_priority_company_wins_when_no_override_or_customer(self) -> None:
+        """Full chain: company='zh' wins when override and customer are None."""
+        result = self._resolve(None, None, "zh")
+        assert result == "zh"
+
+    def test_full_chain_en_fallback(self) -> None:
+        """Full chain: 'en' is the final fallback when all tiers are None."""
+        result = self._resolve(None, None, None)
+        assert result == "en"

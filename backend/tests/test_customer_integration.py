@@ -844,6 +844,209 @@ class TestCustomerAddresses:
 
 
 # ---------------------------------------------------------------------------
+# Customer locale CRUD (M9 step 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestCustomerLocaleCRUD:
+    """Integration tests for customer.locale field (M9 step 2)."""
+
+    async def test_create_customer_with_locale_en(self, db_client: AsyncClient) -> None:
+        """POST /customers with locale='en' stores and returns the value."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "Locale EN", "locale": "en"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["locale"] == "en"
+
+    async def test_create_customer_with_locale_zh(self, db_client: AsyncClient) -> None:
+        """POST /customers with locale='zh' stores and returns the value."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "Locale ZH", "locale": "zh"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["locale"] == "zh"
+
+    async def test_create_customer_locale_null(self, db_client: AsyncClient) -> None:
+        """POST /customers without locale returns locale=null."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "No Locale"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["locale"] is None
+
+    async def test_update_customer_locale(self, db_client: AsyncClient) -> None:
+        """PUT /customers/{id} can change locale en → zh."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "Switchable", "locale": "en"},
+        )
+        cid = create_resp.json()["id"]
+
+        resp = await db_client.put(
+            f"/api/v1/customers/{cid}",
+            json={"name": "Switchable", "locale": "zh"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["locale"] == "zh"
+
+    async def test_update_customer_clears_locale(self, db_client: AsyncClient) -> None:
+        """PUT /customers/{id} with locale=null clears the locale."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "ClearLocale", "locale": "zh"},
+        )
+        cid = create_resp.json()["id"]
+
+        resp = await db_client.put(
+            f"/api/v1/customers/{cid}",
+            json={"name": "ClearLocale", "locale": None},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["locale"] is None
+
+    async def test_create_customer_invalid_locale_rejected(
+        self, db_client: AsyncClient
+    ) -> None:
+        """POST /customers with locale='fr' → 422."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "Bad Locale", "locale": "fr"},
+        )
+        assert resp.status_code == 422
+
+    async def test_get_customer_returns_locale(self, db_client: AsyncClient) -> None:
+        """GET /customers/{id} returns locale field."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        create_resp = await db_client.post(
+            "/api/v1/customers",
+            json={"name": "GetLocale", "locale": "zh"},
+        )
+        cid = create_resp.json()["id"]
+
+        resp = await db_client.get(f"/api/v1/customers/{cid}")
+        assert resp.status_code == 200
+        assert resp.json()["locale"] == "zh"
+
+
+# ---------------------------------------------------------------------------
+# Document defaults settings (M9 step 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestDocumentDefaultsSettings:
+    """Integration tests for GET/PUT /settings/document-defaults (M9 step 2)."""
+
+    async def test_get_document_defaults_returns_en_by_default(
+        self, db_client: AsyncClient
+    ) -> None:
+        """GET /settings/document-defaults returns 'en' when not configured."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.get("/api/v1/settings/document-defaults")
+        assert resp.status_code == 200
+        assert resp.json()["locale"] == "en"
+
+    async def test_put_document_defaults_zh(self, db_client: AsyncClient) -> None:
+        """PUT /settings/document-defaults can set locale to 'zh'."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.put(
+            "/api/v1/settings/document-defaults",
+            json={"locale": "zh"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["locale"] == "zh"
+
+    async def test_put_document_defaults_en(self, db_client: AsyncClient) -> None:
+        """PUT /settings/document-defaults can set locale to 'en'."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        # First set zh
+        await db_client.put(
+            "/api/v1/settings/document-defaults",
+            json={"locale": "zh"},
+        )
+        # Then reset to en
+        resp = await db_client.put(
+            "/api/v1/settings/document-defaults",
+            json={"locale": "en"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["locale"] == "en"
+
+    async def test_get_document_defaults_reflects_update(
+        self, db_client: AsyncClient
+    ) -> None:
+        """GET /settings/document-defaults reflects a previous PUT."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        await db_client.put(
+            "/api/v1/settings/document-defaults",
+            json={"locale": "zh"},
+        )
+
+        resp = await db_client.get("/api/v1/settings/document-defaults")
+        assert resp.status_code == 200
+        assert resp.json()["locale"] == "zh"
+
+    async def test_put_document_defaults_invalid_locale_rejected(
+        self, db_client: AsyncClient
+    ) -> None:
+        """PUT /settings/document-defaults with invalid locale → 422."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+
+        resp = await db_client.put(
+            "/api/v1/settings/document-defaults",
+            json={"locale": "fr"},
+        )
+        assert resp.status_code == 422
+
+    async def test_document_defaults_requires_owner(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Non-owner user cannot access document-defaults endpoints."""
+        # Register an owner first to make the app non-fresh
+        await _full_auth(db_client, email="owner2@example.com")
+        await _setup_company(db_client)
+
+        resp = await db_client.get("/api/v1/settings/document-defaults")
+        # Owner access → 200
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
 # Utility
 # ---------------------------------------------------------------------------
 

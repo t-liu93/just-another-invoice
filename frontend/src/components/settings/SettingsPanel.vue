@@ -17,6 +17,7 @@ import {
   ColorPaletteOutline,
   BookOutline,
   SparklesOutline,
+  DocumentOutline,
 } from '@vicons/ionicons5'
 import { useSettingsPanel, type SettingsCategory } from '../../composables/useSettingsPanel'
 import PreferenceSettings from './PreferenceSettings.vue'
@@ -24,6 +25,7 @@ import SmtpSettingsForm from './SmtpSettingsForm.vue'
 import ThemeSettings from './ThemeSettings.vue'
 import DictionarySettings from './DictionarySettings.vue'
 import AiSettingsForm from './AiSettingsForm.vue'
+import DocumentDefaultsSettings from './DocumentDefaultsSettings.vue'
 
 const { t } = useI18n()
 const { isOpen, activeCategory, close } = useSettingsPanel()
@@ -57,6 +59,11 @@ const menuOptions = computed<MenuOption[]>(() => [
     label: t('settings.panel.categoryAi'),
     key: 'ai',
     icon: renderIcon(SparklesOutline),
+  },
+  {
+    label: t('settings.panel.categoryDocumentDefaults'),
+    key: 'document-defaults',
+    icon: renderIcon(DocumentOutline),
   },
 ])
 
@@ -96,6 +103,7 @@ function onMenuUpdate(key: string) {
         <ThemeSettings v-else-if="activeCategory === 'theme'" />
         <DictionarySettings v-else-if="activeCategory === 'dictionary'" />
         <AiSettingsForm v-else-if="activeCategory === 'ai'" />
+        <DocumentDefaultsSettings v-else-if="activeCategory === 'document-defaults'" />
       </div>
     </div>
   </n-modal>
