@@ -28,8 +28,10 @@ from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.user import User
 from jai.schemas.setting import (
+    DEFAULT_EMAIL_TEMPLATES,
     SETTING_KEY_AI,
     SETTING_KEY_DOCUMENT_DEFAULTS,
+    SETTING_KEY_EMAIL_TEMPLATES,
     SETTING_KEY_INVOICE_NUMBERING,
     SETTING_KEY_QUOTE_DEFAULT_VALID_DAYS,
     SETTING_KEY_QUOTE_NUMBERING,
@@ -42,6 +44,9 @@ from jai.schemas.setting import (
     DocumentDefaultsRead,
     DocumentDefaultsSetting,
     DocumentDefaultsUpdate,
+    EmailTemplatesRead,
+    EmailTemplatesSetting,
+    EmailTemplatesUpdate,
     InvoiceNumberingConfig,
     InvoiceNumberSequenceRead,
     InvoiceNumberSequenceWrite,
@@ -826,3 +831,68 @@ async def update_document_defaults(
     )
     await session.commit()
     return DocumentDefaultsRead(locale=body.locale)
+
+
+# ---------------------------------------------------------------------------
+# Email templates (COMPANY level, owner-only) – M9 step 5
+# ---------------------------------------------------------------------------
+
+
+def _email_templates_to_read(cfg: EmailTemplatesSetting) -> EmailTemplatesRead:
+    """Convert the internal model to the API read response."""
+    return EmailTemplatesRead(invoice=cfg.invoice, quote=cfg.quote)
+
+
+@router.get("/email-templates", response_model=EmailTemplatesRead)
+async def get_email_templates(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EmailTemplatesRead:
+    """Return company email templates (invoice + quote, EN/ZH).
+
+    Falls back to built-in defaults when no setting has been saved yet (D4).
+    """
+    _owner_only(user)
+    if user.company_id is None:
+        return _email_templates_to_read(DEFAULT_EMAIL_TEMPLATES)
+
+    raw = await get_setting(
+        session,
+        SETTING_KEY_EMAIL_TEMPLATES,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+        value_type=EmailTemplatesSetting,
+    )
+    cfg = raw if raw is not None else DEFAULT_EMAIL_TEMPLATES
+    return _email_templates_to_read(cfg)
+
+
+@router.put("/email-templates", response_model=EmailTemplatesRead)
+async def update_email_templates(
+    body: EmailTemplatesUpdate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EmailTemplatesRead:
+    """Update company email templates.
+
+    The full ``invoice`` and ``quote`` structure (EN + ZH each) must be
+    supplied; partial updates are not supported.  Pydantic validates the
+    nested structure – an invalid payload is rejected with 422.
+    """
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile must be created first.",
+        )
+
+    value = EmailTemplatesSetting(invoice=body.invoice, quote=body.quote)
+    await set_setting(
+        session,
+        SETTING_KEY_EMAIL_TEMPLATES,
+        value,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+    )
+    await session.commit()
+    return _email_templates_to_read(value)

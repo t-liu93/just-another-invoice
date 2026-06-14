@@ -637,6 +637,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/email-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Email Templates
+         * @description Return company email templates (invoice + quote, EN/ZH).
+         *
+         *     Falls back to built-in defaults when no setting has been saved yet (D4).
+         */
+        get: operations["get_email_templates_api_v1_settings_email_templates_get"];
+        /**
+         * Update Email Templates
+         * @description Update company email templates.
+         *
+         *     The full ``invoice`` and ``quote`` structure (EN + ZH each) must be
+         *     supplied; partial updates are not supported.  Pydantic validates the
+         *     nested structure – an invalid payload is rejected with 422.
+         */
+        put: operations["update_email_templates_api_v1_settings_email_templates_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vat-rates": {
         parameters: {
             query?: never;
@@ -1030,6 +1060,68 @@ export interface paths {
          *     customer.locale → company-level default → "en".
          */
         get: operations["download_invoice_pdf_api_v1_invoices__invoice_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Quote Pdf
+         * @description Render and download a quote as PDF.
+         *
+         *     ``locale`` controls the language of static labels (Quote, Date, Valid Until,
+         *     etc.).  User-entered content (names, descriptions, notes) is rendered as-is.
+         *
+         *     When ``locale`` is omitted the smart locale-resolution chain (D2) is used:
+         *     customer.locale → company-level default → "en".
+         *
+         *     No cost/margin/estimate data is included in the PDF (client-facing
+         *     zero-leakage guard).  No due_amount / paid_status is rendered (quotes have
+         *     no payment dimension).
+         */
+        get: operations["download_quote_pdf_api_v1_quotes__quote_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{payment_id}/receipt-pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Payment Receipt Pdf
+         * @description Render and download a payment receipt as PDF.
+         *
+         *     Produces a single-payment receipt (D3).  The receipt shows:
+         *     - Company header + customer billing address.
+         *     - Related invoice number.
+         *     - Payment date, amount, and payment method (from snapshot).
+         *     - Invoice total, amount paid (total), and amount due (from invoice snapshots).
+         *
+         *     Amounts come exclusively from DB snapshots – never recalculated (red-line 1).
+         *     Receipt is download-only; no email sending (D3).
+         *
+         *     ``locale`` controls the language of static labels.  When omitted the D2
+         *     resolution chain is used: customer.locale → company-level default → 'en'.
+         */
+        get: operations["download_payment_receipt_pdf_api_v1_payments__payment_id__receipt_pdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2352,6 +2444,52 @@ export interface components {
              * @description At least 1 line required.
              */
             lines: components["schemas"]["DocumentTemplateLineWrite"][];
+        };
+        /**
+         * EmailTemplate
+         * @description A single email template with a subject line and plain-text body.
+         *
+         *     Both fields may contain placeholder tokens of the form ``{TOKEN_NAME}``.
+         *     Tokens are resolved at send time; unknown tokens are left as-is (not
+         *     raised).  The ``body`` is stored as **plain text + placeholders** – no
+         *     HTML.  HTML conversion (nl2br + HTML-escaping) happens only at render
+         *     time inside ``services/email.render_email_template``.
+         */
+        EmailTemplate: {
+            /**
+             * Subject
+             * @description Email subject line (plain text, may contain placeholders).
+             */
+            subject: string;
+            /**
+             * Body
+             * @description Email body (plain text + placeholders, no HTML).
+             */
+            body: string;
+        };
+        /**
+         * EmailTemplateLocaleMap
+         * @description Per-locale templates for a single document type.
+         */
+        EmailTemplateLocaleMap: {
+            en: components["schemas"]["EmailTemplate"];
+            zh: components["schemas"]["EmailTemplate"];
+        };
+        /**
+         * EmailTemplatesRead
+         * @description Response body for ``GET /api/v1/settings/email-templates``.
+         */
+        EmailTemplatesRead: {
+            invoice: components["schemas"]["EmailTemplateLocaleMap"];
+            quote: components["schemas"]["EmailTemplateLocaleMap"];
+        };
+        /**
+         * EmailTemplatesUpdate
+         * @description Request body for ``PUT /api/v1/settings/email-templates``.
+         */
+        EmailTemplatesUpdate: {
+            invoice: components["schemas"]["EmailTemplateLocaleMap"];
+            quote: components["schemas"]["EmailTemplateLocaleMap"];
         };
         /**
          * EstimateCalculationRead
@@ -6437,6 +6575,59 @@ export interface operations {
             };
         };
     };
+    get_email_templates_api_v1_settings_email_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailTemplatesRead"];
+                };
+            };
+        };
+    };
+    update_email_templates_api_v1_settings_email_templates_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailTemplatesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailTemplatesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_vat_rates_endpoint_api_v1_vat_rates_get: {
         parameters: {
             query?: never;
@@ -7815,6 +8006,74 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Invoice PDF download. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_quote_pdf_api_v1_quotes__quote_id__pdf_get: {
+        parameters: {
+            query?: {
+                /** @description Document language. When omitted the D2 resolution chain is used: customer.locale → company default → 'en'. */
+                locale?: ("en" | "zh") | null;
+            };
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Quote PDF download. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_payment_receipt_pdf_api_v1_payments__payment_id__receipt_pdf_get: {
+        parameters: {
+            query?: {
+                /** @description Document language. When omitted the D2 resolution chain is used: customer.locale → company default → 'en'. */
+                locale?: ("en" | "zh") | null;
+            };
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Payment receipt PDF download. */
             200: {
                 headers: {
                     [name: string]: unknown;

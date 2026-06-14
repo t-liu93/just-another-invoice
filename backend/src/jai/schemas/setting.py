@@ -393,3 +393,124 @@ class DocumentDefaultsUpdate(BaseModel):
     locale: Literal["en", "zh"] = Field(
         description="New default document language: 'en' or 'zh'.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Email templates (COMPANY level, M9 step 5)
+# ---------------------------------------------------------------------------
+
+#: Company-level email templates (invoice + quote, EN/ZH).
+SETTING_KEY_EMAIL_TEMPLATES: str = "email.templates"
+
+
+class EmailTemplate(BaseModel):
+    """A single email template with a subject line and plain-text body.
+
+    Both fields may contain placeholder tokens of the form ``{TOKEN_NAME}``.
+    Tokens are resolved at send time; unknown tokens are left as-is (not
+    raised).  The ``body`` is stored as **plain text + placeholders** – no
+    HTML.  HTML conversion (nl2br + HTML-escaping) happens only at render
+    time inside ``services/email.render_email_template``.
+    """
+
+    subject: str = Field(description="Email subject line (plain text, may contain placeholders).")
+    body: str = Field(description="Email body (plain text + placeholders, no HTML).")
+
+
+class EmailTemplateLocaleMap(BaseModel):
+    """Per-locale templates for a single document type."""
+
+    en: EmailTemplate
+    zh: EmailTemplate
+
+
+class EmailTemplatesSetting(BaseModel):
+    """Company-level email template configuration.
+
+    Stored at ``COMPANY`` level with key ``SETTING_KEY_EMAIL_TEMPLATES``
+    (``"email.templates"``).  Holds one set of ``{en, zh}`` templates for
+    each supported document type.
+
+    Body is **plain text + placeholders** (red-line 7: no arbitrary HTML
+    stored).  Rendering via ``render_email_template`` converts the body to
+    safe HTML at send time.
+    """
+
+    invoice: EmailTemplateLocaleMap
+    quote: EmailTemplateLocaleMap
+
+
+# ---------------------------------------------------------------------------
+# API-facing read / write models
+# ---------------------------------------------------------------------------
+
+
+class EmailTemplatesRead(BaseModel):
+    """Response body for ``GET /api/v1/settings/email-templates``."""
+
+    invoice: EmailTemplateLocaleMap
+    quote: EmailTemplateLocaleMap
+
+
+class EmailTemplatesUpdate(BaseModel):
+    """Request body for ``PUT /api/v1/settings/email-templates``."""
+
+    invoice: EmailTemplateLocaleMap
+    quote: EmailTemplateLocaleMap
+
+
+# ---------------------------------------------------------------------------
+# Built-in default email templates (fallback when no setting exists – D4)
+# ---------------------------------------------------------------------------
+
+DEFAULT_EMAIL_TEMPLATES = EmailTemplatesSetting(
+    invoice=EmailTemplateLocaleMap(
+        en=EmailTemplate(
+            subject="Invoice {INVOICE_NUMBER} from {COMPANY_NAME}",
+            body=(
+                "Dear {CUSTOMER_NAME},\n\n"
+                "Please find attached invoice {INVOICE_NUMBER} dated {DATE}.\n\n"
+                "Amount due: {CURRENCY} {AMOUNT_DUE}\n"
+                "Due date: {DUE_DATE}\n\n"
+                "If you have any questions, please do not hesitate to contact us.\n\n"
+                "Kind regards,\n{COMPANY_NAME}"
+            ),
+        ),
+        zh=EmailTemplate(
+            subject="{COMPANY_NAME} 发票 {INVOICE_NUMBER}",
+            body=(
+                "尊敬的 {CUSTOMER_NAME}，\n\n"
+                "请查收附件中的发票 {INVOICE_NUMBER}，开票日期：{DATE}。\n\n"
+                "应付金额：{CURRENCY} {AMOUNT_DUE}\n"
+                "付款截止日：{DUE_DATE}\n\n"
+                "如有任何疑问，请随时与我们联系。\n\n"
+                "此致\n{COMPANY_NAME}"
+            ),
+        ),
+    ),
+    quote=EmailTemplateLocaleMap(
+        en=EmailTemplate(
+            subject="Quote {QUOTE_NUMBER} from {COMPANY_NAME}",
+            body=(
+                "Dear {CUSTOMER_NAME},\n\n"
+                "Please find attached our quote {QUOTE_NUMBER} dated {DATE}.\n\n"
+                "Total amount: {CURRENCY} {TOTAL}\n"
+                "Valid until: {VALID_UNTIL}\n\n"
+                "We look forward to your response. Please contact us if you have "
+                "any questions.\n\n"
+                "Kind regards,\n{COMPANY_NAME}"
+            ),
+        ),
+        zh=EmailTemplate(
+            subject="{COMPANY_NAME} 报价单 {QUOTE_NUMBER}",
+            body=(
+                "尊敬的 {CUSTOMER_NAME}，\n\n"
+                "请查收附件中的报价单 {QUOTE_NUMBER}，报价日期：{DATE}。\n\n"
+                "报价总额：{CURRENCY} {TOTAL}\n"
+                "有效期至：{VALID_UNTIL}\n\n"
+                "期待您的回复，如有疑问请随时联系我们。\n\n"
+                "此致\n{COMPANY_NAME}"
+            ),
+        ),
+    ),
+)

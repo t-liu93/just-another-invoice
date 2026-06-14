@@ -9,24 +9,74 @@ Templates
 ---------
 Jinja2 HTML templates live in ``jai/templates/email/``.  Autoescape is
 **always enabled** (red-line 7 – XSS prevention for user-supplied content).
+
+Email template rendering (M9 step 5)
+-------------------------------------
+``render_email_template`` converts a plain-text body (with ``{TOKEN}``
+placeholders) to a safe HTML email body:
+
+1. nh3 sanitises the raw body text first (strips any accidental HTML/scripts
+   the author might have pasted in).
+2. Placeholder tokens are replaced with HTML-escaped values (prevent
+   injection via data values).
+3. Newlines are converted to ``<br>`` tags.
+4. The result is wrapped in a minimal HTML shell.
+
+The subject line receives only placeholder substitution (plain text, no HTML
+wrapping or nl2br).
+
+Supported placeholder tokens:
+  Common:   COMPANY_NAME, CUSTOMER_NAME, DATE, DOCUMENT_NUMBER, TOTAL, CURRENCY
+  Invoice:  INVOICE_NUMBER, DUE_DATE, AMOUNT_DUE
+  Quote:    QUOTE_NUMBER, VALID_UNTIL
 """
 
 from __future__ import annotations
 
+import html
 import logging
+import re
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
 import aiosmtplib
+import nh3
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.config import get_settings
 from jai.models._enums import SettingLevel
-from jai.schemas.setting import SETTING_KEY_SMTP, SmtpSettings
+from jai.schemas.setting import SETTING_KEY_SMTP, EmailTemplate, SmtpSettings
 
 logger = logging.getLogger("jai.email")
+
+# ---------------------------------------------------------------------------
+# Allowed placeholder token names (explicit allowlist — D4)
+# ---------------------------------------------------------------------------
+
+#: All tokens that may appear in email template bodies / subjects.
+_ALLOWED_TOKENS: frozenset[str] = frozenset(
+    {
+        # Common
+        "COMPANY_NAME",
+        "CUSTOMER_NAME",
+        "DATE",
+        "DOCUMENT_NUMBER",
+        "TOTAL",
+        "CURRENCY",
+        # Invoice-specific
+        "INVOICE_NUMBER",
+        "DUE_DATE",
+        "AMOUNT_DUE",
+        # Quote-specific
+        "QUOTE_NUMBER",
+        "VALID_UNTIL",
+    }
+)
+
+#: Regex matching any ``{TOKEN_NAME}`` placeholder.
+_PLACEHOLDER_RE = re.compile(r"\{([A-Z_]+)\}")
 
 # ---------------------------------------------------------------------------
 # Jinja2 environment (autoescape ON → red-line 7)
@@ -204,3 +254,85 @@ async def is_smtp_configured(session: AsyncSession) -> bool:
     """Return ``True`` if SMTP settings are present (DB or env fallback)."""
     cfg = await _get_smtp_config(session)
     return _configured(cfg)
+
+
+# ---------------------------------------------------------------------------
+# Email template rendering (M9 step 5)
+# ---------------------------------------------------------------------------
+
+
+def render_email_template(
+    template: EmailTemplate,
+    context: dict[str, str],
+) -> tuple[str, str]:
+    """Render an email template, returning ``(subject, html_body)``.
+
+    The rendering pipeline (red-line 7 + D4 + D7):
+
+    **Body**:
+      1. ``nh3.clean`` the raw body text so any accidentally pasted HTML or
+         script tags are stripped before further processing.
+      2. Replace each ``{TOKEN}`` placeholder with its HTML-escaped value
+         (prevents injection through data values).  Tokens not present in
+         *context* are replaced with an empty string.  Tokens not in the
+         explicit ``_ALLOWED_TOKENS`` allowlist are replaced with empty
+         string (not raised, not executed).
+      3. Convert remaining newlines to ``<br>`` tags.
+      4. Wrap the result in a minimal HTML shell.
+
+    **Subject**:
+      Placeholder substitution only (plain text).  Values are treated as
+      plain text; no HTML escaping or wrapping is applied.
+
+    Parameters
+    ----------
+    template:
+        The ``EmailTemplate`` instance (subject + body, plain text).
+    context:
+        Mapping of token name → value.  Missing tokens → empty string.
+        Values are caller-supplied strings (e.g. invoice number, company
+        name).
+
+    Returns
+    -------
+    (subject, html_body):
+        ``subject`` – plain-text subject with placeholders filled in.
+        ``html_body`` – safe HTML body ready for sending.
+    """
+    # --- Subject (plain text, placeholder substitution only) ---
+    def _replace_subject(m: re.Match[str]) -> str:
+        token = m.group(1)
+        # Unknown tokens → empty string (not crash, not execute).
+        return context.get(token, "") if token in _ALLOWED_TOKENS else ""
+
+    rendered_subject = _PLACEHOLDER_RE.sub(_replace_subject, template.subject)
+
+    # --- Body ---
+    # Step 1: nh3 clean – strip any HTML/scripts in the stored plain text.
+    #   Allow *no* tags so the body is truly plain text after sanitisation.
+    clean_body = nh3.clean(template.body, tags=set())
+
+    # Step 2: Replace placeholders with HTML-escaped values.
+    def _replace_body(m: re.Match[str]) -> str:
+        token = m.group(1)
+        if token not in _ALLOWED_TOKENS:
+            return ""  # Unknown token → suppress (not raise, not execute)
+        raw_value = context.get(token, "")
+        return html.escape(raw_value, quote=True)
+
+    escaped_body = _PLACEHOLDER_RE.sub(_replace_body, clean_body)
+
+    # Step 3: nl2br – convert newlines to <br> tags.
+    # Also handle Windows-style \r\n.
+    br_body = escaped_body.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>\n")
+
+    # Step 4: Minimal HTML shell.
+    html_body = (
+        "<!DOCTYPE html>\n"
+        "<html><head><meta charset=\"utf-8\"></head>\n"
+        "<body style=\"font-family: sans-serif; font-size: 14px; color: #333;\">\n"
+        f"{br_body}\n"
+        "</body></html>"
+    )
+
+    return rendered_subject, html_body

@@ -18,6 +18,7 @@ import {
   BookOutline,
   SparklesOutline,
   DocumentOutline,
+  CreateOutline,
 } from '@vicons/ionicons5'
 import { useSettingsPanel, type SettingsCategory } from '../../composables/useSettingsPanel'
 import PreferenceSettings from './PreferenceSettings.vue'
@@ -26,6 +27,7 @@ import ThemeSettings from './ThemeSettings.vue'
 import DictionarySettings from './DictionarySettings.vue'
 import AiSettingsForm from './AiSettingsForm.vue'
 import DocumentDefaultsSettings from './DocumentDefaultsSettings.vue'
+import EmailTemplatesSettings from './EmailTemplatesSettings.vue'
 
 const { t } = useI18n()
 const { isOpen, activeCategory, close } = useSettingsPanel()
@@ -64,6 +66,11 @@ const menuOptions = computed<MenuOption[]>(() => [
     label: t('settings.panel.categoryDocumentDefaults'),
     key: 'document-defaults',
     icon: renderIcon(DocumentOutline),
+  },
+  {
+    label: t('settings.panel.categoryEmailTemplates'),
+    key: 'email-templates',
+    icon: renderIcon(CreateOutline),
   },
 ])
 
@@ -104,6 +111,7 @@ function onMenuUpdate(key: string) {
         <DictionarySettings v-else-if="activeCategory === 'dictionary'" />
         <AiSettingsForm v-else-if="activeCategory === 'ai'" />
         <DocumentDefaultsSettings v-else-if="activeCategory === 'document-defaults'" />
+        <EmailTemplatesSettings v-else-if="activeCategory === 'email-templates'" />
       </div>
     </div>
   </n-modal>

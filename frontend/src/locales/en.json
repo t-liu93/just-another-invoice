@@ -184,7 +184,8 @@
       "categoryAi": "AI",
       "categoryDictionary": "Dictionaries",
       "comingSoon": "Coming soon",
-      "categoryDocumentDefaults": "Document defaults"
+      "categoryDocumentDefaults": "Document defaults",
+      "categoryEmailTemplates": "Email templates"
     },
     "ai": {
       "title": "AI Settings",
@@ -239,6 +240,21 @@
       "save": "Save",
       "saveSuccess": "Document defaults saved.",
       "saveFailed": "Failed to save document defaults."
+    },
+    "emailTemplates": {
+      "title": "Email Templates",
+      "hint": "Customise the subject and body sent when emailing invoices or quotes. Use placeholders (shown below) to insert document data at send time.",
+      "docTypeInvoice": "Invoice",
+      "docTypeQuote": "Quote",
+      "subject": "Subject",
+      "subjectPlaceholder": "e.g. Invoice {INVOICE_NUMBER} from {COMPANY_NAME}",
+      "body": "Body",
+      "bodyPlaceholder": "Plain text. Use placeholders like {CUSTOMER_NAME}, {INVOICE_NUMBER}, etc.",
+      "placeholders": "Available placeholders",
+      "placeholderHint": "Copy any placeholder into the subject or body. Missing values are replaced with an empty string at send time.",
+      "save": "Save",
+      "saveSuccess": "Email templates saved.",
+      "saveFailed": "Failed to save email templates."
     }
   },
   "vat": {

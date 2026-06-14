@@ -184,7 +184,8 @@
       "categoryAi": "AI",
       "categoryDictionary": "字典",
       "comingSoon": "敬请期待",
-      "categoryDocumentDefaults": "文档默认"
+      "categoryDocumentDefaults": "文档默认",
+      "categoryEmailTemplates": "邮件模板"
     },
     "ai": {
       "title": "AI 设置",
@@ -239,6 +240,21 @@
       "save": "保存",
       "saveSuccess": "文档默认设置已保存。",
       "saveFailed": "保存文档默认设置失败。"
+    },
+    "emailTemplates": {
+      "title": "邮件模板",
+      "hint": "自定义发送发票或报价单邮件时的主题和正文。在发送时，占位符会被替换为单据数据。",
+      "docTypeInvoice": "发票",
+      "docTypeQuote": "报价单",
+      "subject": "主题",
+      "subjectPlaceholder": "例如：{COMPANY_NAME} 发票 {INVOICE_NUMBER}",
+      "body": "正文",
+      "bodyPlaceholder": "纯文本，可使用占位符，如 {CUSTOMER_NAME}、{INVOICE_NUMBER} 等。",
+      "placeholders": "可用占位符",
+      "placeholderHint": "将占位符复制到主题或正文中，发送时自动替换为真实数据；缺失值替换为空字符串。",
+      "save": "保存",
+      "saveSuccess": "邮件模板已保存。",
+      "saveFailed": "保存邮件模板失败。"
     }
   },
   "vat": {
