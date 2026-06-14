@@ -312,7 +312,7 @@ docs/
 | M6.5 | 成本核算 / 报价辅助（内部 estimation → 报价） | 🟢 完成（2026-06-12；步骤 1–5 + 部署自测点 1–8 全过；987 测试绿） |
 | M7 | 收款 | 🟢 完成（2026-06-13；orchestrator 5 步，每步盲审+返工收敛；ruff/mypy/单测 404/集成 641/codegen 无漂移/build 全绿；人工 walkthrough 自测点 1–8 通过，#9 单币种 UI 待 FX 前端落地后补、隔离/cascade 由集成测试覆盖）。收款 sub-cent 边界（3 位总额不可按分收满）顺延 M7.5 |
 | M7.5 | 货币舍入口径修正（落到「分」） | 🟢 完成（2026-06-13；orchestrator 3 步逐步盲审收敛，步骤2 一处 docstring fixup、步骤1/3 零 finding；**行级到分**、`F2026-009`→`3865.16`；ruff/mypy/单测 426/集成 644（+3 F2026-009 收满回归）全绿；零迁移/零契约/无 codegen；payment/costing/estimate 服务代码零改动；作者人工 walkthrough 自测点 1–3 通过、无 finding） |
-| M8 | 开支（含 AI 填单 + AI 供货价单识别，可与单据线并行） | ⬜ 待实现（`milestones/M8.md` 精细设计**已定稿/冻结** 2026-06-13：5 步主线 [expense+分存 / storage 收据 / 周期开支 / AI 票据填单 / 前端收尾] + AI 价单 follow-on 单列；AI 走 OpenAI 兼容 Chat Completions（`httpx` 自构造、非 SDK；base_url/model/key/提示词 用户自填 + 多模态测试；PDF 用 pypdfium2 栅格化成图统一走 image_url）；D1–D16 与作者共定） |
+| M8 | 开支（含 AI 填单 + AI 供货价单识别，可与单据线并行） | 🟢 完成（2026-06-14；orchestrator 5 步逐步盲审收敛 [expense+分存 / storage 收据 / 周期开支 / AI 票据填单 / 前端收尾]；末轮 walkthrough refinements 单列一轮压进同一收尾 commit [可抵扣随分类联动 / 收据 bind-mount uid1000 / AI 探针 64×64 / 注入当前日期 / 摘要写 note 跟随界面语言 / 选率自动算 VAT 后端端点 / 提示词「默认常驻+自定义追加」]；ruff/mypy/单测 599/集成/build/无漂移全绿；自测点 1–5 人工通过、7 集成覆盖、8 通过，6 周期性开支作者暂不用未走（不影响验收）、9 远端 CI 待确认。AI 走 OpenAI 兼容 Chat Completions（`httpx` 自构造、非 SDK；base_url/model/key/提示词 用户自填 + 多模态测试；PDF 用 pypdfium2 栅格化成图统一走 image_url）。**follow-on 未做**：AI 供货价单 → M4 目录） |
 | M9 | PDF（邮件底座在 M1） | ⬜（`milestones/M9.md` 骨架/预研已落，未冻结，进入时 JIT 补全） |
 | M10 | 报表 / 仪表盘（含 VAT 申报） | ⬜ |
 | M11 | 收尾 / GA 前体检 | ⬜ |
