@@ -2035,27 +2035,27 @@ export interface components {
              * Enabled
              * @default false
              */
-            enabled: boolean;
+            enabled?: boolean;
             /**
              * Base Url
              * @default https://api.openai.com/v1
              */
-            base_url: string;
+            base_url?: string;
             /**
              * Api Key Set
              * @default false
              */
-            api_key_set: boolean;
+            api_key_set?: boolean;
             /**
              * Model
              * @default
              */
-            model: string;
+            model?: string;
             /**
              * Receipt Prompt
              * @default
              */
-            receipt_prompt: string;
+            receipt_prompt?: string;
         };
         /**
          * AiSettingsUpdate
@@ -2174,7 +2174,7 @@ export interface components {
              * Has Logo
              * @default false
              */
-            has_logo: boolean;
+            has_logo?: boolean;
             /** Logo Url */
             logo_url?: string | null;
             /**
@@ -2278,7 +2278,7 @@ export interface components {
              * Is Default
              * @default false
              */
-            is_default: boolean;
+            is_default?: boolean;
         };
         /**
          * CustomerListResponse
@@ -2381,13 +2381,13 @@ export interface components {
          */
         DiscountInput: {
             /** @default NONE */
-            type: components["schemas"]["DiscountType"];
+            type?: components["schemas"]["DiscountType"];
             /**
              * Value
              * @description Discount value. Ignored when type=NONE.
              * @default 0
              */
-            value: number | string;
+            value?: number | string;
         };
         /**
          * DiscountType
@@ -2406,7 +2406,7 @@ export interface components {
              * @default en
              * @enum {string}
              */
-            locale: "en" | "zh";
+            locale?: "en" | "zh";
         };
         /**
          * DocumentDefaultsUpdate
@@ -2516,13 +2516,13 @@ export interface components {
             /** Unit Price */
             unit_price?: number | string | null;
             /** @default NONE */
-            discount_type: components["schemas"]["DiscountType"];
+            discount_type?: components["schemas"]["DiscountType"];
             /**
              * Discount Value
              * @description Discount value. Ignored when discount_type=NONE.
              * @default 0
              */
-            discount_value: number | string;
+            discount_value?: number | string;
             /** Vat Rate Id */
             vat_rate_id?: string | null;
         };
@@ -2548,7 +2548,7 @@ export interface components {
              * Lines
              * @default []
              */
-            lines: components["schemas"]["DocumentTemplateLineRead"][];
+            lines?: components["schemas"]["DocumentTemplateLineRead"][];
             /**
              * Created At
              * Format: date-time
@@ -2726,12 +2726,12 @@ export interface components {
              * Groups
              * @default []
              */
-            groups: components["schemas"]["EstimateGroupInput"][];
+            groups?: components["schemas"]["EstimateGroupInput"][];
             /**
              * Lines
              * @default []
              */
-            lines: components["schemas"]["EstimateLineInput"][];
+            lines?: components["schemas"]["EstimateLineInput"][];
         };
         /**
          * EstimateGroupCalculationRead
@@ -2839,7 +2839,7 @@ export interface components {
              * @description Markup-on-cost rate. Must be in [0, 99.9999].
              * @default 0
              */
-            margin_rate: number | string;
+            margin_rate?: number | string;
             /** Unit Id */
             unit_id?: string | null;
             /** Unit Name */
@@ -2979,12 +2979,12 @@ export interface components {
              * Groups
              * @default []
              */
-            groups: components["schemas"]["EstimateGroupInput"][];
+            groups?: components["schemas"]["EstimateGroupInput"][];
             /**
              * Lines
              * @default []
              */
-            lines: components["schemas"]["EstimateLineInput"][];
+            lines?: components["schemas"]["EstimateLineInput"][];
             /**
              * Name
              * @description Internal estimate name.
@@ -3165,7 +3165,7 @@ export interface components {
              * Active
              * @default true
              */
-            active: boolean;
+            active?: boolean;
         };
         /**
          * ExpenseInput
@@ -3219,19 +3219,19 @@ export interface components {
             /** Note */
             note?: string | null;
             /** @default BUSINESS */
-            paid_by: components["schemas"]["PaidBy"];
+            paid_by?: components["schemas"]["PaidBy"];
             /**
              * Business Percentage
              * @description Business-use percentage 0–100.
              * @default 100
              */
-            business_percentage: number | string;
+            business_percentage?: number | string;
             /**
              * Depreciation Years
              * @description Depreciation years; 1 = fully expensed this year.
              * @default 1
              */
-            depreciation_years: number;
+            depreciation_years?: number;
         };
         /**
          * ExpenseListItem
@@ -3266,7 +3266,7 @@ export interface components {
              * Attachment Count
              * @default 0
              */
-            attachment_count: number;
+            attachment_count?: number;
             paid_by: components["schemas"]["PaidBy"];
             /** Business Percentage */
             business_percentage: string;
@@ -3353,7 +3353,7 @@ export interface components {
              * Attachment Count
              * @default 0
              */
-            attachment_count: number;
+            attachment_count?: number;
             /**
              * Created At
              * Format: date-time
@@ -3449,7 +3449,7 @@ export interface components {
              * Amounts Include Vat
              * @default false
              */
-            amounts_include_vat: boolean;
+            amounts_include_vat?: boolean;
             /** Vat Treatment Id */
             vat_treatment_id?: string | null;
             /** Document Vat Rate Id */
@@ -3460,7 +3460,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount: components["schemas"]["DiscountInput"];
+            discount?: components["schemas"]["DiscountInput"];
             /**
              * Lines
              * @description At least 1 line required.
@@ -3541,7 +3541,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount: components["schemas"]["DiscountInput"];
+            discount?: components["schemas"]["DiscountInput"];
             /** Vat Rate Id */
             vat_rate_id?: string | null;
         };
@@ -3600,7 +3600,7 @@ export interface components {
              * Line Taxes
              * @default []
              */
-            line_taxes: components["schemas"]["InvoiceLineReadTax"][];
+            line_taxes?: components["schemas"]["InvoiceLineReadTax"][];
         };
         /**
          * InvoiceLineReadTax
@@ -3756,13 +3756,13 @@ export interface components {
              * @description Numbering template. Supported placeholders: {{SERIES:VALUE}}, {{SEQUENCE:n}}, {{CUSTOMER_SERIES}}, {{CUSTOMER_SEQUENCE:n}}, {{DATE:format}}.
              * @default {{SERIES:INV}}-{{SEQUENCE:6}}
              */
-            template: string;
+            template?: string;
             /**
              * Sequence Start
              * @description Starting number used only when the sequence row is first created. Changing this after the first invoice has no effect.
              * @default 1
              */
-            sequence_start: number;
+            sequence_start?: number;
             /**
              * Preview
              * @description Read-only: preview of the next invoice number (ignored on PUT).
@@ -3808,7 +3808,7 @@ export interface components {
              * Items
              * @default []
              */
-            items: components["schemas"]["PaymentRead"][];
+            items?: components["schemas"]["PaymentRead"][];
         };
         /**
          * InvoiceRead
@@ -3909,12 +3909,12 @@ export interface components {
              * Lines
              * @default []
              */
-            lines: components["schemas"]["InvoiceLineRead"][];
+            lines?: components["schemas"]["InvoiceLineRead"][];
             /**
              * Taxes
              * @default []
              */
-            taxes: components["schemas"]["InvoiceTaxRowRead"][];
+            taxes?: components["schemas"]["InvoiceTaxRowRead"][];
             /**
              * Created At
              * Format: date-time
@@ -4021,7 +4021,7 @@ export interface components {
              * Amounts Include Vat
              * @default false
              */
-            amounts_include_vat: boolean;
+            amounts_include_vat?: boolean;
             /** Vat Treatment Id */
             vat_treatment_id?: string | null;
             /** Document Vat Rate Id */
@@ -4032,7 +4032,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount: components["schemas"]["DiscountInput"];
+            discount?: components["schemas"]["DiscountInput"];
             /** Notes */
             notes?: string | null;
             /** Warranty Text */
@@ -4267,7 +4267,7 @@ export interface components {
              * Active
              * @default true
              */
-            active: boolean;
+            active?: boolean;
         };
         /**
          * PaymentRead
@@ -4364,7 +4364,7 @@ export interface components {
              * Active
              * @default true
              */
-            active: boolean;
+            active?: boolean;
         };
         /**
          * ProductImportRequest
@@ -4385,7 +4385,7 @@ export interface components {
              * Updated
              * @default 0
              */
-            updated: number;
+            updated?: number;
             /** Errors */
             errors: components["schemas"]["ProductImportRowError"][];
         };
@@ -4401,7 +4401,7 @@ export interface components {
              * Name
              * @default
              */
-            name: string;
+            name?: string;
             /** Sku */
             sku?: string | null;
             /** Category Name */
@@ -4542,7 +4542,7 @@ export interface components {
              * Active
              * @default true
              */
-            active: boolean;
+            active?: boolean;
         };
         /**
          * QuoteCalculationRead
@@ -4606,7 +4606,7 @@ export interface components {
              * Amounts Include Vat
              * @default false
              */
-            amounts_include_vat: boolean;
+            amounts_include_vat?: boolean;
             /** Vat Treatment Id */
             vat_treatment_id?: string | null;
             /** Document Vat Rate Id */
@@ -4617,7 +4617,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount: components["schemas"]["DiscountInput"];
+            discount?: components["schemas"]["DiscountInput"];
             /**
              * Lines
              * @description At least 1 line required.
@@ -4699,7 +4699,7 @@ export interface components {
              * Line Taxes
              * @default []
              */
-            line_taxes: components["schemas"]["QuoteLineReadTax"][];
+            line_taxes?: components["schemas"]["QuoteLineReadTax"][];
         };
         /**
          * QuoteLineReadTax
@@ -4829,13 +4829,13 @@ export interface components {
              * @description Numbering template. Supported placeholders: {{SERIES:VALUE}}, {{SEQUENCE:n}}, {{CUSTOMER_SERIES}}, {{CUSTOMER_SEQUENCE:n}}, {{DATE:format}}.
              * @default {{SERIES:QUO}}-{{SEQUENCE:6}}
              */
-            template: string;
+            template?: string;
             /**
              * Sequence Start
              * @description Starting number used only when the sequence row is first created. Changing this after the first quote has no effect.
              * @default 1
              */
-            sequence_start: number;
+            sequence_start?: number;
             /**
              * Preview
              * @description Read-only: preview of the next quote number (ignored on PUT).
@@ -4946,12 +4946,12 @@ export interface components {
              * Lines
              * @default []
              */
-            lines: components["schemas"]["QuoteLineRead"][];
+            lines?: components["schemas"]["QuoteLineRead"][];
             /**
              * Taxes
              * @default []
              */
-            taxes: components["schemas"]["QuoteTaxRowRead"][];
+            taxes?: components["schemas"]["QuoteTaxRowRead"][];
             /**
              * Created At
              * Format: date-time
@@ -5031,7 +5031,7 @@ export interface components {
              * Amounts Include Vat
              * @default false
              */
-            amounts_include_vat: boolean;
+            amounts_include_vat?: boolean;
             /** Vat Treatment Id */
             vat_treatment_id?: string | null;
             /** Document Vat Rate Id */
@@ -5042,7 +5042,7 @@ export interface components {
              *       "value": "0"
              *     }
              */
-            discount: components["schemas"]["DiscountInput"];
+            discount?: components["schemas"]["DiscountInput"];
             /** Notes */
             notes?: string | null;
             /** Warranty Text */
@@ -5107,19 +5107,19 @@ export interface components {
             /** Note */
             note?: string | null;
             /** @default BUSINESS */
-            paid_by: components["schemas"]["PaidBy"];
+            paid_by?: components["schemas"]["PaidBy"];
             /**
              * Business Percentage
              * @description Business-use percentage 0–100.
              * @default 100
              */
-            business_percentage: number | string;
+            business_percentage?: number | string;
             /**
              * Depreciation Years
              * @description Depreciation years; 1 = fully expensed this year.
              * @default 1
              */
-            depreciation_years: number;
+            depreciation_years?: number;
             /**
              * Frequency
              * @description One of: MONTHLY, QUARTERLY, YEARLY.
@@ -5143,7 +5143,7 @@ export interface components {
              * @description Whether the template is active.
              * @default true
              */
-            active: boolean;
+            active?: boolean;
         };
         /**
          * RecurringExpenseListResponse
@@ -5288,42 +5288,42 @@ export interface components {
              * Host
              * @default
              */
-            host: string;
+            host?: string;
             /**
              * Port
              * @default 587
              */
-            port: number;
+            port?: number;
             /**
              * Username
              * @default
              */
-            username: string;
+            username?: string;
             /**
              * Password Set
              * @default false
              */
-            password_set: boolean;
+            password_set?: boolean;
             /**
              * From Email
              * @default
              */
-            from_email: string;
+            from_email?: string;
             /**
              * From Name
              * @default
              */
-            from_name: string;
+            from_name?: string;
             /**
              * Use Tls
              * @default true
              */
-            use_tls: boolean;
+            use_tls?: boolean;
             /**
              * Use Ssl
              * @default false
              */
-            use_ssl: boolean;
+            use_ssl?: boolean;
         };
         /**
          * SmtpSettingsUpdate
@@ -5336,12 +5336,12 @@ export interface components {
              * Port
              * @default 587
              */
-            port: number;
+            port?: number;
             /**
              * Username
              * @default
              */
-            username: string;
+            username?: string;
             /** Password */
             password?: string | null;
             /**
@@ -5353,17 +5353,17 @@ export interface components {
              * From Name
              * @default
              */
-            from_name: string;
+            from_name?: string;
             /**
              * Use Tls
              * @default true
              */
-            use_tls: boolean;
+            use_tls?: boolean;
             /**
              * Use Ssl
              * @default false
              */
-            use_ssl: boolean;
+            use_ssl?: boolean;
         };
         /**
          * UnitListResponse
@@ -5413,7 +5413,7 @@ export interface components {
              * Active
              * @default true
              */
-            active: boolean;
+            active?: boolean;
         };
         /**
          * UserPreferences
@@ -5433,14 +5433,14 @@ export interface components {
              * @default system
              * @enum {string}
              */
-            theme: "system" | "light" | "dark";
+            theme?: "system" | "light" | "dark";
             /**
              * Locale
              * @description UI language preference (interface locale).
              * @default en
              * @enum {string}
              */
-            locale: "en" | "zh";
+            locale?: "en" | "zh";
         };
         /**
          * UserRead
@@ -5461,27 +5461,27 @@ export interface components {
              * Is Active
              * @default true
              */
-            is_active: boolean;
+            is_active?: boolean;
             /**
              * Is Superuser
              * @default false
              */
-            is_superuser: boolean;
+            is_superuser?: boolean;
             /**
              * Is Verified
              * @default false
              */
-            is_verified: boolean;
+            is_verified?: boolean;
             /**
              * Role
              * @default owner
              */
-            role: string;
+            role?: string;
             /**
              * Mfa Enabled
              * @default false
              */
-            mfa_enabled: boolean;
+            mfa_enabled?: boolean;
             /** Company Id */
             company_id?: string | null;
         };
@@ -5546,7 +5546,7 @@ export interface components {
              * Active
              * @default true
              */
-            active: boolean;
+            active?: boolean;
         };
         /**
          * VatTreatmentEffect
@@ -5640,14 +5640,14 @@ export interface components {
              * Requires Icp
              * @default false
              */
-            requires_icp: boolean;
+            requires_icp?: boolean;
             /** Deductible */
             deductible?: boolean | null;
             /**
              * Active
              * @default true
              */
-            active: boolean;
+            active?: boolean;
         };
         /**
          * _AiExtractRequest

@@ -99,7 +99,7 @@ async function loadData() {
       get<DocumentDefaultsRead>('/api/v1/settings/document-defaults'),
     ])
     templates.value = tpl
-    companyDefaultLocale.value = defaults.locale
+    companyDefaultLocale.value = defaults.locale ?? 'en'
 
     // Pre-fill form
     formTo.value = props.customerEmail ?? ''
