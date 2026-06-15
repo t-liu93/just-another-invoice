@@ -37,6 +37,7 @@ from jai.schemas.setting import (
     SETTING_KEY_QUOTE_NUMBERING,
     SETTING_KEY_SMTP,
     SETTING_KEY_USER_PREFERENCES,
+    SETTING_KEY_VAT_RATE_TIERS,
     AiSettings,
     AiSettingsRead,
     AiSettingsUpdate,
@@ -58,6 +59,9 @@ from jai.schemas.setting import (
     SmtpSettings,
     SmtpSettingsRead,
     UserPreferences,
+    VatRateTiers,
+    VatRateTiersRead,
+    VatRateTiersUpdate,
 )
 from jai.services import email as email_svc
 from jai.services.numbering import (
@@ -896,3 +900,66 @@ async def update_email_templates(
     )
     await session.commit()
     return _email_templates_to_read(value)
+
+
+# ---------------------------------------------------------------------------
+# VAT rate tier thresholds (COMPANY level, owner-only) – M10 step 2
+# ---------------------------------------------------------------------------
+
+
+@router.get("/vat-rate-tiers", response_model=VatRateTiersRead)
+async def get_vat_rate_tiers(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> VatRateTiersRead:
+    """Return the company-level VAT rate tier thresholds used by the BTW return.
+
+    Defaults when no setting exists: hoog=21, laag=9, zero=0 (2026 NL rates).
+    These thresholds control which numeric rate value is classified as
+    hoog (box 1a) / laag (box 1b) / zero (box 1e) in the BTW return.
+    """
+    _owner_only(user)
+    if user.company_id is None:
+        return VatRateTiersRead()
+
+    raw = await get_setting(
+        session,
+        SETTING_KEY_VAT_RATE_TIERS,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+        value_type=VatRateTiers,
+    )
+    if raw is None:
+        return VatRateTiersRead()
+    return VatRateTiersRead(hoog=raw.hoog, laag=raw.laag, zero=raw.zero)
+
+
+@router.put("/vat-rate-tiers", response_model=VatRateTiersRead)
+async def update_vat_rate_tiers(
+    body: VatRateTiersUpdate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> VatRateTiersRead:
+    """Update the company-level VAT rate tier thresholds.
+
+    Use this if the Dutch government changes tax rates (e.g. hoog moves from
+    21% to a different value).  The actual rates in the VAT rate dictionary
+    are unaffected; only the bucket classification thresholds change here.
+    """
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile must be created first.",
+        )
+
+    value = VatRateTiers(hoog=body.hoog, laag=body.laag, zero=body.zero)
+    await set_setting(
+        session,
+        SETTING_KEY_VAT_RATE_TIERS,
+        value,
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+    )
+    await session.commit()
+    return VatRateTiersRead(hoog=body.hoog, laag=body.laag, zero=body.zero)

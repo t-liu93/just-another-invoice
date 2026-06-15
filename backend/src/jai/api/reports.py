@@ -1,7 +1,8 @@
-"""Reports API routes (M10 step 1).
+"""Reports API routes (M10 steps 1 & 2).
 
 Endpoints (all GET, owner-only, requires MFA):
   GET /api/v1/reports/profit-loss  – P/L report with time series.
+  GET /api/v1/reports/vat-return   – BTW VAT return summary (NL ruleset).
 
 Design:
 - Thin controller: validate parameters, call services/reporting, return schema.
@@ -18,13 +19,19 @@ from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session
+from jai.models._enums import SettingLevel
+from jai.models.company import Company
 from jai.models.user import User
-from jai.schemas.report import ProfitLossReport
+from jai.schemas.report import ProfitLossReport, VatReturnReport
+from jai.schemas.setting import SETTING_KEY_VAT_RATE_TIERS, VatRateTiers
+from jai.services.reporting.btw import compute_vat_return
 from jai.services.reporting.pl import compute_profit_loss
+from jai.services.settings import get_setting
 
 router = APIRouter(prefix="/api/v1", tags=["reports"])
 
@@ -98,4 +105,72 @@ async def get_profit_loss(
         date_from=date_from,
         date_to=date_to,
         granularity=granularity,
+    )
+
+
+# ---------------------------------------------------------------------------
+# VAT return report (M10 step 2)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/reports/vat-return",
+    response_model=VatReturnReport,
+    response_model_by_alias=True,
+)
+async def get_vat_return(
+    year: int = Query(
+        description="Calendar year of the VAT return period (e.g. 2026).",
+        ge=2000,
+        le=2100,
+    ),
+    quarter: int = Query(
+        description="Quarter of the VAT return period (1–4).",
+        ge=1,
+        le=4,
+    ),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> VatReturnReport:
+    """Return the BTW (VAT) quarterly return summary for the given year and quarter.
+
+    Aggregates invoice VAT snapshots and expense VAT amounts into the standard
+    Dutch BTW return boxes (1a/1b/1c/1d/1e/2a/3a/3b/3c/4a/4b/5b) using the
+    NL ruleset.  Non-NL companies fall back to the NL ruleset with a warning.
+
+    The rate tier thresholds (hoog/laag/zero) are read from the company-level
+    ``reporting.vat_rate_tiers`` setting (defaults: hoog=21, laag=9, zero=0).
+
+    Box 1d (private-use correction) is non-zero only when quarter == 4 and is
+    based on the full calendar year's expenses.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    # Fetch the company record (needed for country_code).
+    stmt_co = select(Company).where(Company.id == company_id)
+    result_co = await session.execute(stmt_co)
+    company = result_co.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile not found.",
+        )
+
+    # Load VAT rate tier thresholds from the company-level setting (with defaults).
+    tiers_setting = await get_setting(
+        session,
+        SETTING_KEY_VAT_RATE_TIERS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=VatRateTiers,
+    )
+    tiers = tiers_setting if tiers_setting is not None else VatRateTiers()
+
+    return await compute_vat_return(
+        session,
+        company=company,
+        year=year,
+        quarter=quarter,
+        tiers=tiers,
     )

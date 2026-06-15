@@ -667,6 +667,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/vat-rate-tiers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Vat Rate Tiers
+         * @description Return the company-level VAT rate tier thresholds used by the BTW return.
+         *
+         *     Defaults when no setting exists: hoog=21, laag=9, zero=0 (2026 NL rates).
+         *     These thresholds control which numeric rate value is classified as
+         *     hoog (box 1a) / laag (box 1b) / zero (box 1e) in the BTW return.
+         */
+        get: operations["get_vat_rate_tiers_api_v1_settings_vat_rate_tiers_get"];
+        /**
+         * Update Vat Rate Tiers
+         * @description Update the company-level VAT rate tier thresholds.
+         *
+         *     Use this if the Dutch government changes tax rates (e.g. hoog moves from
+         *     21% to a different value).  The actual rates in the VAT rate dictionary
+         *     are unaffected; only the bucket classification thresholds change here.
+         */
+        put: operations["update_vat_rate_tiers_api_v1_settings_vat_rate_tiers_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vat-rates": {
         parameters: {
             query?: never;
@@ -1988,6 +2020,36 @@ export interface paths {
          *     or quarter.
          */
         get: operations["get_profit_loss_api_v1_reports_profit_loss_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/vat-return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Vat Return
+         * @description Return the BTW (VAT) quarterly return summary for the given year and quarter.
+         *
+         *     Aggregates invoice VAT snapshots and expense VAT amounts into the standard
+         *     Dutch BTW return boxes (1a/1b/1c/1d/1e/2a/3a/3b/3c/4a/4b/5b) using the
+         *     NL ruleset.  Non-NL companies fall back to the NL ruleset with a warning.
+         *
+         *     The rate tier thresholds (hoog/laag/zero) are read from the company-level
+         *     ``reporting.vat_rate_tiers`` setting (defaults: hoog=21, laag=9, zero=0).
+         *
+         *     Box 1d (private-use correction) is non-zero only when quarter == 4 and is
+         *     based on the full calendar year's expenses.
+         */
+        get: operations["get_vat_return_api_v1_reports_vat_return_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5614,6 +5676,50 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * VatBoxBaseOnly
+         * @description A VAT return box that holds only a taxable base (no VAT column).
+         *
+         *     Used for boxes 1e, 3a, 3b, 3c (0% / ICP / export – no BTW due).
+         */
+        VatBoxBaseOnly: {
+            /**
+             * Base
+             * @description Taxable base amount (net, EUR).
+             */
+            base: string;
+        };
+        /**
+         * VatBoxBaseVat
+         * @description A VAT return box with both taxable base and VAT amount.
+         *
+         *     Used for boxes 1a, 1b, 1c, 2a, 4a, 4b.
+         */
+        VatBoxBaseVat: {
+            /**
+             * Base
+             * @description Taxable base amount (net, EUR).
+             */
+            base: string;
+            /**
+             * Vat
+             * @description VAT / BTW amount (EUR).
+             */
+            vat: string;
+        };
+        /**
+         * VatBoxVatOnly
+         * @description A VAT return box that holds only a VAT amount (no base column).
+         *
+         *     Used for box 1d (privégebruik, BTW only) and 5b (voorbelasting).
+         */
+        VatBoxVatOnly: {
+            /**
+             * Vat
+             * @description VAT / BTW amount (EUR).
+             */
+            vat: string;
+        };
+        /**
          * VatRateListResponse
          * @description List envelope for GET /api/v1/vat-rates.
          */
@@ -5649,6 +5755,51 @@ export interface components {
             updated_at: string;
         };
         /**
+         * VatRateTiersRead
+         * @description Response body for ``GET /api/v1/settings/vat-rate-tiers``.
+         */
+        VatRateTiersRead: {
+            /**
+             * Hoog
+             * @description Current hoog-tarief threshold (%).
+             * @default 21
+             */
+            hoog?: number;
+            /**
+             * Laag
+             * @description Current laag-tarief threshold (%).
+             * @default 9
+             */
+            laag?: number;
+            /**
+             * Zero
+             * @description Current zero-tarief threshold (%).
+             * @default 0
+             */
+            zero?: number;
+        };
+        /**
+         * VatRateTiersUpdate
+         * @description Request body for ``PUT /api/v1/settings/vat-rate-tiers``.
+         */
+        VatRateTiersUpdate: {
+            /**
+             * Hoog
+             * @description New hoog-tarief threshold (%).
+             */
+            hoog: number;
+            /**
+             * Laag
+             * @description New laag-tarief threshold (%).
+             */
+            laag: number;
+            /**
+             * Zero
+             * @description New zero-tarief threshold (%).
+             */
+            zero: number;
+        };
+        /**
          * VatRateWrite
          * @description Request body for POST/PUT /api/v1/vat-rates.
          */
@@ -5662,6 +5813,107 @@ export interface components {
              * @default true
              */
             active?: boolean;
+        };
+        /**
+         * VatReturnBoxes
+         * @description All BTW return boxes as defined by the NL Belastingdienst form.
+         *
+         *     Boxes with ``base + vat``: 1a, 1b, 1c, 2a, 4a, 4b.
+         *     Boxes with ``vat only``: 1d, 5b.
+         *     Boxes with ``base only``: 1e, 3a, 3b, 3c.
+         *
+         *     v1 boxes that are always zero but kept for schema completeness:
+         *     1c (other rates), 2a (domestic reverse-charge), 3c (distance selling), 4a (non-EU import).
+         */
+        VatReturnBoxes: {
+            /** @description Domestic / EU-B2C hoog-tarief (21%) supplies. */
+            box_1a: components["schemas"]["VatBoxBaseVat"];
+            /** @description Domestic / EU-B2C laag-tarief (9%) supplies. */
+            box_1b: components["schemas"]["VatBoxBaseVat"];
+            /** @description Other rates (e.g. 13% forfait); v1 always 0. */
+            box_1c: components["schemas"]["VatBoxBaseVat"];
+            /** @description Privégebruik (private-use correction); only non-zero in Q4 (year-end). */
+            box_1d: components["schemas"]["VatBoxVatOnly"];
+            /** @description 0% or reverse-charge supplier-side supplies (net only). */
+            box_1e: components["schemas"]["VatBoxBaseOnly"];
+            /** @description Domestic reverse-charge (recipient side); v1 always 0. */
+            box_2a: components["schemas"]["VatBoxBaseVat"];
+            /** @description Exports to non-EU countries (net only). */
+            box_3a: components["schemas"]["VatBoxBaseOnly"];
+            /** @description ICP (EU B2B reverse-charge) supplies (net only). */
+            box_3b: components["schemas"]["VatBoxBaseOnly"];
+            /** @description Distance / installation sales EU; v1 always 0. */
+            box_3c: components["schemas"]["VatBoxBaseOnly"];
+            /** @description Non-EU import self-assessment (art.23); v1 always 0. */
+            box_4a: components["schemas"]["VatBoxBaseVat"];
+            /** @description EU intra-community acquisition self-assessment. */
+            box_4b: components["schemas"]["VatBoxBaseVat"];
+            /** @description Input VAT (voorbelasting) deductible. */
+            box_5b: components["schemas"]["VatBoxVatOnly"];
+        };
+        /**
+         * VatReturnReport
+         * @description Response schema for GET /api/v1/reports/vat-return.
+         *
+         *     The ``from`` / ``to`` fields use serialisation aliases so the JSON keys
+         *     match the query-parameter convention used by the P/L report.
+         */
+        VatReturnReport: {
+            /**
+             * Year
+             * @description Calendar year of the VAT return period.
+             */
+            year: number;
+            /**
+             * Quarter
+             * @description Quarter of the VAT return period (1–4).
+             */
+            quarter: number;
+            /**
+             * From
+             * Format: date
+             * @description First day of the quarter.
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             * @description Last day of the quarter.
+             */
+            to: string;
+            /**
+             * Is Last Period Of Year
+             * @description True when quarter == 4; triggers 1d private-use calculation.
+             */
+            is_last_period_of_year: boolean;
+            /** @description Individual BTW return boxes. */
+            boxes: components["schemas"]["VatReturnBoxes"];
+            /** @description Derived totals (not official box numbers). */
+            totals: components["schemas"]["VatReturnTotals"];
+            /**
+             * Warnings
+             * @description Advisory messages, e.g. missing VAT-ID on ICP customers, or non-NL company using the NL ruleset as fallback.
+             */
+            warnings?: string[];
+            /**
+             * Disclaimer
+             * @description Fixed disclaimer: this output is for bookkeeping assistance only; not tax or accounting advice.  Verify with your accountant / tax authority.
+             */
+            disclaimer: string;
+        };
+        /**
+         * VatReturnTotals
+         * @description Derived / auxiliary totals (not official box numbers, for display only).
+         *
+         *     These mirror the numbers the tax authority's form program computes
+         *     automatically.  Named after the Dutch official wording, not traditional
+         *     5a / 5c labels (see D-BOX5 in M10.md).
+         */
+        VatReturnTotals: {
+            /** @description Sum of all output VAT (≈ traditional '5a').  = 1a.vat + 1b.vat + 1c.vat + 1d.vat + 2a.vat + 4a.vat + 4b.vat */
+            output_vat_total: components["schemas"]["VatBoxVatOnly"];
+            /** @description Net VAT payable (+) or refundable (−) (Totaal te betalen / terug te vragen; ≈ traditional '5c').  = output_vat_total.vat − 5b.vat */
+            net_payable_or_refundable: components["schemas"]["VatBoxVatOnly"];
         };
         /**
          * VatTreatmentEffect
@@ -6938,6 +7190,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmailTemplatesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vat_rate_tiers_api_v1_settings_vat_rate_tiers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatRateTiersRead"];
+                };
+            };
+        };
+    };
+    update_vat_rate_tiers_api_v1_settings_vat_rate_tiers_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VatRateTiersUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatRateTiersRead"];
                 };
             };
             /** @description Validation Error */
@@ -10326,6 +10631,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfitLossReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vat_return_api_v1_reports_vat_return_get: {
+        parameters: {
+            query: {
+                /** @description Calendar year of the VAT return period (e.g. 2026). */
+                year: number;
+                /** @description Quarter of the VAT return period (1–4). */
+                quarter: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatReturnReport"];
                 };
             };
             /** @description Validation Error */

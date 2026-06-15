@@ -51,6 +51,10 @@ SETTING_KEY_AI: str = "ai"
 #: Company-level default document locale (used for PDF/email language resolution).
 SETTING_KEY_DOCUMENT_DEFAULTS: str = "document.default_locale"
 
+#: Company-level VAT rate tier thresholds for BTW return bucketing (M10 step 2).
+#: Stores which numeric rate values map to hoog/laag/zero tiers for 1a/1b/1e.
+SETTING_KEY_VAT_RATE_TIERS: str = "reporting.vat_rate_tiers"
+
 
 # ---------------------------------------------------------------------------
 # Onboarding state (GLOBAL level)
@@ -358,6 +362,60 @@ class AiTestResult(BaseModel):
 # ---------------------------------------------------------------------------
 # Document default locale (COMPANY level, M9 step 2)
 # ---------------------------------------------------------------------------
+
+
+class VatRateTiers(BaseModel):
+    """Company-level VAT rate tier thresholds used by the BTW return ruleset.
+
+    Stored at ``COMPANY`` level with key ``SETTING_KEY_VAT_RATE_TIERS``
+    (``"reporting.vat_rate_tiers"``).
+
+    The NL ruleset maps each invoice/expense line's ``vat_rate_percent`` to one
+    of the four tier labels:
+    - **hoog** (hoog tarief / high rate) → box 1a
+    - **laag** (laag tarief / low rate) → box 1b
+    - **zero** (0% tarief)              → box 1e
+    - anything else that is non-zero    → box 1c
+
+    These thresholds can be updated via the settings API without redeploying,
+    which allows the system to adapt if the Dutch government changes the rates
+    (red-line 12: rates are data-driven; this setting only records which numeric
+    value is considered "hoog" / "laag" / "zero").
+
+    Defaults (2026 NL rates): hoog = 21, laag = 9, zero = 0.
+    """
+
+    hoog: int = Field(
+        default=21,
+        ge=0,
+        description="VAT rate (%) considered hoog tarief; maps to BTW box 1a.",
+    )
+    laag: int = Field(
+        default=9,
+        ge=0,
+        description="VAT rate (%) considered laag tarief; maps to BTW box 1b.",
+    )
+    zero: int = Field(
+        default=0,
+        ge=0,
+        description="VAT rate (%) considered zero tarief; maps to BTW box 1e.",
+    )
+
+
+class VatRateTiersRead(BaseModel):
+    """Response body for ``GET /api/v1/settings/vat-rate-tiers``."""
+
+    hoog: int = Field(default=21, description="Current hoog-tarief threshold (%).")
+    laag: int = Field(default=9, description="Current laag-tarief threshold (%).")
+    zero: int = Field(default=0, description="Current zero-tarief threshold (%).")
+
+
+class VatRateTiersUpdate(BaseModel):
+    """Request body for ``PUT /api/v1/settings/vat-rate-tiers``."""
+
+    hoog: int = Field(ge=0, description="New hoog-tarief threshold (%).")
+    laag: int = Field(ge=0, description="New laag-tarief threshold (%).")
+    zero: int = Field(ge=0, description="New zero-tarief threshold (%).")
 
 
 class DocumentDefaultsSetting(BaseModel):

@@ -187,6 +187,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/reports/vat-return',
+    name: 'report-vat-return',
+    component: () => import('../views/reports/VatReturn.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/dashboard',
   },
