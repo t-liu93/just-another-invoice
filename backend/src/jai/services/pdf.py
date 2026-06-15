@@ -98,6 +98,31 @@ def _filter_pct(value: Any) -> str:
 _jinja_env.filters["money2"] = _filter_money2
 _jinja_env.filters["pct"] = _filter_pct
 
+
+# ---------------------------------------------------------------------------
+# Billing name helper (pure function)
+# ---------------------------------------------------------------------------
+
+
+def resolve_billing_name(customer: Any) -> str:
+    """Derive the billing name for client-facing document headers.
+
+    Priority: company_name → contact_name → name.
+
+    ``name`` is the internal nickname (never printed directly on documents);
+    it is used only as a guaranteed-non-null fallback.
+
+    Empty strings are treated the same as ``None`` because the service layer
+    normalises them to ``None`` before persisting, but callers may pass raw
+    ORM objects where the DB value is already ``None``.
+    """
+    return (
+        (customer.company_name or "").strip()
+        or (customer.contact_name or "").strip()
+        or (customer.name or "").strip()
+    )
+
+
 # ---------------------------------------------------------------------------
 # i18n label table (backend-only; not reusing vue-i18n)
 # ---------------------------------------------------------------------------
@@ -369,6 +394,7 @@ def build_invoice_html(
         "company": company,
         "customer": customer,
         "billing_address": billing_address,
+        "billing_name": resolve_billing_name(customer),
         "logo_data_uri": logo_data_uri,
         "css": css_text,
     }
@@ -597,6 +623,7 @@ def build_quote_html(
         "company": company,
         "customer": customer,
         "billing_address": billing_address,
+        "billing_name": resolve_billing_name(customer),
         "logo_data_uri": logo_data_uri,
         "css": css_text,
     }
@@ -695,6 +722,7 @@ def build_payment_receipt_html(
         "company": company,
         "customer": customer,
         "billing_address": billing_address,
+        "billing_name": resolve_billing_name(customer),
         "logo_data_uri": logo_data_uri,
         "paid_total": paid_total,
         "css": css_text,

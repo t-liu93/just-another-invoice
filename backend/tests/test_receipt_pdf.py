@@ -109,6 +109,8 @@ def _make_customer(
     billing_postal_code: str | None = "5678 CD",
     billing_city: str | None = "Rotterdam",
     billing_country: str | None = "NL",
+    contact_name: str | None = None,
+    company_name: str | None = None,
 ) -> Any:
     from jai.models._enums import AddressType
 
@@ -123,6 +125,8 @@ def _make_customer(
     )
     return SimpleNamespace(
         name=name,
+        contact_name=contact_name,
+        company_name=company_name,
         vat_id=vat_id,
         addresses=[billing],
     )

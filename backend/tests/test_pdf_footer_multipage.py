@@ -67,6 +67,8 @@ def _make_customer() -> Any:
     )
     return SimpleNamespace(
         name="ACME Corp",
+        contact_name=None,
+        company_name=None,
         vat_id=None,
         addresses=[billing],
     )

@@ -386,7 +386,10 @@
     "invoicePrefixHint": "Used as {{CUSTOMER_SERIES}} in the numbering template.",
     "documentLocale": "Document language",
     "documentLocaleDefault": "Follow company default",
-    "documentLocaleHint": "PDF and email language for this customer. Null = follow the company-level default."
+    "documentLocaleHint": "PDF and email language for this customer. Null = follow the company-level default.",
+    "nameHelp": "Internal nickname — not shown on invoices or quotes.",
+    "invoiceHeaderPreview": "Invoice header preview",
+    "invoiceHeaderLabel": "Invoice header:"
   },
   "dict": {
     "active": "Active",

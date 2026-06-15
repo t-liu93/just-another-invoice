@@ -76,7 +76,7 @@
 <!-- ── Billing address ──────────────────────────────────────────────────── -->
 <div class="billing-section">
     <div class="billing-label">{{ labels.bill_to }}</div>
-    <div class="billing-name">{{ customer.name }}</div>
+    <div class="billing-name">{{ billing_name }}</div>
     {% if billing_address %}
     <div class="billing-address">
         {% if billing_address.street %}

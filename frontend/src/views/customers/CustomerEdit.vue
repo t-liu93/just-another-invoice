@@ -2,10 +2,10 @@
 /**
  * Customer edit / create page – scalar fields + billing/shipping addresses (M3 step 2).
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useMessage, NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert, NDivider, NSelect } from 'naive-ui'
+import { useMessage, NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert, NDivider, NSelect, NText } from 'naive-ui'
 import AppHeader from '../../components/AppHeader.vue'
 import AddressFieldsForm, { type AddressModel } from '../../components/AddressFieldsForm.vue'
 import { useCustomersStore } from '../../stores/customers'
@@ -132,6 +132,16 @@ async function handleSave() {
   }
 }
 
+/** Derive billing header the same way the backend does:
+ *  company_name → contact_name → name (first non-blank wins).
+ */
+const billingHeaderPreview = computed<string>(() => {
+  const company = companyName.value?.trim()
+  const contact = contactName.value?.trim()
+  const fallback = name.value?.trim()
+  return company || contact || fallback || ''
+})
+
 function handleCancel() {
   router.push('/customers')
 }
@@ -157,7 +167,10 @@ function handleCancel() {
                 <n-divider>{{ t('customers.infoSection') }}</n-divider>
 
                 <n-form-item :label="t('customers.name')" required>
-                  <n-input v-model:value="name" :placeholder="t('customers.namePlaceholder')" />
+                  <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+                    <n-input v-model:value="name" :placeholder="t('customers.namePlaceholder')" />
+                    <n-text depth="3" style="font-size: 12px;">{{ t('customers.nameHelp') }}</n-text>
+                  </div>
                 </n-form-item>
 
                 <n-form-item :label="t('customers.contactName')">
@@ -166,6 +179,14 @@ function handleCancel() {
 
                 <n-form-item :label="t('customers.companyName')">
                   <n-input v-model:value="companyName" :placeholder="t('customers.companyNamePlaceholder')" />
+                </n-form-item>
+
+                <!-- Invoice header preview (read-only, derived: company_name → contact_name → name) -->
+                <n-form-item :label="t('customers.invoiceHeaderPreview')">
+                  <n-text depth="2" style="font-size: 14px;">
+                    <span style="color: var(--n-text-color-3, #888);">{{ t('customers.invoiceHeaderLabel') }}</span>
+                    <strong>{{ billingHeaderPreview }}</strong>
+                  </n-text>
                 </n-form-item>
 
                 <!-- Contact section -->

@@ -386,7 +386,10 @@
     "invoicePrefixHint": "对应编号模板中的 {{CUSTOMER_SERIES}} 占位符。",
     "documentLocale": "文档语言",
     "documentLocaleDefault": "跟随公司默认",
-    "documentLocaleHint": "PDF 和邮件的输出语言，仅针对此客户。留空则跟随公司级默认设置。"
+    "documentLocaleHint": "PDF 和邮件的输出语言，仅针对此客户。留空则跟随公司级默认设置。",
+    "nameHelp": "内部识别名，不会显示在发票上。",
+    "invoiceHeaderPreview": "发票抬头预览",
+    "invoiceHeaderLabel": "发票抬头："
   },
   "dict": {
     "active": "启用",

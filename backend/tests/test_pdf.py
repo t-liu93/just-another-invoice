@@ -28,6 +28,7 @@ from jai.services.pdf import (
     _safe_url_fetcher,
     build_content_disposition,
     build_invoice_html,
+    resolve_billing_name,
 )
 
 # ---------------------------------------------------------------------------
@@ -160,6 +161,8 @@ def _make_customer(
     billing_postal_code: str | None = "5678 CD",
     billing_city: str | None = "Rotterdam",
     billing_country: str | None = "NL",
+    contact_name: str | None = None,
+    company_name: str | None = None,
 ) -> Any:
     from jai.models._enums import AddressType
 
@@ -174,6 +177,8 @@ def _make_customer(
     )
     return SimpleNamespace(
         name=name,
+        contact_name=contact_name,
+        company_name=company_name,
         vat_id=vat_id,
         addresses=[billing],
     )
@@ -757,3 +762,117 @@ def test_build_invoice_html_vat_percent_no_trailing_zeros() -> None:
     # Should show "21%" not "21.000%"
     assert "(21%)" in html
     assert "21.000%" not in html
+
+
+# ---------------------------------------------------------------------------
+# Test: resolve_billing_name – billing name priority chain
+# ---------------------------------------------------------------------------
+
+
+def _make_billing_customer(
+    name: str = "内部花名",
+    contact_name: str | None = None,
+    company_name: str | None = None,
+) -> Any:
+    """Minimal fake customer for resolve_billing_name tests."""
+    return SimpleNamespace(
+        name=name,
+        contact_name=contact_name,
+        company_name=company_name,
+    )
+
+
+def test_resolve_billing_name_company_wins() -> None:
+    """When all three fields are filled, company_name takes highest priority."""
+    customer = _make_billing_customer(
+        name="花名",
+        contact_name="张三",
+        company_name="Acme B.V.",
+    )
+    assert resolve_billing_name(customer) == "Acme B.V."
+
+
+def test_resolve_billing_name_contact_when_no_company() -> None:
+    """When company_name is absent, contact_name is used."""
+    customer = _make_billing_customer(
+        name="花名",
+        contact_name="张三",
+        company_name=None,
+    )
+    assert resolve_billing_name(customer) == "张三"
+
+
+def test_resolve_billing_name_fallback_to_name() -> None:
+    """When only name is set, it is used as the last resort."""
+    customer = _make_billing_customer(
+        name="花名",
+        contact_name=None,
+        company_name=None,
+    )
+    assert resolve_billing_name(customer) == "花名"
+
+
+def test_resolve_billing_name_empty_string_company_skipped() -> None:
+    """An empty-string company_name must be treated the same as None (skipped)."""
+    customer = _make_billing_customer(
+        name="花名",
+        contact_name="张三",
+        company_name="",
+    )
+    assert resolve_billing_name(customer) == "张三"
+
+
+def test_resolve_billing_name_empty_string_contact_skipped() -> None:
+    """An empty-string contact_name must be treated the same as None (skipped),
+    falling back to name."""
+    customer = _make_billing_customer(
+        name="花名",
+        contact_name="",
+        company_name=None,
+    )
+    assert resolve_billing_name(customer) == "花名"
+
+
+def test_resolve_billing_name_whitespace_only_skipped() -> None:
+    """Whitespace-only company_name is skipped after strip(); contact_name is used."""
+    customer = _make_billing_customer(
+        name="花名",
+        contact_name="张三",
+        company_name="   ",
+    )
+    assert resolve_billing_name(customer) == "张三"
+
+
+def test_resolve_billing_name_billing_name_in_invoice_html() -> None:
+    """build_invoice_html must render billing_name (company_name) not customer.name."""
+    from jai.models._enums import AddressType
+
+    billing = SimpleNamespace(
+        type=AddressType.BILLING,
+        street="Klantenstraat",
+        house_number="1",
+        house_number_addition=None,
+        postal_code="1234 AB",
+        city="Amsterdam",
+        country_code="NL",
+    )
+    customer = SimpleNamespace(
+        name="内部花名",
+        contact_name="联系人",
+        company_name="Acme B.V.",
+        vat_id=None,
+        addresses=[billing],
+    )
+    invoice = _make_invoice()
+    company = _make_company()
+
+    html = build_invoice_html(invoice, company, customer, "en", None)
+
+    # The company name must appear in BILL TO block.
+    assert "Acme B.V." in html
+    # The internal nickname must NOT appear in the BILL TO block.
+    # (It may appear elsewhere only if coincidentally present in other fields.)
+    # We verify the billing-name div specifically by checking order:
+    bill_to_idx = html.index("BILL TO")
+    acme_idx = html.index("Acme B.V.", bill_to_idx)
+    assert acme_idx > bill_to_idx  # company_name is rendered after "BILL TO"
