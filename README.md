@@ -2,11 +2,11 @@
 
 > 🌐 **English** · [中文](README_zh.md)
 
-Self-hosted invoicing and small-business administration for freelancers and small businesses. Invoices, quotes, expenses, payments, PDF + email, and Dutch **BTW (VAT) return** summaries — all in a single Docker container.
+Self-hosted invoicing and small-business administration for freelancers and small businesses. Invoices, quotes, expenses, payments, PDF + email, and Dutch **BTW (VAT) return** summaries — run with Docker Compose (a single app container plus PostgreSQL).
 
 Built with **FastAPI + Vue 3 + PostgreSQL**.
 
-> **Status — early / pre-release (`v0.x`).** Open source and self-hosted. There is **no published Docker image yet**, so the quick start below builds the image from source. A pull-and-run quick start will be added once images are published.
+> **Status — beta (`v0.1.0-beta0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and breaking changes before `v1.0`.
 
 ## Features
 
@@ -18,7 +18,7 @@ Built with **FastAPI + Vue 3 + PostgreSQL**.
 - **Customers & catalog** — addresses, VAT IDs, per-customer currency & document language; product/material catalog.
 - **Documents** — invoice / quote / receipt PDFs (EN/ZH) and email sending with editable templates.
 - **Reports** — Profit & Loss, **Dutch BTW VAT-return summary**, ICP listing, expense report, and an ECharts dashboard.
-- **Platform** — TOTP two-factor auth, typed three-tier settings, `Decimal` money math, bilingual UI (English / 中文), single-container deploy.
+- **Platform** — TOTP two-factor auth, typed three-tier settings, `Decimal` money math, bilingual UI (English / 中文), single-container app deployed via Docker Compose.
 
 ## Tech stack
 
@@ -26,16 +26,16 @@ Built with **FastAPI + Vue 3 + PostgreSQL**.
 | --- | --- |
 | Backend | FastAPI · SQLAlchemy 2.0 (async) · Alembic · fastapi-users · PostgreSQL (asyncpg) · Python 3.12 (uv) |
 | Frontend | Vue 3 + TypeScript · Pinia · Vue Router · Vite · Naive UI · ECharts |
-| Packaging | Single Docker container (frontend build + backend + uvicorn) + PostgreSQL |
+| Packaging | Single app container (frontend build + backend + uvicorn) + PostgreSQL, run with Docker Compose |
 
-## Quick start (build from source)
+## Quick start
 
-The published image isn't available yet, so build it locally and run the production single-container compose.
+Pull the published image and run it with Docker Compose (app + PostgreSQL).
 
 **Prerequisites:** Docker + Docker Compose, and `git`.
 
 ```bash
-# 1. Clone
+# 1. Clone (for docker-compose.yml + .env.example)
 git clone https://github.com/yet-another-ledger/yet-another-ledger.git
 cd yet-another-ledger
 
@@ -47,16 +47,15 @@ cp .env.example .env
 #    in .env if your user differs)
 mkdir -p data/storage
 
-# 4. Build the image with the tag compose expects
-docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .
-
-# 5. Start (runs DB migrations, then app + PostgreSQL)
+# 4. Pull images and start (runs DB migrations, then app + PostgreSQL)
 docker compose up -d
 ```
 
 Open **http://localhost:8000**, register the first (owner) account, and set up TOTP two-factor authentication. The app is published on `127.0.0.1` only; put it behind a TLS reverse proxy for remote access.
 
 To stop: `docker compose down` (add `-v` to also drop the database volume).
+
+> `:latest` currently tracks the newest beta; pin a version by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.1.0-beta0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
 
 ## Configuration
 
