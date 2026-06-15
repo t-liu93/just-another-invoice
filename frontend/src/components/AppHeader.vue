@@ -61,6 +61,7 @@ const navOptions = computed<MenuOption[]>(() => [
       { label: t('reports.pl.title'), key: 'report-profit-loss' },
       { label: t('reports.vat.navLink'), key: 'report-vat-return' },
       { label: t('reports.icp.navLink'), key: 'report-icp' },
+      { label: t('reports.expenses.navLink'), key: 'report-expenses' },
     ],
   },
 ])
@@ -79,6 +80,7 @@ const activeKey = computed<string | null>(() => {
   if (name === 'report-profit-loss') return 'report-profit-loss'
   if (name === 'report-vat-return') return 'report-vat-return'
   if (name === 'report-icp') return 'report-icp'
+  if (name === 'report-expenses') return 'report-expenses'
   if (name === 'dashboard') return 'dashboard'
   return null
 })
@@ -96,6 +98,7 @@ function handleNav(key: string) {
   else if (key === 'report-profit-loss') router.push('/reports/profit-loss')
   else if (key === 'report-vat-return') router.push('/reports/vat-return')
   else if (key === 'report-icp') router.push('/reports/icp')
+  else if (key === 'report-expenses') router.push('/reports/expenses')
 }
 
 function toggleLocale() {

@@ -1,5 +1,5 @@
 /**
- * Pinia store for M10 reporting (step 1: P/L report; step 2: BTW VAT return).
+ * Pinia store for M10 reporting (P/L, BTW VAT return, ICP, Expenses by category).
  *
  * Follows the same pattern as other stores in this project:
  * - Reactive state (loading, error, result)
@@ -16,8 +16,18 @@ type ProfitLossSeriesItem = components['schemas']['ProfitLossSeriesItem']
 type VatReturnReport = components['schemas']['VatReturnReport']
 type IcpReport = components['schemas']['IcpReport']
 type IcpLine = components['schemas']['IcpLine']
+type ExpenseReport = components['schemas']['ExpenseReport']
+type ExpenseCategoryRow = components['schemas']['ExpenseCategoryRow']
 
-export type { ProfitLossReport, ProfitLossSeriesItem, VatReturnReport, IcpReport, IcpLine }
+export type {
+  ProfitLossReport,
+  ProfitLossSeriesItem,
+  VatReturnReport,
+  IcpReport,
+  IcpLine,
+  ExpenseReport,
+  ExpenseCategoryRow,
+}
 
 export const useReportsStore = defineStore('reports', () => {
   // P/L report state
@@ -34,6 +44,11 @@ export const useReportsStore = defineStore('reports', () => {
   const icpReport = ref<IcpReport | null>(null)
   const icpLoading = ref(false)
   const icpError = ref<string | null>(null)
+
+  // Expense report state (step 4)
+  const expenseReport = ref<ExpenseReport | null>(null)
+  const expenseLoading = ref(false)
+  const expenseError = ref<string | null>(null)
 
   /**
    * Fetch the P/L report for the given date range and granularity.
@@ -101,6 +116,27 @@ export const useReportsStore = defineStore('reports', () => {
     }
   }
 
+  /**
+   * Fetch the expense report aggregated by category for the given date range.
+   *
+   * @param from  ISO date string (YYYY-MM-DD), inclusive start.
+   * @param to    ISO date string (YYYY-MM-DD), inclusive end.
+   */
+  async function fetchExpenseReport(from: string, to: string): Promise<void> {
+    expenseLoading.value = true
+    expenseError.value = null
+    try {
+      const params = new URLSearchParams({ from, to })
+      expenseReport.value = await get<ExpenseReport>(
+        `/api/v1/reports/expenses?${params.toString()}`,
+      )
+    } catch (e: unknown) {
+      expenseError.value = e instanceof ApiError ? e.message : String(e)
+    } finally {
+      expenseLoading.value = false
+    }
+  }
+
   return {
     plReport,
     plLoading,
@@ -114,5 +150,9 @@ export const useReportsStore = defineStore('reports', () => {
     icpLoading,
     icpError,
     fetchIcp,
+    expenseReport,
+    expenseLoading,
+    expenseError,
+    fetchExpenseReport,
   }
 })

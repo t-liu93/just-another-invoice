@@ -199,6 +199,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/reports/expenses',
+    name: 'report-expenses',
+    component: () => import('../views/reports/ExpenseReport.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/dashboard',
   },

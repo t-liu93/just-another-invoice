@@ -27,9 +27,10 @@ from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.company import Company
 from jai.models.user import User
-from jai.schemas.report import IcpReport, ProfitLossReport, VatReturnReport
+from jai.schemas.report import ExpenseReport, IcpReport, ProfitLossReport, VatReturnReport
 from jai.schemas.setting import SETTING_KEY_VAT_RATE_TIERS, VatRateTiers
 from jai.services.reporting.btw import compute_vat_return
+from jai.services.reporting.expenses import compute_expense_report
 from jai.services.reporting.icp import compute_icp
 from jai.services.reporting.pl import compute_profit_loss
 from jai.services.settings import get_setting
@@ -227,4 +228,50 @@ async def get_icp_report(
         company=company,
         year=year,
         quarter=quarter,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Expense report (M10 step 4)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/reports/expenses",
+    response_model=ExpenseReport,
+    response_model_by_alias=True,
+)
+async def get_expense_report(
+    date_from: Annotated[date, Query(alias="from", description="Inclusive start date.")],
+    date_to: Annotated[date, Query(alias="to", description="Inclusive end date.")],
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ExpenseReport:
+    """Return an expense report aggregated by category for the given date range.
+
+    Only confirmed expenses (``is_draft=false``) are included, filtered by
+    ``expense_date`` within [from, to] (inclusive).
+
+    Each ``by_category`` row reports the raw base-currency amounts (net, VAT,
+    gross) and the deductible / non-deductible split of net.  Amounts are the
+    original recorded amounts, *not* prorated by ``business_percentage`` or
+    ``depreciation_years`` (that is P/L scope, not raw expense reporting).
+
+    When a category has been deleted, its expenses are grouped by the preserved
+    ``category_name`` snapshot; same-name snapshots are merged into one row.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    if date_from > date_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="'from' must not be after 'to'.",
+        )
+
+    return await compute_expense_report(
+        session,
+        company_id=company_id,
+        date_from=date_from,
+        date_to=date_to,
     )

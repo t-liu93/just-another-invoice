@@ -1175,6 +1175,28 @@
       "missingCountry": "Missing country",
       "disclaimer": "Disclaimer",
       "disclaimerText": "This output is for bookkeeping assistance only and does not constitute tax or accounting advice. Always verify with your accountant and/or the Belastingdienst before filing your Opgaaf ICP."
+    },
+    "expenses": {
+      "title": "Expense Report by Category",
+      "navLink": "Expenses by Category",
+      "from": "From",
+      "to": "To",
+      "refresh": "Refresh",
+      "categoryName": "Category",
+      "net": "Net (EUR)",
+      "vat": "VAT (EUR)",
+      "gross": "Gross (EUR)",
+      "deductibleNet": "Deductible Net",
+      "nonDeductibleNet": "Non-Deductible Net",
+      "sharePct": "Share (%)",
+      "totalsTitle": "Totals",
+      "totalNet": "Total Net",
+      "totalVat": "Total VAT",
+      "totalGross": "Total Gross",
+      "totalDeductibleNet": "Total Deductible Net",
+      "totalNonDeductibleNet": "Total Non-Deductible Net",
+      "empty": "No confirmed expenses in this date range.",
+      "uncategorised": "Uncategorised"
     }
   }
 }

@@ -1175,6 +1175,28 @@
       "missingCountry": "缺国家代码",
       "disclaimer": "免责声明",
       "disclaimerText": "本报表仅为记账辅助，不构成税务或会计建议。提交 Opgaaf ICP 前请务必与您的会计师核对并以税局为准。"
+    },
+    "expenses": {
+      "title": "开支报表（按分类）",
+      "navLink": "开支按分类",
+      "from": "开始日期",
+      "to": "结束日期",
+      "refresh": "刷新",
+      "categoryName": "分类",
+      "net": "净额（EUR）",
+      "vat": "VAT（EUR）",
+      "gross": "毛额（EUR）",
+      "deductibleNet": "可抵扣净额",
+      "nonDeductibleNet": "不可抵扣净额",
+      "sharePct": "占比（%）",
+      "totalsTitle": "合计",
+      "totalNet": "净额合计",
+      "totalVat": "VAT 合计",
+      "totalGross": "毛额合计",
+      "totalDeductibleNet": "可抵扣净额合计",
+      "totalNonDeductibleNet": "不可抵扣净额合计",
+      "empty": "此日期区间内无已确认开支。",
+      "uncategorised": "未分类"
     }
   }
 }

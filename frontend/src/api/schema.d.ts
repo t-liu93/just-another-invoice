@@ -2085,6 +2085,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Expense Report
+         * @description Return an expense report aggregated by category for the given date range.
+         *
+         *     Only confirmed expenses (``is_draft=false``) are included, filtered by
+         *     ``expense_date`` within [from, to] (inclusive).
+         *
+         *     Each ``by_category`` row reports the raw base-currency amounts (net, VAT,
+         *     gross) and the deductible / non-deductible split of net.  Amounts are the
+         *     original recorded amounts, *not* prorated by ``business_percentage`` or
+         *     ``depreciation_years`` (that is P/L scope, not raw expense reporting).
+         *
+         *     When a category has been deleted, its expenses are grouped by the preserved
+         *     ``category_name`` snapshot; same-name snapshots are merged into one row.
+         */
+        get: operations["get_expense_report_api_v1_reports_expenses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3271,6 +3302,59 @@ export interface components {
             updated_at: string;
         };
         /**
+         * ExpenseCategoryRow
+         * @description One category row in the expense report.
+         *
+         *     Aggregates net / VAT / gross amounts and the deductible split for all
+         *     confirmed expenses in the requested date range belonging to this category.
+         *
+         *     Grouping key:
+         *     - ``category_id`` non-null  → grouped by the live category FK.
+         *     - ``category_id`` null (category deleted) → grouped by ``category_name``
+         *       snapshot.  Same-name snapshots are merged into one row.
+         *     - Both null → merged into the "Uncategorised" catch-all row.
+         *
+         *     Amounts are raw entry amounts (not prorated by business_percentage or
+         *     depreciation_years) – this is the raw expense breakdown, distinct from P/L.
+         */
+        ExpenseCategoryRow: {
+            /**
+             * Category Id
+             * @description Category UUID as string, or null when the category has been deleted (rows are then grouped by category_name snapshot).
+             */
+            category_id?: string | null;
+            /**
+             * Category Name
+             * @description Human-readable category name.  For live categories this is the snapshot captured at expense-entry time.  For deleted categories it is the preserved snapshot.  'Uncategorised' when both are absent.
+             */
+            category_name: string;
+            /**
+             * Net
+             * @description Sum of base_net_amount for this category (EUR).
+             */
+            net: string;
+            /**
+             * Vat
+             * @description Sum of base_vat_amount for this category (EUR).
+             */
+            vat: string;
+            /**
+             * Gross
+             * @description Sum of base_gross_amount for this category (EUR).
+             */
+            gross: string;
+            /**
+             * Deductible Net
+             * @description Sum of base_net_amount for deductible=true expenses in this category (EUR). deductible_net + non_deductible_net == net.
+             */
+            deductible_net: string;
+            /**
+             * Non Deductible Net
+             * @description Sum of base_net_amount for deductible=false expenses in this category (EUR). deductible_net + non_deductible_net == net.
+             */
+            non_deductible_net: string;
+        };
+        /**
          * ExpenseCategoryWrite
          * @description Request body for POST/PUT /api/v1/expense-categories.
          */
@@ -3484,6 +3568,59 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * ExpenseReport
+         * @description Response schema for GET /api/v1/reports/expenses.
+         *
+         *     The ``from`` / ``to`` query parameter names are Python reserved words so
+         *     internally they are stored as ``date_from`` / ``date_to`` but serialised
+         *     (and documented in OpenAPI) as ``from`` / ``to``, matching the P/L report
+         *     convention.
+         */
+        ExpenseReport: {
+            /**
+             * From
+             * Format: date
+             * @description Inclusive start date of the report range.
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             * @description Inclusive end date of the report range.
+             */
+            to: string;
+            /**
+             * By Category
+             * @description Per-category breakdown.  Empty list when no confirmed expenses fall within the requested date range.
+             */
+            by_category: components["schemas"]["ExpenseCategoryRow"][];
+            /**
+             * Total Net
+             * @description Sum of net across all categories (EUR). Equals Σ by_category[*].net.
+             */
+            total_net: string;
+            /**
+             * Total Vat
+             * @description Sum of vat across all categories (EUR). Equals Σ by_category[*].vat.
+             */
+            total_vat: string;
+            /**
+             * Total Gross
+             * @description Sum of gross across all categories (EUR). Equals Σ by_category[*].gross.
+             */
+            total_gross: string;
+            /**
+             * Total Deductible Net
+             * @description Sum of deductible_net across all categories (EUR). total_deductible_net + total_non_deductible_net == total_net.
+             */
+            total_deductible_net: string;
+            /**
+             * Total Non Deductible Net
+             * @description Sum of non_deductible_net across all categories (EUR). total_deductible_net + total_non_deductible_net == total_net.
+             */
+            total_non_deductible_net: string;
         };
         /**
          * ForgotPasswordRequest
@@ -10793,6 +10930,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IcpReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_expense_report_api_v1_reports_expenses_get: {
+        parameters: {
+            query: {
+                /** @description Inclusive start date. */
+                from: string;
+                /** @description Inclusive end date. */
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseReport"];
                 };
             };
             /** @description Validation Error */

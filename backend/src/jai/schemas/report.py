@@ -3,6 +3,10 @@
 ProfitLossSeriesItem   – one time-bucket (month or quarter) in the P/L series.
 ProfitLossReport       – full P/L report response.
 VatReturnReport        – BTW/VAT return summary (step 2, NL ruleset).
+IcpLine                – one customer line in the ICP report (step 3).
+IcpReport              – full ICP report response.
+ExpenseCategoryRow     – one category row in the expense report (step 4).
+ExpenseReport          – full expense report response (step 4).
 
 Schema layer never computes amounts (red-line 1).  All monetary fields are
 ``Decimal`` serialised as strings, matching the established money schema
@@ -246,5 +250,105 @@ class VatReturnReport(BaseModel):
         description=(
             "Fixed disclaimer: this output is for bookkeeping assistance only; "
             "not tax or accounting advice.  Verify with your accountant / tax authority."
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Expense report (step 4)
+# ---------------------------------------------------------------------------
+
+
+class ExpenseCategoryRow(BaseModel):
+    """One category row in the expense report.
+
+    Aggregates net / VAT / gross amounts and the deductible split for all
+    confirmed expenses in the requested date range belonging to this category.
+
+    Grouping key:
+    - ``category_id`` non-null  → grouped by the live category FK.
+    - ``category_id`` null (category deleted) → grouped by ``category_name``
+      snapshot.  Same-name snapshots are merged into one row.
+    - Both null → merged into the "Uncategorised" catch-all row.
+
+    Amounts are raw entry amounts (not prorated by business_percentage or
+    depreciation_years) – this is the raw expense breakdown, distinct from P/L.
+    """
+
+    category_id: str | None = Field(
+        default=None,
+        description=(
+            "Category UUID as string, or null when the category has been deleted "
+            "(rows are then grouped by category_name snapshot)."
+        ),
+    )
+    category_name: str = Field(
+        description=(
+            "Human-readable category name.  For live categories this is the "
+            "snapshot captured at expense-entry time.  For deleted categories it "
+            "is the preserved snapshot.  'Uncategorised' when both are absent."
+        )
+    )
+    net: Decimal = Field(description="Sum of base_net_amount for this category (EUR).")
+    vat: Decimal = Field(description="Sum of base_vat_amount for this category (EUR).")
+    gross: Decimal = Field(description="Sum of base_gross_amount for this category (EUR).")
+    deductible_net: Decimal = Field(
+        description=(
+            "Sum of base_net_amount for deductible=true expenses in this category (EUR). "
+            "deductible_net + non_deductible_net == net."
+        )
+    )
+    non_deductible_net: Decimal = Field(
+        description=(
+            "Sum of base_net_amount for deductible=false expenses in this category (EUR). "
+            "deductible_net + non_deductible_net == net."
+        )
+    )
+
+
+class ExpenseReport(BaseModel):
+    """Response schema for GET /api/v1/reports/expenses.
+
+    The ``from`` / ``to`` query parameter names are Python reserved words so
+    internally they are stored as ``date_from`` / ``date_to`` but serialised
+    (and documented in OpenAPI) as ``from`` / ``to``, matching the P/L report
+    convention.
+    """
+
+    model_config = {"populate_by_name": True}
+
+    date_from: date = Field(
+        serialization_alias="from",
+        description="Inclusive start date of the report range.",
+    )
+    date_to: date = Field(
+        serialization_alias="to",
+        description="Inclusive end date of the report range.",
+    )
+    by_category: list[ExpenseCategoryRow] = Field(
+        description=(
+            "Per-category breakdown.  Empty list when no confirmed expenses fall "
+            "within the requested date range."
+        )
+    )
+    total_net: Decimal = Field(
+        description="Sum of net across all categories (EUR). Equals Σ by_category[*].net."
+    )
+    total_vat: Decimal = Field(
+        description="Sum of vat across all categories (EUR). Equals Σ by_category[*].vat."
+    )
+    total_gross: Decimal = Field(
+        description="Sum of gross across all categories (EUR). Equals Σ by_category[*].gross."
+    )
+    total_deductible_net: Decimal = Field(
+        description=(
+            "Sum of deductible_net across all categories (EUR). "
+            "total_deductible_net + total_non_deductible_net == total_net."
+        )
+    )
+    total_non_deductible_net: Decimal = Field(
+        description=(
+            "Sum of non_deductible_net across all categories (EUR). "
+            "total_deductible_net + total_non_deductible_net == total_net."
         )
     )
