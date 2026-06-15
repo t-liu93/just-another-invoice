@@ -1,7 +1,7 @@
 services:
   db-migration:
     container_name: jai-db-migration
-    image: ${JAI_IMAGE:-ghcr.io/tianyuliu/just-another-invoice:latest}
+    image: ${JAI_IMAGE:-ghcr.io/yet-another-ledger/yet-another-ledger:latest}
     depends_on:
       postgres:
         condition: service_healthy
@@ -16,7 +16,7 @@ services:
 
   app:
     container_name: jai-app
-    image: ${JAI_IMAGE:-ghcr.io/tianyuliu/just-another-invoice:latest}
+    image: ${JAI_IMAGE:-ghcr.io/yet-another-ledger/yet-another-ledger:latest}
     depends_on:
       db-migration:
         condition: service_completed_successfully

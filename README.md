@@ -1,4 +1,4 @@
-# Just Another Invoice
+# Yet Another Ledger
 
 Self-hosted invoicing application for Dutch freelancers and small businesses.
 

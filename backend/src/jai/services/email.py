@@ -307,8 +307,8 @@ async def send_test_email(session: AsyncSession, to: str) -> None:
         raise RuntimeError("SMTP is not configured.")
     assert cfg is not None  # guaranteed by _configured() check above
 
-    html = "<p>This is a test email from <strong>Just Another Invoice</strong>.</p>"
-    subject = "JAI – Test Email"
+    html = "<p>This is a test email from <strong>Yet Another Ledger</strong>.</p>"
+    subject = "YAL – Test Email"
     await _send_mail(cfg, to, subject, html)
 
 

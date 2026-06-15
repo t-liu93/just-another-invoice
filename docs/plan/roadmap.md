@@ -1,4 +1,4 @@
-# Just Another Invoice · v1 主路线图（Master Roadmap）
+# Yet Another Ledger · v1 主路线图（Master Roadmap）
 
 > **这是什么**：把已拍板的 v1 范围（P0–P7）整理成一份**可施工的总览**——按「原子化、前后端可并行、每个里程碑完成即可部署自测」切成 **M0–M11**。
 >

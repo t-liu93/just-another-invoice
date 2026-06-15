@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const EXPECTED_OPENAPI_TITLE = 'Just Another Invoice'
+const EXPECTED_OPENAPI_TITLE = 'Yet Another Ledger'
 const DEFAULT_SCHEMA_URL = 'http://localhost:8000/api/v1/openapi.json'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))

@@ -901,7 +901,7 @@ wheels = [
 ]
 
 [[package]]
-name = "just-another-invoice"
+name = "yet-another-ledger"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -1,4 +1,4 @@
-# AGENTS.md · Just Another Invoice (`jai`)
+# AGENTS.md · Yet Another Ledger (`jai`)
 
 > 给所有在本仓库工作的 agent（Claude Code / Codex，任意模型）。这份文件只装**不变的规矩 + 路标**；具体的、随里程碑演进的内容在 `docs/plan/`，**别在这里重复，去读源头**。
 >

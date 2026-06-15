@@ -153,7 +153,7 @@ def create_app() -> FastAPI:
     settings = _cfg.get_settings()
 
     app = FastAPI(
-        title="Just Another Invoice",
+        title="Yet Another Ledger",
         version=settings.app_version,
         openapi_url="/api/v1/openapi.json",
         lifespan=lifespan,

@@ -35,4 +35,4 @@ async def test_openapi_schema_uses_contract_path(client: AsyncClient) -> None:
     """OpenAPI must be exposed at the contract path used by frontend codegen."""
     response = await client.get("/api/v1/openapi.json")
     assert response.status_code == 200
-    assert response.json()["info"]["title"] == "Just Another Invoice"
+    assert response.json()["info"]["title"] == "Yet Another Ledger"

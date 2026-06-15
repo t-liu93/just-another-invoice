@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Just Another Invoice",
+    "title": "Yet Another Ledger",
     "subtitle": "自托管发票与业务管理"
   },
   "nav": {
@@ -65,7 +65,7 @@
     "confirmNewPassword": "确认新密码"
   },
   "dashboard": {
-    "welcome": "欢迎使用 Just Another Invoice",
+    "welcome": "欢迎使用 Yet Another Ledger",
     "emptyHint": "仪表盘暂无内容，更多功能即将上线！",
     "settings": "设置",
     "title": "仪表盘",
@@ -84,8 +84,7 @@
     "categoryNet": "净额（EUR）",
     "chartLegendRevenue": "收入",
     "chartLegendExpense": "支出",
-    "chartLegendProfit": "利润",
-    "loadError": "仪表盘数据加载失败。"
+    "chartLegendProfit": "利润"
   },
   "onboarding": {
     "stepCompany": "公司",

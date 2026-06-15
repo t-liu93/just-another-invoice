@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Just Another Invoice",
+    "title": "Yet Another Ledger",
     "subtitle": "Self-hosted invoicing & business management"
   },
   "nav": {
@@ -65,7 +65,7 @@
     "confirmNewPassword": "Confirm new password"
   },
   "dashboard": {
-    "welcome": "Welcome to Just Another Invoice",
+    "welcome": "Welcome to Yet Another Ledger",
     "emptyHint": "Your dashboard is empty. More features coming soon!",
     "settings": "Settings",
     "title": "Dashboard",
@@ -84,8 +84,7 @@
     "categoryNet": "Net (EUR)",
     "chartLegendRevenue": "Revenue",
     "chartLegendExpense": "Expenses",
-    "chartLegendProfit": "Profit",
-    "loadError": "Failed to load dashboard data."
+    "chartLegendProfit": "Profit"
   },
   "onboarding": {
     "stepCompany": "Company",
