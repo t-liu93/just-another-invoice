@@ -1,12 +1,12 @@
 # M<x> · <里程碑名>
 
-> 进入本里程碑前 JIT 产出。先读 `docs/plan/roadmap.md` 的 §2 全局约束 + M<x> 那一格，再读分析文档对应章节。
+> 进入本里程碑前 JIT 产出。先读 `docs/plan/roadmap.md` 的 §2 全局约束 + M<x> 那一格，再读相关上游文档（已冻结的前置里程碑 `M<y>.md`；涉及 VAT 则 `docs/insight/btw-aangifte-2026-guide.md`）。
 
 ## 目标与范围
 - **目标**：<一句话>
 - **纳入（IN）**：<bullets，照 roadmap M<x> 展开>
 - **不纳入（OUT / 留到后续）**：<明确边界>
-- **对应文档**：分析文档 §<...>；roadmap M<x>
+- **对应文档**：roadmap M<x>；相关前置 `M<y>.md`（涉及 VAT 则 `docs/insight/btw-aangifte-2026-guide.md`）
 
 ## 待回填的产品决策（动手前先定）
 - [ ] <如：单位是否可选的细节 / VAT 数字口径 / 内容块字段……>

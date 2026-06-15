@@ -8,7 +8,8 @@
 自托管的**发票 / 个人公司管理系统**，作者本人 + 开源项目自用（荷兰个体户口径）。**FastAPI + Vue 3 SPA，单容器，PostgreSQL。** Python 包名 `jai`。
 
 ## 先读哪里（路标，不要在本文件里重复其内容）
-- **领域 / 范围 / 决策 / 荷兰 VAT 模型（权威）**：`docs/insight/InvoiceShelf-analysis.md`
+- **领域 / 范围 / 决策（权威）**：`docs/plan/roadmap.md`（总览 + 约束 + 里程碑地图）+ 各 `docs/plan/milestones/M<x>.md`（已冻结的逐里程碑决策）。
+- **荷兰 VAT / BTW 申报口径（权威）**：`docs/insight/btw-aangifte-2026-guide.md`（税局官方 2026 申报说明的结构化指南）。
 - **主路线图 + 全局约束 + 里程碑地图**：`docs/plan/roadmap.md`
 - **动手实现前**：读当前里程碑的 `docs/plan/milestones/M<x>.md`。
   **当前活跃的里程碑 = `roadmap.md` 进度表里标 🟡 的那个**（“做到哪了”只在这张表上记，本文件不记）。

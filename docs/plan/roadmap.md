@@ -1,10 +1,10 @@
 # Just Another Invoice · v1 主路线图（Master Roadmap）
 
-> **这是什么**：把 `docs/insight/InvoiceShelf-analysis.md` 里已拍板的 v1 范围（P0–P7）翻译成一份**可施工的总览**——按「原子化、前后端可并行、每个里程碑完成即可部署自测」重新切成 **M0–M11**。
+> **这是什么**：把已拍板的 v1 范围（P0–P7）整理成一份**可施工的总览**——按「原子化、前后端可并行、每个里程碑完成即可部署自测」切成 **M0–M11**。
 >
 > **这不是什么**：不是逐行施工图。本文停在「里程碑 + 方法论 + 约束」这一层；每个里程碑的**原子步骤清单**在动手时才落到 `docs/plan/milestones/M<x>.md`（JIT 细化，模板见 `milestones/_TEMPLATE.md`）。
 >
-> **上游文档**：方向、领域模型、决策记录、荷兰 VAT 模型一律以 `docs/insight/InvoiceShelf-analysis.md` 为准（下称「分析文档」）。本文只做「怎么落地」。
+> **权威来源**：方向、范围、领域模型、决策记录现以**本路线图 + 各 `milestones/M<x>.md`（已冻结的逐里程碑决策）**为准；荷兰 VAT/BTW 申报口径以 `docs/insight/btw-aangifte-2026-guide.md`（税局官方申报说明的结构化指南）为准。（早期上游「分析文档」已于 2026-06-15 从仓库移除——内容已吸收进上述文档；旧里程碑文档里残留的「分析文档 §x」字样仅为历史痕迹。）
 >
 > **架构母版**：`~/workspace/trading-journal`（同构、已上线）。骨架、约定、Dockerfile、CI 全部对齐它；差异仅在「换 PostgreSQL + 发票领域」。
 
@@ -306,7 +306,7 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 
 ```
 docs/
-  insight/InvoiceShelf-analysis.md   # 上游：方向/领域/决策/VAT 模型（权威）
+  insight/btw-aangifte-2026-guide.md # 荷兰 VAT/BTW 申报口径（权威，税局官方说明的结构化指南）
   plan/
     roadmap.md                       # 本文：总览 + 方法论 + 约束 + M0–M11
     milestones/
