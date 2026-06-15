@@ -13,7 +13,8 @@
     "payments": "收款",
     "contentLibrary": "内容库",
     "expenses": "开支",
-    "recurring": "周期开支"
+    "recurring": "周期开支",
+    "reports": "报表"
   },
   "health": {
     "backend": "后端：{status}",
@@ -941,6 +942,7 @@
   "common": {
     "cancel": "取消",
     "close": "关闭",
+    "error": "错误",
     "discountNone": "无折扣",
     "discountPercentage": "百分比 (%)",
     "discountFixed": "固定金额"
@@ -1098,5 +1100,20 @@
     "cc": "抄送",
     "statusSENT": "已发送",
     "statusFAILED": "发送失败"
+  },
+  "reports": {
+    "pl": {
+      "title": "盈亏报表（P/L）",
+      "from": "开始日期",
+      "to": "结束日期",
+      "granMonth": "按月",
+      "granQuarter": "按季",
+      "refresh": "刷新",
+      "revenueNet": "销项净额",
+      "expenseActual": "实际开支",
+      "profit": "利润",
+      "period": "期间",
+      "seriesTitle": "时间序列"
+    }
   }
 }

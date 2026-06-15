@@ -1965,6 +1965,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/profit-loss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profit Loss
+         * @description Return a P/L (profit & loss) report for the given date range.
+         *
+         *     Revenue is aggregated from invoices with status SENT or COMPLETED,
+         *     using ``base_taxable_amount`` (net EUR, post-discount).
+         *
+         *     Expenses are aggregated from confirmed (``is_draft=false``) expenses
+         *     with straight-line depreciation prorated by ``business_percentage``.
+         *     Each expense contributes an annual slice to the year of its purchase
+         *     anniversary within the requested window.
+         *
+         *     Returns a top-level summary plus a time-series breakdown by month
+         *     or quarter.
+         */
+        get: operations["get_profit_loss_api_v1_reports_profit_loss_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4543,6 +4574,90 @@ export interface components {
              * @default true
              */
             active?: boolean;
+        };
+        /**
+         * ProfitLossReport
+         * @description Response schema for GET /api/v1/reports/profit-loss.
+         *
+         *     Monetary fields are Decimal (serialised as strings by FastAPI/Pydantic v2
+         *     when ``model_config`` sets ``json_encoders`` or when callers use
+         *     ``model.model_dump(mode='json')``).
+         *
+         *     The ``from`` / ``to`` query parameter names are Python reserved words so
+         *     internally they are stored as ``date_from`` / ``date_to`` but serialised
+         *     (and documented in OpenAPI) as ``from`` / ``to``.
+         */
+        ProfitLossReport: {
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+            /**
+             * Granularity
+             * @description 'month' or 'quarter'.
+             */
+            granularity: string;
+            /**
+             * Revenue Net
+             * @description Total net taxable revenue across the full date range (EUR).
+             */
+            revenue_net: string;
+            /**
+             * Expense Actual
+             * @description Total depreciation-adjusted, business%-prorated expense cost (EUR).
+             */
+            expense_actual: string;
+            /**
+             * Profit
+             * @description revenue_net − expense_actual across the full range.
+             */
+            profit: string;
+            /**
+             * Series
+             * @description Time-bucketed breakdown by month or quarter.
+             */
+            series: components["schemas"]["ProfitLossSeriesItem"][];
+            /**
+             * By Category
+             * @description Reserved for future per-category breakdown (step 1: always null).
+             */
+            by_category?: null;
+        };
+        /**
+         * ProfitLossSeriesItem
+         * @description One time-bucket in the P/L time series.
+         *
+         *     ``period`` is an ISO date string representing the start of the bucket:
+         *     - month granularity  → ``YYYY-MM-01``
+         *     - quarter granularity → ``YYYY-01-01`` / ``YYYY-04-01`` / ``YYYY-07-01`` / ``YYYY-10-01``
+         */
+        ProfitLossSeriesItem: {
+            /**
+             * Period
+             * @description Bucket start date in YYYY-MM-DD format.
+             */
+            period: string;
+            /**
+             * Revenue Net
+             * @description Net taxable revenue in this period (EUR).
+             */
+            revenue_net: string;
+            /**
+             * Expense Actual
+             * @description Depreciation-adjusted, business%-prorated expense cost in this period (EUR).
+             */
+            expense_actual: string;
+            /**
+             * Profit
+             * @description revenue_net − expense_actual for this period.
+             */
+            profit: string;
         };
         /**
          * QuoteCalculationRead
@@ -10176,6 +10291,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profit_loss_api_v1_reports_profit_loss_get: {
+        parameters: {
+            query: {
+                /** @description Inclusive start date. */
+                from: string;
+                /** @description Inclusive end date. */
+                to: string;
+                /** @description Time-series bucket size: 'month' or 'quarter'. */
+                granularity?: "month" | "quarter";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfitLossReport"];
+                };
             };
             /** @description Validation Error */
             422: {

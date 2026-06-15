@@ -13,7 +13,8 @@
     "payments": "Payments",
     "contentLibrary": "Content Library",
     "expenses": "Expenses",
-    "recurring": "Recurring"
+    "recurring": "Recurring",
+    "reports": "Reports"
   },
   "health": {
     "backend": "backend: {status}",
@@ -941,6 +942,7 @@
   "common": {
     "cancel": "Cancel",
     "close": "Close",
+    "error": "Error",
     "discountNone": "None",
     "discountPercentage": "Percentage (%)",
     "discountFixed": "Fixed amount"
@@ -1098,5 +1100,20 @@
     "cc": "CC",
     "statusSENT": "Sent",
     "statusFAILED": "Failed"
+  },
+  "reports": {
+    "pl": {
+      "title": "Profit & Loss",
+      "from": "From",
+      "to": "To",
+      "granMonth": "Monthly",
+      "granQuarter": "Quarterly",
+      "refresh": "Refresh",
+      "revenueNet": "Net Revenue",
+      "expenseActual": "Actual Expenses",
+      "profit": "Profit",
+      "period": "Period",
+      "seriesTitle": "Time Series"
+    }
   }
 }

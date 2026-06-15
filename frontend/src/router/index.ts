@@ -181,6 +181,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/reports/profit-loss',
+    name: 'report-profit-loss',
+    component: () => import('../views/reports/ProfitLoss.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/dashboard',
   },
