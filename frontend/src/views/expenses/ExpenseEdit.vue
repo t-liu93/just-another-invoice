@@ -17,6 +17,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { localDateStr } from '../../utils/date'
 import {
   NForm, NFormItem, NInput, NInputNumber, NSelect, NCheckbox,
   NButton, NSpace, NAlert, NSpin, NText, NTag,
@@ -51,7 +52,7 @@ const expenseId = computed(() => route.params.id as string | undefined)
 const isEdit = computed(() => !!expenseId.value)
 
 // ---- Form state (raw inputs only) ----
-const expenseDate = ref(new Date().toISOString().slice(0, 10))
+const expenseDate = ref(localDateStr(new Date()))
 const categoryId = ref<string | null>(null)
 const supplierName = ref('')
 const vatTreatmentId = ref<string | null>(null)
@@ -110,13 +111,6 @@ const purchaseTreatmentOptions = computed(() =>
 const vatRateOptions = computed(() =>
   vatRates.value.map(r => ({ label: `${r.percent}% – ${r.label}`, value: r.id }))
 )
-
-const dateTs = computed({
-  get: () => expenseDate.value ? new Date(expenseDate.value).getTime() : null,
-  set: (v: number | null) => {
-    expenseDate.value = v ? new Date(v).toISOString().slice(0, 10) : ''
-  },
-})
 
 // ---- Load data ----
 async function loadDictionaries() {
@@ -397,10 +391,10 @@ async function handleAiExtract(attachmentId: string) {
                   <!-- Date -->
                   <n-form-item :label="t('expenses.expenseDate')">
                     <n-date-picker
-                      :value="dateTs"
+                      v-model:formatted-value="expenseDate"
+                      value-format="yyyy-MM-dd"
                       type="date"
                       style="width: 100%"
-                      @update:value="dateTs = $event"
                     />
                   </n-form-item>
 
