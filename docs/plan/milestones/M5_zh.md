@@ -1,0 +1,242 @@
+# M5 · 定价引擎 + 发票核心（Pricing Engine / Invoice Core）
+
+> 🌐 [English](M5.md) · **中文**
+
+> 进入本里程碑前 JIT 产出。先读 `docs/plan/roadmap.md` 的 §2 全局约束 + M5 那一格，再读分析文档 §2.2（Invoice / InvoiceItem / Tax）、§2.3（状态机）、§2.4（编号 / 多币种 / 计税 / 折扣）、§2.5（金钱精度）、§7.4（荷兰 VAT 模型）。
+> **M4 已完成**：`customer` 已含账单地址国家 + VAT 号；`vat_rate` / `vat_treatment` 两轴字典已落地；`payment_method` / `expense_category` / `unit` / 内部 `product` 目录已就绪。M5 在此之上首次落地真正的单据主线：**后端权威算价 + 发票持久化 + 并发安全编号**。
+> **本里程碑是 v1 的心脏**：所有金额计算必须进 `services/pricing`，前端只提交原始输入。任何把总额从前端信任落库的实现都直接违反红线 1。
+
+## 目标与范围
+- **目标**：能创建、编辑、查看、删除一张金额由后端算准的发票；发票编号并发安全、可自定义起始与跳号；发票行支持自由填写、可选产品目录项、VAT 处理类别落盘。
+- **纳入（IN）**：
+  - **`services/pricing` 权威定价引擎**：`Decimal` + `NUMERIC(18,3)` + `ROUND_HALF_UP`；支持不含税 / 含税单价、行级折扣、单据级折扣、按行计税 / 按单据计税、VAT treatment 归零效果、后端预览端点。
+  - **发票 CRUD + 列表**：发票头、行项目、税快照、生命周期状态 + 收款状态；列表搜索 / 过滤 / 分页；所有写入由 service 注入 `company_id`。
+  - **编号引擎**：消费 M2 的 `invoice.numbering` 设置；支持模板渲染、起始序号、跳到下一个序号；用 DB 行锁 + 唯一约束保证并发不撞号；删除草稿不回收号码。
+  - **VAT treatment 推导 + 落盘**：销售侧按客户账单国家 + VAT 号推导默认 treatment，允许 owner 手动覆盖；发票保存 treatment 快照，M10 报表再消费。
+  - **规范化税表**：不用 InvoiceShelf 那种一张宽表挂一堆可空 FK；M5 建 `invoice_tax`（单据级）和 `invoice_line_tax`（行级）两张表。
+  - **行项目模型**：自由填写 `name` / `description`（`text`）/ `quantity` / `unit_price`；单位可选；产品目录项可选，只作为带出名称、单位、默认 VAT rate 的便利来源。
+  - **产品目录边界**：新增发票专用的安全产品选项契约，只返回 `id/name/unit/default_vat_rate` 等客户面字段；发票 API 永不返回 `product.purchase_cost_excl_vat` / `margin_rate` / `effective_margin_rate`；M5 不做 cost→sale price 自动推导，成本核算留 M6.5。
+  - **前端**：发票列表、发票编辑器、后端计算预览、编号设置中的“下一个序号 / 跳号”入口、客户表单补客户编号前缀。
+- **不纳入（OUT / 留到后续）**：
+  - **报价 Quote / Convert / 内容模板 / 标准内容块 / Notes 模板** → M6。
+  - **成本核算 / estimate → quote** → M6.5。
+  - **收款 Payment、部分付款、`due_amount` 随收款流转** → M7；M5 只把新发票初始化为 `UNPAID` 且 `due_amount = total_incl_vat`。
+  - **PDF / 邮件 / 公开链接** → M9；`unique_hash` 字段只留位，不启用客户可访问链接。
+  - **币种字典 / FX provider / 外币开票** → 继续顺延。M4 已决定 FX 整块推迟；M5 只允许发票币种 = `company.base_currency`，`exchange_rate = 1`，`base_* = *`。
+  - **VAT 报表格子 / ICP 聚合 / Belastingdienst 口径** → M10；M5 不填 `vat_treatment.report_box`，不自作主张决定 BTW 格子。
+  - **KOR、OSS 阈值、实时 VAT 号校验、最新税法查询** → 后续实现阶段再与作者确认。
+  - **客户门户、在线支付、循环发票、Quote 克隆 / Invoice 克隆** → v1 OUT 或低优 follow-on。
+- **对应文档**：分析文档 §2.2–2.5 / §7.2.1 / §7.3 / §7.4；roadmap M5 / §2（红线 **1 / 2 / 3 / 4 / 6 / 7 / 8 / 10 / 11 / 12**）；M3 / M4 验收遗留项。
+
+## 本轮拟定的产品与技术决策（动手前可调整）
+- [x] **M5 单币种**：发票币种默认 `company.base_currency`；如果请求传入其他币种，后端 `422`。`customer.currency` 在 M5 只作历史字段 / 未来 FX 提示，不驱动开票币种。`exchange_rate` 与 `base_*` 字段先落 `1` / 同值，给未来 FX additive 迁移留口。
+- [x] **创建草稿即占号**：`POST /invoices` 成功即分配 `invoice_number`；删除 / 作废都不回收，编号允许有自然空洞。
+- [x] **编号并发模型**：`number_sequence` 行锁（`SELECT ... FOR UPDATE`）+ `UNIQUE(company_id, invoice_number)` 双保险；禁止 `max+1`。
+- [x] **跳号只允许把 next sequence 调大**：防止回退撞历史号；迁移旧系统时先设 `sequence_start` / `next_sequence`，再创建第一张新发票。
+- [x] **模板渲染不用 Jinja**：实现一个小而封闭的 renderer，只支持白名单占位符，避免模板执行能力。
+- [x] **客户编号前缀在 M5 补列**：`customer.invoice_prefix` 供 `{{CUSTOMER_SERIES}}` 使用；客户级序号只在模板引用 `{{CUSTOMER_SEQUENCE:n}}` 时分配。
+- [x] **计税模式语义**：
+  - `LINE`：每行必须有 `vat_rate_id`，每行生成 `invoice_line_tax`；单据级折扣按行金额比例分摊后再按行计税。
+  - `DOCUMENT`：单据必须有 `document_vat_rate_id`，整单生成一条 `invoice_tax`；行上的 `vat_rate_id` 只作草稿默认 / 产品带出，不参与计税。
+- [x] **VAT treatment 是单据级**：`vat_treatment_id` 作用于整张发票；`APPLY_RATE` 正常按 rate 计税，`ZERO_REVERSE` / `ZERO_EXPORT` / `EXEMPT` 的实际税额为 0，但保留 rate 与 treatment 快照。
+- [x] **VAT treatment 默认推导**：客户账单国家为空或等于公司国家 → `NL_DOMESTIC`；EU 且有 VAT 号 → `EU_B2B_REVERSE`；EU 且无 VAT 号 → `EU_B2C`；非 EU → `EXPORT_NON_EU`。匹配的 SALES treatment 不存在或 inactive 时后端 `422`，owner 可手动选择其他 active SALES treatment 覆盖。
+- [x] **含税单价反算**：`amounts_include_vat=true` 时，后端从含税金额反推不含税金额与税额；归零 / 免税 treatment 下含税金额等于不含税金额。
+- [x] **舍入位置**：每次金额乘法、折扣金额、税额、分摊份额都调用 `quantize_money()`；单据合计由已舍入的持久化行 / 税额汇总得出。固定单据折扣按比例分摊时，最后一个非零行吸收 0.001 级剩余，保证分摊和等于单据折扣。
+- [x] **产品目录不推导售价**：M5 选产品只带出 `name` / `unit_id` / `default_vat_rate_id`；`unit_price` 仍由用户输入。`cost` / `margin` 的内部逻辑留 M6.5。
+
+## 契约（先行 · 前后端各自对着写）
+> 业务端点一律 `/api/v1/*`。改契约就 `npm run codegen` 重生成 `schema.d.ts`，CI drift 关强制无漂移（红线 11）。沿用 M1 cookie 会话 + `current_mfa_user`；owner-only 复用 `_owner_only`。所有写端点 `company_id` 由 service 注入。
+
+**Pricing preview（步骤 1）**
+- `POST /api/v1/invoices/calculate` body `InvoiceCalculationRequest` → `200 InvoiceCalculationRead`。只算不落库、不占号。
+- `InvoiceCalculationRequest` 与 `InvoiceWrite` 共用核心字段：`customer_id`, `invoice_date`, `due_date?`, `currency?`, `tax_mode`, `amounts_include_vat`, `vat_treatment_id?`, `document_vat_rate_id?`, `discount?`, `lines[]`。
+
+**发票 CRUD / 列表（步骤 3）**
+- `GET /api/v1/invoices` query `{q?, customer_id?, status?, paid_status?, date_from?, date_to?, limit?=50, offset?=0, sort_by?: "invoice_date"|"created_at"|"invoice_number"}` → `InvoiceListResponse {items, total}`。
+- `POST /api/v1/invoices` body `InvoiceWrite` → `201 InvoiceRead`（占号 + 计算 + 落库）。
+- `GET /api/v1/invoices/{id}` → `200 InvoiceRead`；不存在 / 跨公司 → `404`。
+- `PUT /api/v1/invoices/{id}` body `InvoiceWrite` → `200 InvoiceRead`（保留原编号，重算并替换行 / 税子表）。
+- `DELETE /api/v1/invoices/{id}` → `204`（DB cascade 删行 / 税；编号不回收）。
+- `POST /api/v1/invoices/{id}/status` body `InvoiceStatusWrite {status}` → `200 InvoiceRead`。M5 允许 `DRAFT` / `SENT` / `CANCELLED`，`COMPLETED` 留 M7 由收款流转触发。
+
+**编号 / 客户前缀（步骤 2）**
+- 扩展既有 `GET/PUT /api/v1/settings/numbering` 的 `InvoiceNumberingConfig`：
+  - `template`: 默认 `{{SERIES:INV}}-{{SEQUENCE:6}}`
+  - `sequence_start`: 首次建序列时使用
+  - `preview?`: 后端可返回下一张预览号（只读）
+- `GET /api/v1/settings/invoice-number-sequence` → `InvoiceNumberSequenceRead {next_sequence, preview_number}`。
+- `PUT /api/v1/settings/invoice-number-sequence` body `InvoiceNumberSequenceWrite {next_sequence}` → `InvoiceNumberSequenceRead`（只能调大）。
+- 扩展 `CustomerWrite` / `CustomerRead`：`invoice_prefix?: str`，供 `{{CUSTOMER_SERIES}}` 使用。
+
+**发票安全产品选项（步骤 3 / 4）**
+- `GET /api/v1/invoice-product-options` query `{q?, limit?=20}` → `ProductInvoiceOptionListResponse {items}`。
+- `ProductInvoiceOptionRead { id, name, unit_id?, unit_name?, default_vat_rate_id? }`。
+- 明确不包含：`purchase_cost_excl_vat`, `margin_rate`, `effective_margin_rate`, `supplier`, `extra`。
+
+**核心 schema 形状**
+- `InvoiceStatus = "DRAFT" | "SENT" | "COMPLETED" | "CANCELLED"`。
+- `InvoicePaidStatus = "UNPAID" | "PARTIALLY_PAID" | "PAID"`。
+- `InvoiceTaxMode = "DOCUMENT" | "LINE"`。
+- `DiscountType = "NONE" | "PERCENTAGE" | "FIXED"`。
+- `DiscountInput { type: DiscountType, value?: Decimal }`；`NONE` 时 `value` 视为 0。
+- `InvoiceLineInput { product_id?, name, description?, quantity, unit_id?, unit_name?, unit_price, discount?: DiscountInput, vat_rate_id? }`
+  - `quantity > 0`；`unit_price >= 0`；`description` 是 `text`；`unit_id` 可空。
+  - `product_id` 可空且只作来源记录；即便传了产品，也必须传最终客户面 `name` / `unit_price`。
+- `InvoiceWrite { customer_id, reference_number?, invoice_date, due_date?, currency?, tax_mode, amounts_include_vat, vat_treatment_id?, document_vat_rate_id?, discount?: DiscountInput, notes?, lines: InvoiceLineInput[] }`
+  - 至少 1 行；`LINE` 模式每行需要 `vat_rate_id`；`DOCUMENT` 模式需要 `document_vat_rate_id`。
+- `InvoiceRead` 包含：`id`, `invoice_number`, `sequence_number`, `customer_id`, `status`, `paid_status`, `currency`, `exchange_rate`, 日期字段、discount 字段、`subtotal_excl_vat`, `line_discount_total`, `document_discount_amount`, `taxable_amount`, `vat_total`, `total_incl_vat`, `due_amount`, 对应 `base_*`, `vat_treatment_snapshot`, `lines[]`, `taxes[]`, `created_at`, `updated_at`。
+- `InvoiceLineRead` 包含客户面字段 + 金额字段 + `product_id` / `unit_id` / `vat_rate_id`；**不包含产品 cost / margin**。
+- `InvoiceTaxRead` / `InvoiceLineTaxRead` 包含 `vat_rate_id`, `vat_rate_label`, `vat_rate_percent`, `effective_vat_percent`, `taxable_amount`, `tax_amount`。
+
+## 定价规则（M5 必须钉死）
+> 以下是 `services/pricing` 的权威口径。schema 只校验形状；所有金额字段都由 service 计算，不信任前端。
+
+- **基础精度**：所有 money 入库前 `quantize_money(Decimal)` → 3 位小数，`ROUND_HALF_UP`。
+- **折扣顺序**：行小计 → 行折扣 → 单据折扣 → VAT → 单据合计。
+- **折扣类型**：
+  - `PERCENTAGE`：`base * percent / 100`，percent 不得小于 0，不得让折扣超过 base。
+  - `FIXED`：固定金额，不得小于 0，不得超过当前可折扣金额。
+  - `NONE`：金额 0。
+- **单据固定折扣分摊**：`LINE` 模式下必须分摊到行以便按税率计算；按各行折后金额比例分摊，最后一个非零行吸收舍入剩余。`DOCUMENT` 模式下可只存单据级折扣，不需要分摊用于计税。
+- **不含税输入**：`unit_price` 视作 excl. VAT；先算不含税基，再算 VAT，再得 incl. VAT。
+- **含税输入**：`unit_price` 视作 incl. VAT；先算含税金额与折扣，再按实际有效税率反推 excl. VAT 与 VAT。
+- **VAT treatment effect**：
+  - `APPLY_RATE`：有效税率 = `vat_rate.percent`。
+  - `ZERO_REVERSE` / `ZERO_EXPORT` / `EXEMPT`：有效税率 = 0，`tax_amount = 0`；仍保存原始 rate 快照与 treatment 快照，供 PDF / M10 报表解释。
+- **合计来源**：发票头的 `subtotal_excl_vat` / `vat_total` / `total_incl_vat` 由持久化行与税快照汇总，不从请求读取。
+
+## 数据模型 / 迁移
+> 每个核心表都用 UUID；时间戳沿用现有写法；根业务表挂 `company_id`（红线 2）。子表通过 FK cascade 归属发票，避免手写删除（红线 3）。
+
+- **新增枚举**（`models/_enums.py`）：`InvoiceStatus` / `InvoicePaidStatus` / `InvoiceTaxMode` / `DiscountType` / `NumberSequenceScope`。
+- **`customer` 改列**：加 `invoice_prefix text nullable`（客户级编号模板占位符）；schema / 前端表单同步。
+- **`number_sequence`**：
+  - `id` UUID PK；`company_id` FK → `company.id` (`RESTRICT`)；`document_type text`（M5 只用 `INVOICE`）；`scope` (`COMPANY` / `CUSTOMER`)；`customer_id` nullable FK → `customer.id` (`CASCADE`)；`next_value bigint not null`。
+  - 约束：partial unique `UNIQUE(company_id, document_type) WHERE scope='COMPANY'`；partial unique `UNIQUE(company_id, document_type, customer_id) WHERE scope='CUSTOMER'`；`next_value >= 1`；`CUSTOMER` scope 必须有 `customer_id`。
+  - 服务层在事务内 `SELECT ... FOR UPDATE`；不存在则按 `sequence_start` 创建。
+- **`invoice`**：
+  - `id` UUID PK；`company_id` FK → `company.id` (`RESTRICT`)；`customer_id` FK → `customer.id` (`RESTRICT`)。
+  - `invoice_number text not null`；`sequence_number bigint not null`；`customer_sequence_number bigint nullable`；`unique_hash text nullable`（留 M9 公开链接，不启用）；`reference_number text nullable`。
+  - 日期：`invoice_date date not null`；`due_date date nullable`。
+  - 状态：`status InvoiceStatus not null default DRAFT`；`paid_status InvoicePaidStatus not null default UNPAID`。
+  - 币种：`currency char(3) not null`；`exchange_rate NUMERIC(18,8) not null default 1`；M5 强制等于本位币。
+  - 税设置：`tax_mode InvoiceTaxMode`; `amounts_include_vat bool`; `vat_treatment_id` FK → `vat_treatment.id` (`RESTRICT`); treatment snapshot columns (`code` / `label` / `effect` / `requires_icp`)。
+  - 折扣：`discount_type DiscountType`; `discount_value NUMERIC(10,3)`; `document_discount_amount Money`。
+  - 金额：`subtotal_excl_vat`, `line_discount_total`, `taxable_amount`, `vat_total`, `total_incl_vat`, `due_amount` + 对应 `base_*`（M5 同值）。
+  - `notes text nullable`；`creator_id` FK → `user.id` nullable / restrict；timestamps。
+  - 约束 / 索引：`UNIQUE(company_id, invoice_number)`；`ix_invoice_company_id`；`ix_invoice_customer_id`；`ix_invoice_invoice_date`。
+- **`invoice_line`**：
+  - `id` UUID PK；`invoice_id` FK → `invoice.id` (`ON DELETE CASCADE`)；`sort_order int`。
+  - 来源 / 展示：`product_id` FK → `product.id` (`SET NULL`)；`name text not null`; `description text nullable`; `quantity NUMERIC(18,3)`; `unit_id` FK → `unit.id` (`SET NULL`); `unit_name text nullable`。
+  - 输入：`unit_price Money`; `discount_type`; `discount_value`; `vat_rate_id` FK → `vat_rate.id` (`RESTRICT`) nullable（`DOCUMENT` 模式可空）。
+  - 金额快照：`subtotal_excl_vat`, `subtotal_incl_vat`, `line_discount_amount`, `document_discount_share`, `taxable_amount`, `vat_total`, `total_incl_vat`。
+  - VAT rate snapshot：`vat_rate_label text nullable`; `vat_rate_percent NUMERIC(6,3) nullable`。
+- **`invoice_tax`**（单据级税）：`invoice_id` FK cascade；`vat_rate_id` FK restrict；rate snapshot；`effective_vat_percent`; `taxable_amount`; `tax_amount`。
+- **`invoice_line_tax`**（行级税）：`invoice_line_id` FK cascade；`vat_rate_id` FK restrict；rate snapshot；`effective_vat_percent`; `taxable_amount`; `tax_amount`。
+- **RLS**：继续留口不开；M5 服务层仍集中用当前用户的 `company_id`，不让前端传 scope。
+
+---
+
+## 原子步骤清单
+> 每步 = 一个原子改动（单人开发不强制 PR，CI 绿即可合 `main`），过 roadmap §5 DoD。后端 / 前端两栏尽量并行（都对着上面契约 + `schema.d.ts`）。**pricing / numbering 必须有单测**。
+
+### 步骤 1 · `services/pricing` + `POST /invoices/calculate`
+- **契约**：`InvoiceCalculationRequest` / `InvoiceCalculationRead`；折扣 / tax mode / line 输入 schema；`POST /api/v1/invoices/calculate`。
+- **后端**：
+  - `schemas/invoice.py` 先定义 calculation/write/read 的核心形状与枚举引用。
+  - `services/pricing.py`：纯计算核心（不落库）+ `derive_sales_vat_treatment()`（客户账单国家 + VAT 号 → SALES treatment）。
+  - `api/invoices.py` 加 calculate endpoint；只读取 customer / company / vat_rate / vat_treatment，返回预览。
+  - `models/_enums.py` 加 invoice / discount / tax mode 枚举。
+- **前端**：先不做完整 UI；可只生成 `schema.d.ts`，供后续 editor 对接。
+- **迁移**：无表迁移（只加 Python enum；PG enum 在步骤 3 建表时落）。
+- **测试**：
+  - pricing 单测：不含税 / 含税、`LINE` / `DOCUMENT`、21% / 9% / 0%、行折扣、单据百分比折扣、固定折扣分摊、归零 treatment、折扣超过基数报错、`ROUND_HALF_UP` 边界。
+  - integration：calculate 端点 owner-only、跨公司 customer/rate/treatment 拒绝、非本位币 `422`。
+- **DoD**：见 roadmap §5。
+
+### 步骤 2 · 编号引擎 + 客户编号前缀 + 跳号设置
+- **契约**：扩展 `InvoiceNumberingConfig`；新增 `GET/PUT /settings/invoice-number-sequence`；扩展 `CustomerWrite/Read.invoice_prefix`。
+- **后端**：
+  - `models/number_sequence.py` + Alembic 建表；`customer` 加 `invoice_prefix`。
+  - `services/numbering.py`：模板 renderer、行锁取号、公司序号 / 客户序号、跳号校验、预览号。
+  - `api/settings.py` 加 next sequence endpoints；`schemas/setting.py` 扩展 numbering schema；`schemas/customer.py` / `services/customer.py` 同步 `invoice_prefix`。
+  - 支持占位符：`{{SERIES:INV}}`, `{{SEQUENCE:6}}`, `{{CUSTOMER_SERIES}}`, `{{CUSTOMER_SEQUENCE:4}}`, `{{DATE:%Y}}` / `{{DATE:%Y%m%d}}`。不支持任意表达式。
+- **前端**：
+  - 公司设置的编号块增加“下一个发票序号 / 预览号 / 跳到序号”。
+  - 客户编辑页增加 `invoice_prefix`。
+  - `npm run codegen`。
+- **迁移**：`number_sequence` 表 + `customer.invoice_prefix`。
+- **测试**：
+  - renderer 占位符 / padding / 日期 / 未知占位符拒绝。
+  - `sequence_start` 首次生效；跳号只能调大；删除 / 创建不回收。
+  - 并发创建 / 并发取号不重复（pytest async 并发 + `UNIQUE(company_id, invoice_number)` 兜底）。
+  - 客户级序号仅模板引用时分配；客户前缀往返。
+- **DoD**：见 roadmap §5。
+
+### 步骤 3 · 发票表 + CRUD / 列表 / 状态流转
+- **契约**：`/invoices` 列表 + CRUD + `/invoices/{id}/status`；`/invoice-product-options`；`InvoiceRead` / `InvoiceListResponse` / `InvoiceStatusWrite` / `ProductInvoiceOptionRead`。
+- **后端**：
+  - `models/invoice.py`：`Invoice` / `InvoiceLine` / `InvoiceTax` / `InvoiceLineTax`；relationship cascade 与 DB cascade 对齐。
+  - `schemas/invoice.py` 完整 read/write/list schema。
+  - `services/invoice.py`：create（取号 + pricing + 落库）、update（保留编号 + 重算 + 替换子表）、delete、list、status transition。
+  - `api/invoices.py` 完整路由；`api/products.py` 或 `api/invoices.py` 加发票安全产品选项端点；挂进 `api/__init__.py`。
+  - 写入时 snapshot customer-facing 字段与 tax 字段；产品 `cost/margin` 不进入任何 invoice schema。
+- **前端**：先只保证 codegen 后类型可用；完整 UI 放步骤 4。
+- **迁移**：建 `invoice` / `invoice_line` / `invoice_tax` / `invoice_line_tax` + PG enum + 索引 / 唯一约束。
+- **测试**：
+  - CRUD 往返、列表过滤 / 搜索 / 分页、跨公司 `404`、owner-only。
+  - 创建即占号；更新不改号；删除 cascade 子表且不回收号。
+  - `customer_id` / `vat_rate_id` / `vat_treatment_id` 跨公司拒绝。
+  - `LINE` / `DOCUMENT` 模式持久化税表正确；发票头金额 = 子表汇总。
+  - `GET /invoice-product-options` 不序列化 cost / margin / supplier / extra。
+  - 删除被发票引用的 customer / vat_rate / vat_treatment 被 DB `RESTRICT` 拦住；删 product / unit 后发票行保留快照且 FK 置空。
+- **DoD**：见 roadmap §5。
+
+### 步骤 4 · 发票前端：列表 + 编辑器 + 后端预览
+- **契约**：对齐步骤 1–3 生成的 `schema.d.ts`。
+- **后端**：必要的小修（错误码 / 校验文案 / sort 参数）。
+- **前端**：
+  - `stores/invoices.ts`：列表、详情、保存、删除、calculate preview、状态切换。
+  - `views/invoices/InvoiceList.vue`：搜索、客户过滤、状态 / 收款状态过滤、分页、删除确认。
+  - `views/invoices/InvoiceEdit.vue`：客户选择、日期、税模式、含税 / 不含税、VAT treatment 默认推导 + 手动覆盖、行项目表格、产品选择、后端预览 totals、保存。
+  - 导航加「发票」入口；表单不做本地权威算钱，只展示 calculate 返回值。
+  - 产品选择调用 `/invoice-product-options`，不直接依赖含 cost / margin 的内部产品目录响应。
+- **迁移**：无。
+- **测试 / 自检**：`npm run build`；手动创建 / 编辑 / 删除一张发票；确认 `schema.d.ts` 无漂移。
+- **DoD**：见 roadmap §5。
+
+### 步骤 5 · 收尾：i18n + UX 打磨 + 部署自测点
+- **后端**：
+  - 补充 pricing / numbering docstring，确保所有金额列用 `Money` / `Numeric` 且 `description` 是 `text`。
+  - 列表排序、空 `q` 行为、错误映射收尾。
+- **前端**：
+  - `invoices.*` / numbering / customer prefix 文案进 `en.json` + `zh.json`。
+  - 发票编辑器的移动端布局、空态、错误提示、保存后跳转、状态标签统一。
+  - 设置页编号块与客户页 prefix 的中文 / 英文文案补全。
+- **验收**：走下方「🟢 部署自测点」；`ruff` / `mypy --strict` / `pytest` / `npm run build` / codegen freshness 全绿。
+- **DoD**：见 roadmap §5。
+
+## 🟢 部署自测点（里程碑验收 · 人工走）
+> 本地集成：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build`；浏览器 `http://localhost:${APP_HOST_PORT:-8000}`。
+
+1. **编号起始 / 跳号**：在公司设置把模板设为默认、起始号设为 100；新建第一张发票得到 `INV-000100`；把 next sequence 跳到 200，再建一张得到 `INV-000200`。删除草稿后再建，号码继续前进不复用。
+2. **基础发票**：选择一个 NL 客户，新增多行自由填写项目（含 `description` 长文本、数量、单位、单价），保存后列表出现，刷新详情金额不变。
+3. **按行计税**：一张发票同时用 21% 与 9% rate，设置行折扣 + 单据固定折扣；预览与保存后的 `subtotal_excl_vat` / `vat_total` / `total_incl_vat` 一致，税表按行落盘。
+4. **按单据计税**：切 `DOCUMENT` 模式，选一个 document VAT rate，行上不同 rate 不参与计税；保存后只生成 `invoice_tax`。
+5. **含税单价**：切 `amounts_include_vat=true`，输入含税价格，后端反算不含税金额与 VAT；切回不含税后同一数据按不含税口径计算。
+6. **VAT treatment 推导**：给 EU B2B 客户（非 NL 国家 + VAT 号）开票，默认 treatment 为 `EU_B2B_REVERSE`，税额为 0 且 `requires_icp` 快照为 true；给非 EU 客户开票默认 `EXPORT_NON_EU`。
+7. **产品目录边界**：选择 M4 产品带出名称 / 单位 / 默认 VAT rate；发票保存后 API / 页面不出现采购成本、margin、effective margin。
+8. **状态 / 收款初始值**：新发票 `status=DRAFT`、`paid_status=UNPAID`、`due_amount=total_incl_vat`；手动标记 `SENT` 后状态持久化，`COMPLETED` 不能在 M5 手动设置。
+9. **单币种边界**：发票币种等于公司本位币；尝试提交不同币种被后端拒绝，`base_*` 与原币金额一致。
+10. **隔离 / cascade / restrict**：跨公司取发票 `404`；删发票由 DB cascade 删除行 / 税；已被发票引用的 customer / vat_rate / vat_treatment 不能被误删；删 product / unit 不破坏历史发票展示。
+11. CI 四关全绿；`schema.d.ts` 无漂移。
+
+## 验收结论（收尾时回填）
+- **完成日期**：2026-06-11
+- **验收**：步骤 1–4 全部完成（步骤 5 i18n/UX 打磨已随步骤 4 一起完成）；323 单元测试 + 414 集成测试全绿；ruff / mypy --strict / npm run build / codegen freshness 全过；不违反任何红线。
+- **已知遗留 / 顺延项**：
+  - Quote / Convert / 内容模板 → M6。
+  - 收款与 `paid_status` 自动流转 → M7。
+  - FX provider / 外币发票 / 开票日 EUR 税基 → 后续按作者真实需求再开 additive 里程碑。
+  - PDF / 邮件 / 公开链接 → M9；`unique_hash` 仅留字段。
+  - VAT 报表格子 / ICP 聚合 / 税局口径逐条确认 → M10。

@@ -1,0 +1,166 @@
+# M1 · 认证 + 邮件底座
+
+> 🌐 [English](M1.md) · **中文**
+
+> 进入本里程碑前 JIT 产出。先读 `docs/plan/roadmap.md` 的 §2 全局约束 + M1 那一格，再读分析文档 §3.3（认证）、§3.5（三层设置）、§3.6（邮件）、§7.2.1（v1 范围·认证/设置）。
+> **M0 已完成**：单容器 walking skeleton + Postgres + Alembic + Money/Decimal + 前端占位页 + codegen + CI 四关。M1 在此之上加**第一条纵向功能切片**：能注册/登录的私有应用 + 邮件能发出去。
+
+## 目标与范围
+- **目标**：一个**能注册→登录（强制 MFA）→进到空 dashboard** 的私有应用；并把**邮件底座 + 三层设置表结构**一并落地（密码重置邮件能发出去、SMTP 在设置页可配）。
+- **纳入（IN）**：
+  - **设置表底座**：单表 `setting`（key-value + `level` + `scope_id` + JSONB `value`），类型化访问 + 内存缓存；**M1 只验收 GLOBAL 层读写**，真实 `user→company→global` 回退等 company/user 层语义到 M2 补全。
+  - **认证**：fastapi-users 用户名(email)+密码（**Argon2**）；**httpOnly cookie 会话**（JWT 策略，签名 secret 自管理：env 覆盖 > DB 首启自动生成）；登录/登出；`GET /users/me`；受保护路由。
+  - **强制 MFA(TOTP)**：首登强制绑定（无恢复码）；两步登录；CLI `jai reset-mfa` 兜底。
+  - **首账号引导**：首注册者成 `owner`，完成 onboarding 后**关闭公开注册**（`onboarding.completed` 全局标志驱动）。
+  - **邮件底座**：SMTP 发送（`aiosmtplib` + `jinja2`），SMTP 配置存设置表（env 兜底）；**密码重置邮件**；**SMTP 配置设置页**（前端填写并保存 + 发测试邮件）。
+  - **前端**：register/onboarding 页、两步登录页（含 MFA 绑定向导）、登出、受保护路由守卫 + **空壳 dashboard**、忘记/重置密码页、SMTP 设置页、Pinia auth store；**暗黑模式**（Naive UI `darkTheme` + 切换器 + localStorage 持久化 + 跟随系统默认）。
+- **不纳入（OUT / 留到后续）**：
+  - 公司业务档案（抬头/logo/VAT/本位币/编号规则）→ **M2**；设置表的 **company/user 层语义补全、真实 `user→company→global` 回退 + 缓存调优** 也在 M2。
+  - 邀请制多用户、RBAC 真实鉴权（v1 owner 全权；user 表此处只**预留** `company_id`/`role` 列）。
+  - RLS 真实实现（M0 留的会话钩子继续留空）。
+  - 单据/客户/字典等任何业务实体。
+  - Passkey/WebAuthn、OAuth/SSO、API token、邮件已读回执。
+- **对应文档**：分析文档 §3.3、§3.5、§3.6、§7.2.1；roadmap M1 / §1.1 / §2（红线 2/5/7/11）。
+
+## 待回填的产品决策（动手前先定 · 已定项打钩，默认项可微调）
+- [x] **首账号引导**：保留 `/register` 页；后端 `registration_open = (用户数 == 0)`，首注册者 `role=owner`；另设全局标志 `onboarding.completed`（默认 `false`）驱动前端"是否还要走引导"。M1 的 onboarding = **注册 owner + 绑定 MFA**，完成即置 `onboarding.completed=true` 并永久关闭公开注册。邀请制多用户**留到后续**。
+  - > **M2 前瞻**：M2 会在 onboarding 里**插入"填公司档案"一步**（把"完成点"后移到公司档案填好之后），并可**顺带加一个"配置邮件（可跳过）"的可选步骤**；M1 先只到 MFA 绑定为止。
+  - > **SMTP 不进 M1 强制 onboarding**：SMTP 配置留在**独立设置页**（步骤 4），随时可填；首次启动不强制填邮件，避免摩擦。密码重置依赖 SMTP，但有下面的 CLI 兜底，owner 不会因没配邮件而锁死。
+- [x] **会话凭证**：fastapi-users **CookieTransport + JWT 策略**。token（JWT）放 **httpOnly cookie**。**签名 secret 解析（`auth/secret.py`，启动期 lifespan 解析一次）**：优先 `AUTH_SECRET` env 显式覆盖；**未显式设置则首启自动生成随机值并持久化到设置表 `GLOBAL/auth.secret`**（每部署唯一、自托管零配置）。secret 损坏/轮换只失效已有会话，重登即可、不丢数据。**无 DB token 表**（JWT 无状态）。`COOKIE_SECURE`：dev 默认 `false`（走 `http://localhost`），prod 默认 `true`（compose 注入 `${COOKIE_SECURE:-true}`；仅 HTTPS 下回传，HTTPS 由 Nginx 反代终结；裸 HTTP 非 localhost 部署需显式设 `false`）；`SameSite=lax`。
+- [x] **MFA(TOTP)**：**强制**，首登绑定；**不发恢复码**；找回靠 CLI（见下条「CLI 运维兜底」）。
+- [x] **CLI 运维兜底**（自托管前提：能摸到服务器 = 拥有全部权限，密码/MFA 都能从命令行恢复、**不依赖邮件**）。调用方式分两态：**开发态** `uv run jai <cmd>`（项目装进 venv）；**部署态（容器内）** `docker compose run --rm app jai <cmd>`（runtime 镜像未 pip-install 项目，提供 `/usr/local/bin/jai` wrapper 调 `python -m jai.cli`，不依赖 `uv`）。
+  - `jai reset-mfa <email>`：清空 `totp_secret` + `mfa_enabled=false`，下次登录重新绑定 MFA。
+  - `jai set-password <email>`：命令行直接重设密码。**即使没配 SMTP，owner 也永不锁死**。
+- [x] **邮件库**：**`aiosmtplib`（异步发送）+ Python 内置 `email`（构造 MIME）+ `jinja2`（后端正文模板，HTML 自动转义→红线 7，M9 PDF 复用同一引擎）**。SMTP 配置**从设置表动态读**（每次发信用当前配置），env 兜底。（不用同步 `smtplib`：会阻塞异步事件循环；不用 `fastapi-mail`：配置偏启动期定死，不利于从 DB 动态取。）
+- [x] **TTL / 时长默认**（暂定，可后改）：pre-auth（过了密码、待 MFA）cookie 5 分钟；完整会话 cookie 7 天；密码重置 token 1 小时。
+- [x] **QR 渲染位置**：后端只返回 `otpauth://` provisioning URI + base32 secret，**QR 由前端渲染**（前端加 `qrcode` JS 库），后端不引图像依赖。前端**同时展示可复制的 `otpauth://` URI 与 base32 secret**，作为二维码扫不出时的手动录入兜底。
+- [x] **暗黑模式**：M1 即加入（前端开始实际使用，纯白底太刺眼）。实现为**客户端主题**：Naive UI `darkTheme`/`lightTheme` + `n-config-provider` 绑定 + 切换器；偏好存 **localStorage**，默认**跟随系统** `prefers-color-scheme`。**持久化到账号**（USER 级设置）留到 M2 设置层补全后再接。
+
+## 契约（先行 · 前后端各自对着写）
+> 业务端点一律 `/api/v1/*`。改契约就 `npm run codegen` 重生成 `schema.d.ts`，CI drift 关强制无漂移（红线 11）。
+
+**Bootstrap / 注册（公开）**
+- `GET /api/v1/auth/bootstrap` → `200 {registration_open: bool, onboarding_completed: bool}` — 驱动前端路由（决定显示 register / login / 续走引导）。
+- `POST /api/v1/auth/register` body `{email, password}` → `201 UserRead`；**仅当 `registration_open` 为真**，否则 `403`。首注册者 `role=owner`。
+
+**登录（两步 · cookie）**
+- `POST /api/v1/auth/login` body `{email, password}` → `200 {next: "mfa_setup" | "mfa_verify"}`，**置短时 pre-auth cookie**；凭证错误 → `400`。（`mfa_setup` = 该用户尚未绑定 TOTP；`mfa_verify` = 已绑定，输验证码即可。）
+- `POST /api/v1/auth/mfa/setup`（需 pre-auth cookie）→ `200 {secret, otpauth_uri}` — 生成**待确认** TOTP secret。
+- `POST /api/v1/auth/mfa/verify`（需 pre-auth cookie）body `{code}` → `204`；校验通过则：首次绑定时落 `totp_secret`+`mfa_enabled=true`+置 `onboarding.completed`，并**把 pre-auth cookie 升级为完整会话 cookie**；验证码错 → `400`。
+- `POST /api/v1/auth/logout` → `204`，清会话 cookie。
+
+**密码重置（公开）**
+- `POST /api/v1/auth/forgot-password` body `{email}` → `202`（恒定返回，防枚举；用户存在且 SMTP 已配则发重置邮件）。
+- `POST /api/v1/auth/reset-password` body `{token, password}` → `204`；token 失效/过期 → `400`。
+
+**当前用户（需完整会话）**
+- `GET /api/v1/users/me` → `200 UserRead {id, email, role, mfa_enabled, company_id}`。
+
+**设置 · SMTP（owner，需完整会话）**
+- `GET /api/v1/settings/smtp` → `200 SmtpSettingsRead`（密码字段**脱敏**返回，如 `password_set: bool`）。
+- `PUT /api/v1/settings/smtp` body `{host, port, username, password?, from_email, from_name?, use_tls, use_ssl}` → `200 SmtpSettingsRead`。
+- `POST /api/v1/settings/smtp/test` → `202`（用当前配置发一封测试邮件到 owner 邮箱；失败回 `400` 带错误信息）。
+
+## 数据模型 / 迁移
+> M1 引入**首批真实业务表**（M0 是空基线）。每步建表 = 一条 Alembic 迁移。
+
+- **`setting`**（设置单表，红线 5/6 的基础）：
+  - `id` UUID PK；`level` 枚举 `GLOBAL|COMPANY|USER`；`scope_id` UUID **可空**（GLOBAL 为 null，COMPANY/USER 指向对应实体，M1 不用）；`key` `text`；`value` **JSONB**（类型化值）；`created_at`/`updated_at`。
+  - **唯一约束** `(level, scope_id, key)`。M1 只读写 GLOBAL 层（`onboarding.completed`、`smtp.*`、`auth.secret`——其中 `auth.secret` 为系统自管理的 JWT 签名密钥，永不经任何 API 暴露）；COMPANY/USER 层先只保留结构位。`scope_id` 的 FK 留到 M2 公司/用户表落地再加。
+- **`user`**（fastapi-users UUID 基表 + 预留列）：
+  - 基表：`id` UUID、`email`（唯一）、`hashed_password`、`is_active`、`is_superuser`、`is_verified`。
+  - **预留**：`company_id` UUID **可空、暂不加 FK**（M2 落 `company` 表时补 FK + `ondelete`，红线 2/3）；`role` `text` 默认 `'owner'`（RBAC 后补）。
+  - **MFA**：`totp_secret` `text` 可空、`mfa_enabled` bool 默认 `false`（**列在建 user 表时一并加**，免二次 alter；M1 步骤 3 只用它们，不再改表）。
+  - `created_at`/`updated_at`。
+- **不建** token 表（JWT 无状态，cookie 内携带）。
+- **RLS**：M0 留的会话钩子继续空置；`setting`/`user` 仅**预留** `scope_id`/`company_id`，本里程碑不开 RLS。
+
+---
+
+## 原子步骤清单
+> 每步 = 一个原子改动（单人开发不强制 PR，CI 绿即可合 `main`），过 roadmap §5 DoD。后端/前端两栏尽量并行（都对着上面契约 + `schema.d.ts`）。**算钱不在本里程碑**，但"设置类型化、不 stringly-typed"（红线 5）从这里就立住。
+
+### 步骤 1 · 设置表 + 类型化访问 + 缓存（底座，先做）
+- **契约**：本步不暴露新 HTTP 端点（SMTP 读写在步骤 4）；只产出内部 `services/settings`。
+- **后端**：
+  - `models/setting.py`：`Setting` ORM（见数据模型）；`models/_enums.py` 加 `SettingLevel`。
+  - `schemas/setting.py`：内部类型化值模型（如 `OnboardingState`、后续 `SmtpSettings`）。
+  - `services/settings.py`：`get_setting(key, level, scope_id) -> typed` / `set_setting(...)`；**M1 只要求 GLOBAL 层稳定读写 + 进程内缓存**（写时失效）。COMPANY/USER 层与真实 `user→company→global` 回退可保留为占位或 mock 覆盖，正式语义到 M2 落地。值经 Pydantic 解析，**杜绝 `'YES'/'NO'`**（红线 5）。
+  - Alembic：建 `setting` 表（M1 首迁移）。
+- **前端**：无（仅 codegen 不变）。
+- **测试**：pytest——GLOBAL 层读写、缓存命中/失效、类型化解析（bool/int/嵌套）、唯一约束冲突；若覆盖回退顺序，本步只作为 mock/占位测试，不作为真实 company/user 语义验收。
+- **DoD**：见 roadmap §5。
+
+### 步骤 2 · 用户模型 + 密码认证（cookie 会话）+ 注册闸门
+- **契约**：`GET /auth/bootstrap`、`POST /auth/register`（gated）、`POST /auth/login`（**本步先单步发完整会话，步骤 3 改两步**）、`POST /auth/logout`、`GET /users/me`。
+  - > 备注：本步 login 先实现"密码对 → 直接发完整会话 cookie"，步骤 3 再把它改造成"密码 → pre-auth → MFA → 完整会话"。两步都在 M1 内落地，churn 可接受。
+- **后端**：
+  - `models/user.py`：`User`（fastapi-users UUID 基表 + `company_id`/`role`/`totp_secret`/`mfa_enabled` 预留列）。
+  - `auth/`：fastapi-users 装配——`UserManager`、**Argon2** 口令哈希（`pwdlib[argon2]`）、`SQLAlchemyUserDatabase`、**CookieTransport + JWTStrategy**（签名 secret 由 `auth/secret.py` 解析：env 覆盖 > DB `auth.secret` 自动生成；`cookie_secure`/`SameSite`/TTL 由 config 控）。
+  - `api/auth.py`：挂 fastapi-users register/auth router 到 `/api/v1/auth`；`register` 包一层 onboarding 闸门（`registration_open` 判定 + 首注册置 `role=owner`，**advisory lock 串行化首注册**）；`GET /auth/bootstrap`；`logout` 公开幂等清 cookie。
+  - `config.py`：加 `AUTH_SECRET`（可选覆盖）、`COOKIE_SECURE`（dev `false`/prod `true`）、会话 TTL（`session_ttl_days`/`pre_auth_ttl_minutes`）。启动期 `main.py` lifespan 在迁移检查后调 `resolve_auth_secret()`。
+  - Alembic：建 `user` 表（含 MFA 列）。
+  - **CLI 入口**：建 `jai` 命令脚本（pyproject `[project.scripts]`，开发态 `uv run jai`）；runtime 镜像另置 `/usr/local/bin/jai` wrapper（`python -m jai.cli`，部署态 `docker compose run --rm app jai`）。首个子命令 `jai set-password <email>`（命令行重设密码、不依赖邮件 → 密码兜底闭环）。`reset-mfa` 步骤 3 复用同一入口。
+- **前端**：
+  - `stores/auth.ts`（Pinia）：当前用户 + 登录/登出 action（cookie 自动携带，`credentials: 'include'`）。
+  - `views/Register.vue`（受 `bootstrap.registration_open` 控）、`views/Login.vue`（密码步）、`views/Dashboard.vue` 空壳。
+  - `router/`：受保护路由守卫（未登录跳 `/login`；`registration_open=false` 时 `/register` 跳 `/login`）。
+  - **暗黑模式**：`composables/useTheme.ts`（`darkTheme`/`lightTheme` 切换 + localStorage + 跟随系统默认）；`App.vue` 的 `n-config-provider` 绑定主题；app shell 放主题切换器。
+  - `npm run codegen` 重生成 `schema.d.ts`。
+- **测试**：pytest——注册闸门（首注册成功+`owner`、二次注册 403）、登录置 cookie、`/users/me` 未登录 401、登出清 cookie。
+- **DoD**：见 roadmap §5。
+
+### 步骤 3 · 强制 MFA(TOTP) + 两步登录 + CLI 重置
+- **契约**：`login` 改返回 `{next}` + 置 pre-auth cookie；新增 `POST /auth/mfa/setup`、`POST /auth/mfa/verify`。
+- **后端**：
+  - 依赖 `pyotp`。`services/mfa.py`：生成 secret、`otpauth_uri`、校验 code（含时间窗容差）。
+  - `auth/`：加 **pre-auth 策略**（短时 JWT，带 `scope=mfa` 声明，仅允许打 `mfa/*`）；`login` 改两步；`mfa/verify` 通过后升级为完整会话 + 首绑时置 `mfa_enabled`/`onboarding.completed`。**未绑 MFA 的用户拿不到完整会话**（强制）。
+  - CLI：复用步骤 2 的 `jai` 入口，加 `jai reset-mfa <email>`（清 `totp_secret` + `mfa_enabled=false`）。
+- **前端**：
+  - `Login.vue` 扩展：密码步后按 `next` 进 **MFA 绑定向导**（`qrcode` JS 渲染 `otpauth_uri` + **同屏展示可复制的 otpauth URI 与 base32 secret** 作手动录入兜底 + 输码确认）或 **MFA 验证步**（已绑定，直接输码）。
+  - 绑定成功 → 进 dashboard。
+- **测试**：pytest——TOTP 校验（有效/无效/相邻时间窗）、两步登录（无 MFA 拿不到完整会话）、`reset-mfa` 清空后需重新绑定；前端基本表单校验。
+- **DoD**：见 roadmap §5；**MFA/TOTP 校验逻辑必须有单测**。
+
+### 步骤 4 · 邮件/SMTP 底座 + 密码重置 + SMTP 设置页
+- **契约**：`POST /auth/forgot-password`、`POST /auth/reset-password`、`GET/PUT /settings/smtp`、`POST /settings/smtp/test`。
+- **后端**：
+  - `services/email.py`：`aiosmtplib` 发送 + `jinja2` 正文模板；**SMTP 配置从 `services/settings` 动态读**（env 兜底）；**渲染用户输入前 autoescape**（红线 7）。
+  - `schemas/setting.py`：`SmtpSettings`（类型化）；密码**脱敏**读出。
+  - `api/settings.py`：`GET/PUT /settings/smtp`（owner only）+ `POST /settings/smtp/test`。
+  - `api/auth.py`：挂 fastapi-users `forgot/reset` router，重置 token 邮件经 `services/email` 发出；`forgot-password` 恒返回 `202`（防枚举）。
+  - 重置邮件 Jinja 模板（EN/ZH 占位）。
+- **前端**：
+  - `views/settings/SmtpSettings.vue`：填写并保存 SMTP + "发测试邮件" 按钮。
+  - `views/ForgotPassword.vue` + `views/ResetPassword.vue`（带 token 的链接落地页）。
+  - i18n：新增文案进 `en.json`/`zh.json`。
+- **测试**：pytest——重置 token 生成/校验/过期；邮件构造（mock SMTP，断言收件人/主题/正文转义）；SMTP 设置读写脱敏；`forgot-password` 对不存在邮箱也回 202。
+- **DoD**：见 roadmap §5。
+
+## 🟢 部署自测点（里程碑验收 · 人工走）
+> 本地集成：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build`；浏览器走 `http://localhost:${APP_HOST_PORT:-8000}`。
+1. **首启引导**：全新库 → `/register` 可见 → 注册 owner → 强制走 **MFA 绑定**（扫码 + 输码）→ 进到空 dashboard。
+2. **注册关闭**：登出后再访问 `/register` → 跳 `/login`（公开注册已关）。
+3. **再次登录**：用 owner 账号登录 → 输 TOTP 验证码 → 回到 dashboard。
+4. **受保护**：登出后直接访问 dashboard → 跳 `/login`。
+5. **邮件链路**：SMTP 设置页填好配置 → 发测试邮件收到 → 触发"忘记密码" → 收到重置邮件 → 点链接重置成功 → 用新密码登录。
+6. **CLI 兜底**（部署态用 `docker compose run --rm app jai <cmd>`；开发态用 `uv run jai <cmd>`）：`jai reset-mfa <owner-email>` → 下次登录被要求重新绑定 MFA；`jai set-password <owner-email>` → 用新密码可登录（不依赖邮件的密码兜底）。
+7. CI 四关全绿；`schema.d.ts` 无漂移。
+
+## 验收结论
+- **完成日期**：2026-06-05
+- **状态**：🟢 完成（步骤 1–4 全部合入 `main`，人工验收通过）。
+- **交付概览**：
+  - **步骤 1 · 设置表底座**：`setting` 单表（`level`/`scope_id`/`key`/JSONB `value` + `(level, scope_id, key)` 唯一约束 + `chk_setting_level_scope` CHECK）；`services/settings` 类型化读写 + 进程内缓存（写时失效）；M1 仅验收 GLOBAL 层。
+  - **步骤 2 · 密码认证 + 注册闸门**：fastapi-users + Argon2；httpOnly cookie + JWT 策略；`auth/secret.py`（env 覆盖 > DB 自动生成持久化）；`registration_open = (用户数==0)` + advisory lock 串行化首注册 + 首注册置 `owner`；`GET /auth/bootstrap`、`GET /users/me`；CLI `jai set-password`。
+  - **步骤 3 · 强制 MFA(TOTP) + 两步登录**：`services/mfa`（pyotp，含时间窗容差）；两步登录（密码 → pre-auth cookie → MFA → 完整会话）；pre-auth 与 session 用**不同 JWT audience（`jai:mfa` / `jai:session`）隔离**，受保护依赖 `current_mfa_user` 强制要求已绑 MFA；CLI `jai reset-mfa`。
+  - **步骤 4 · 邮件/SMTP 底座 + 密码重置**：`services/email`（aiosmtplib + jinja2 autoescape，SMTP 配置从设置表动态读、env 兜底）；`forgot/reset-password`（防枚举恒返回 202）；`GET/PUT /settings/smtp`（密码脱敏）+ `POST /settings/smtp/test`；前端 SMTP 设置页、忘记/重置密码页。
+  - **前端**：register/onboarding、两步登录（含 MFA 绑定向导，`qrcode` 渲染 + 可复制 otpauth URI/base32 兜底）、空壳 dashboard、受保护路由守卫、Pinia auth store、暗黑模式（Naive UI `darkTheme` + localStorage + 跟随系统）。
+- **自动化测试**：默认套件 112 个单元测试（无需 DB）+ 集成套件 71 个（PostgreSQL）；`ruff` / `mypy --strict`（28 源文件）/ 前端 `npm run build` 均通过；`schema.d.ts` 无漂移。CI backend-quality 现已**同时跑 `uv run pytest` 与 `uv run pytest -m integration`**（步骤 1 review 提的「CI 漏跑集成测试」P1 已闭环）。MFA/TOTP 校验、auth token 隔离、重置 token 生命周期、SMTP 读写脱敏均有单测。
+- **人工验收（部署自测点 1–7）**：全部通过。首启引导（注册 owner → 强制 MFA 绑定 → 空 dashboard）、注册关闭后 `/register` 跳 `/login`、再次登录走 TOTP、受保护页未登录跳转、SMTP 配置→测试邮件→忘记/重置密码闭环、CLI `reset-mfa` / `set-password` 兜底，均符合预期。
+- **已知遗留 / 顺延项**：
+  1. **设置表 company/user 层语义**：真实 `user→company→global` 回退、scope 缓存调优在 M1 仅留结构位，正式落地 → **M2**。
+  2. **`setting.scope_id` / `user.company_id` 的 FK + `ondelete`**：待 M2 `company` 表落地后补 FK（当前仅预留可空列，红线 2/3）→ **M2**。
+  3. **暗黑模式持久化到账号**（USER 级设置）：M1 仅 localStorage + 跟随系统，绑定账号偏好 → **M2**（设置层补全后接）。
+  4. **onboarding 后移**：M2 在引导中插入「填公司档案」一步（并可选「配置邮件（可跳过）」），把完成点后移到公司档案填好之后。
+  5. **文档措辞校正（非阻塞）**：M1 契约写的 pre-auth JWT「带 `scope=mfa` 声明」，实现改用 **JWT audience 隔离**达成同一目标（功能等价）；后续若新增业务受保护端点，统一用 `current_mfa_user`，避免绕过 MFA 校验。

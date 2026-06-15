@@ -1,346 +1,348 @@
-# Yet Another Ledger · v1 主路线图（Master Roadmap）
+# Yet Another Ledger · v1 Master Roadmap
 
-> **这是什么**：把已拍板的 v1 范围（P0–P7）整理成一份**可施工的总览**——按「原子化、前后端可并行、每个里程碑完成即可部署自测」切成 **M0–M11**。
+> 🌐 **English** · [中文](roadmap_zh.md)
+
+> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) — sliced into **M0–M11** following the principles of atomicity, frontend/backend parallelism, and deployable verification at the end of every milestone.
 >
-> **这不是什么**：不是逐行施工图。本文停在「里程碑 + 方法论 + 约束」这一层；每个里程碑的**原子步骤清单**在动手时才落到 `docs/plan/milestones/M<x>.md`（JIT 细化，模板见 `milestones/_TEMPLATE.md`）。
+> **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
 >
-> **权威来源**：方向、范围、领域模型、决策记录现以**本路线图 + 各 `milestones/M<x>.md`（已冻结的逐里程碑决策）**为准；荷兰 VAT/BTW 申报口径以 `docs/insight/btw-aangifte-2026-guide.md`（税局官方申报说明的结构化指南）为准。（早期上游「分析文档」已于 2026-06-15 从仓库移除——内容已吸收进上述文档；旧里程碑文档里残留的「分析文档 §x」字样仅为历史痕迹。）
+> **Authoritative sources**: Direction, scope, domain model, and decision records are governed by **this roadmap + each `milestones/M<x>.md` (frozen per-milestone decisions)**; Dutch VAT/BTW filing conventions are governed by `docs/insight/btw-aangifte-2026-guide.md` (structured guide to the official Tax Authority filing instructions). (Early upstream "analysis documents" were removed from the repository on 2026-06-15 — their content has been absorbed into the above documents; any remaining "analysis doc §x" references in older milestone files are historical artefacts only.)
 >
-> **架构母版**：`~/workspace/trading-journal`（同构、已上线）。骨架、约定、Dockerfile、CI 全部对齐它；差异仅在「换 PostgreSQL + 发票领域」。
+> **Architecture reference**: `~/workspace/trading-journal` (isomorphic, live in production). Skeleton, conventions, Dockerfile, and CI all align with it; the only differences are "swap SQLite for PostgreSQL + invoice domain".
 
 ---
 
-## 0. agent 开工必读（每次进场先看这 5 条）
+## 0. Agent pre-flight checklist (read these 5 items every time before starting)
 
-1. **先读约束**：本文 [§2 全局约束] 是纪律红线，违反任何一条都要先停下来问。
-2. **契约先行**：动手前先定/改 API 契约（Pydantic schema），再分头写后端实现与前端界面。见 [§1.1]。
-3. **算钱只在后端**：前端只收原始输入，所有金额由后端 `services/pricing` 权威计算。见 [§2] 第 1 条。
-4. **一步 = 一个原子改动 + 过 DoD**：原子、可独立部署、附测试，CI 绿即可合 `main`（单人开发不强制 PR）。模板见 [§5]。
-5. **改了契约就重生成 TS 类型**：`npm run codegen`，并确保 CI 的 drift 检测过。见 [§1.1]、[§5]。
-
----
-
-## 1. 开发方法论（四支柱）
-
-### 1.1 Contract-first（契约先行）→ 前后端可并行
-
-每个功能的**第一个动作**是把 API 契约定下来：在后端写 Pydantic 请求/响应模型 + 路由签名（可先返回桩数据），FastAPI 自动产出 OpenAPI。契约一锁：
-
-- **后端线**：写 `models → schemas → services → api` 的真实实现 + 测试。
-- **前端线**：`npm run codegen` 把 OpenAPI 拉成 `frontend/src/api/schema.d.ts`（**已提交进仓库**），前端对着类型写 store / view，先连 mock、最后对接真接口。
-
-两条线并行，靠「类型 + OpenAPI」这一份契约保证不漂。CI 的 `codegen-freshness` 关会强制 `schema.d.ts` 与后端一致。
-
-### 1.2 Walking Skeleton + 纵向薄切片 → 每个里程碑都能部署自测
-
-- **M0 不是"堆基础设施"**，而是打通一条最薄的端到端链路：单容器起来、FastAPI 托管前端、健康检查、一个能打开的页面、Postgres 连上、迁移能跑、CI 绿。**第一天就能"进部署页面点一下"**。
-- 之后每个里程碑加**一条纵向可见的功能**（DB → API → UI 一条龙），而不是"先写完所有后端再写前端"。每个里程碑结尾都有明确的 **部署自测点**（见 [§4]）。
-
-### 1.3 原子步骤 + 统一 Definition of Done → 可维护、可 review
-
-每个原子步骤是一组小而自洽的改动，结构永远是母版那套分层（`models / schemas / services / api`，算钱在 `services`），过统一的 DoD（见 [§5]）。**单人开发，不强制走 PR**：自测 + CI 绿即可直接合 `main`（想做人工 review 时仍可开分支/PR，留这个口）。好处：每个步骤都小而同构，哪天要回看也扫一眼就懂。
-
-### 1.4 仓内 Markdown 计划文档 → vibe coding 友好
-
-计划全部以 Markdown 落在 `docs/plan/`，随代码版本化、agent 与人都能读。本文是总览；里程碑细节 JIT 落到 `milestones/M<x>.md`。结构见 [§7]。
+1. **Read the constraints first**: [§2 Global Constraints] are the hard guardrails — stop and ask before violating any of them.
+2. **Contract first**: Define/update the API contract (Pydantic schema) before writing backend implementation or frontend UI. See [§1.1].
+3. **Money calculations only in the backend**: The frontend only collects raw input; all amounts are authoritatively calculated by backend `services/pricing`. See [§2] item 1.
+4. **One step = one atomic change + pass DoD**: Atomic, independently deployable, with tests; once CI is green, merge to `main` (solo development — no mandatory PR). Template at [§5].
+5. **Regenerate TS types whenever the contract changes**: `npm run codegen`, and ensure the CI drift check passes. See [§1.1] and [§5].
 
 ---
 
-## 2. 全局约束（Guardrails · 红线）
+## 1. Development Methodology (Four Pillars)
 
-> 源自分析文档 §7.3 避坑清单 + 决策记录。**每个 agent 开工必读，违反先停。**
+### 1.1 Contract-first → Frontend and backend in parallel
 
-1. **算钱在后端**：前端只传 `{item_id?, name, description, quantity, unit_price, discount, tax_category_id, ...}` 等原始输入；后端 `services/pricing` 负责 行小计→折扣→计税(含税/不含税/复合/定额)→单据合计→base 换算，统一产出并落盘。金额一律 **`Decimal`**（DB `NUMERIC`，scale≈3），**定死舍入规则与位置**（逐行 vs 合计舍入口径固定）。
-2. **多租户用 Postgres RLS，别手动 scope**：即便 v1 单租户，也把数据访问收敛、核心表预留 `company_id`，别散落 `where company=`。详见 [§3.3]。
-3. **别手写级联删除**：用 DB 外键 + ORM cascade（SQLAlchemy `relationship(cascade=...)` / `ondelete="CASCADE"`），杜绝孤儿数据。
-4. **编号并发安全**：别 `max+1`；用 DB 序列 / 唯一约束 + 重试；且支持**自定义起始与跳号**（迁移旧系统衔接）。
-5. **设置别 stringly-typed**：三层设置类型化访问（Pydantic/枚举）+ 缓存，别满地 `'YES'/'NO'`。
-6. **税表结构规范化**：别用一张宽表挂一堆可空 FK；用规范多态或「单据级税表 / 行级税表」分表。
-7. **渲染用户输入要清洗**：进 PDF/HTML 前过滤（XSS/SSRF），沿用 InvoiceShelf 近期的 sanitizer 思路。
-8. **汇率锁快照**：外币按**开票日**锁 EUR 税基（VAT 合规），收款日另算现金/汇兑；历史不漂移（分析文档 §7.4.5）。
-9. **不做应用内自更新**：升级走重新部署容器镜像，不给网络留控制容器的入口。
-10. **`description` 用 `text`**：别再犯 255 上限的错。
-11. **OpenAPI→TS 类型生成**：沿用母版做法，前后端类型一致、契约不漂；CI 强制 drift 检测。
-12. **VAT 数据驱动、不写死枚举**：税率与 VAT 处理类别是**用户可增删改的记录**（NL 默认 21/9/0 仅作种子）；「类别→申报格子」映射是国别特定的，与税率表解耦（分析文档 §7.4.2）。
+The **first action** for any feature is to lock the API contract: write Pydantic request/response models + route signatures in the backend (stub data is fine initially), and FastAPI produces OpenAPI automatically. Once the contract is locked:
+
+- **Backend track**: Implement `models → schemas → services → api` with real logic + tests.
+- **Frontend track**: `npm run codegen` pulls the OpenAPI into `frontend/src/api/schema.d.ts` (**committed to the repo**); the frontend writes stores/views against those types — mock first, then wire up the real API.
+
+Both tracks run in parallel, kept in sync by the single "types + OpenAPI" contract. The CI `codegen-freshness` gate enforces that `schema.d.ts` matches the backend at all times.
+
+### 1.2 Walking Skeleton + vertical thin slices → every milestone is deployable
+
+- **M0 is not "pile up infrastructure"** — it threads the thinnest possible end-to-end path: single container up, FastAPI serving the frontend, health check, one working page, Postgres connected, migrations running, CI green. **Day one you can open a browser and click something.**
+- Every subsequent milestone adds **one vertically visible feature** (DB → API → UI end-to-end), not "finish all backend, then all frontend". Each milestone ends with an explicit **deployment smoke test** (see [§4]).
+
+### 1.3 Atomic steps + uniform Definition of Done → maintainable and reviewable
+
+Every atomic step is a small, self-contained change that always follows the reference layering (`models / schemas / services / api`, money logic in `services`) and passes the uniform DoD (see [§5]). **Solo development — no mandatory PR**: self-test + CI green is enough to merge to `main` (branch/PR still available for intentional human review). Benefit: every step is small and isomorphic, easy to read back later.
+
+### 1.4 In-repo Markdown plan documents → vibe-coding friendly
+
+All planning lives as Markdown under `docs/plan/`, version-controlled alongside code and readable by both agents and humans. This document is the overview; milestone details are written JIT into `milestones/M<x>.md`. Structure at [§7].
 
 ---
 
-## 3. 技术栈与骨架（对齐母版）
+## 2. Global Constraints (Guardrails · Hard Lines)
 
-### 3.1 技术栈
+> Derived from analysis doc §7.3 pitfall list + decision records. **Every agent must read these before starting; stop and ask before violating any.**
 
-| 层 | 选型 |
+1. **Money calculations in the backend**: The frontend only sends `{item_id?, name, description, quantity, unit_price, discount, tax_category_id, ...}` and other raw inputs; backend `services/pricing` is responsible for line subtotals → discounts → tax computation (inclusive/exclusive/compound/fixed) → document totals → base-currency conversion, all produced authoritatively and persisted. All amounts must use **`Decimal`** (DB `NUMERIC`, scale≈3); **rounding rules and positions are fixed** (per-line vs. aggregate rounding mode is fixed).
+2. **Multi-tenancy via Postgres RLS, not manual scoping**: Even for v1 single-tenant, converge data access and reserve `company_id` on core tables — no scattered `where company=` clauses. See [§3.3].
+3. **No hand-written cascade deletes**: Use DB foreign keys + ORM cascade (`SQLAlchemy relationship(cascade=...)` / `ondelete="CASCADE"`) to eliminate orphaned data.
+4. **Concurrency-safe numbering**: No `max+1`; use DB sequences / unique constraints + retry; support **custom starting number and gap skipping** (for migrating from legacy systems).
+5. **No stringly-typed settings**: Three-tier settings with typed access (Pydantic/enum) + caching; no `'YES'/'NO'` scattered everywhere.
+6. **Normalised tax table structure**: No wide table with a pile of nullable FKs; use normalised polymorphism or separate "document-level tax table / line-level tax table".
+7. **Sanitise user input before rendering**: Filter before entering PDF/HTML (XSS/SSRF), following InvoiceShelf's recent sanitiser approach.
+8. **Lock exchange rate as a snapshot**: Foreign currency locks the EUR tax base at **invoice date** (VAT compliance); payment date uses a separate cash/FX rate; historical records never drift (analysis doc §7.4.5).
+9. **No in-app self-update**: Upgrades go through redeploying the container image; no inbound network entry point that could control the container.
+10. **Use `text` for `description`**: Never repeat the 255-character limit mistake.
+11. **OpenAPI → TS type generation**: Follow the reference project's approach — consistent frontend/backend types, no contract drift; CI enforces drift detection.
+12. **VAT is data-driven, not hardcoded enums**: Tax rates and VAT treatment categories are **user-editable records** (NL defaults 21/9/0 are seeds only); the "category → filing box" mapping is country-specific and decoupled from the rate table (analysis doc §7.4.2).
+
+---
+
+## 3. Tech Stack and Skeleton (aligned with the reference project)
+
+### 3.1 Tech stack
+
+| Layer | Choice |
 | --- | --- |
-| 后端 | **FastAPI** + **SQLAlchemy 2.0 (async)** + **Alembic** + **fastapi-users** + **pydantic-settings**；包管理 **uv**；Python 3.12 |
-| 数据库 | **PostgreSQL**（开发期即用，不用 SQLite；asyncpg 驱动）+ **行级安全 RLS** |
-| 质量门 | **ruff**（line 100；E/F/I/B/UP/ASYNC）+ **mypy --strict** + **pytest**（asyncio auto） |
-| 前端 | **Vue 3 + TypeScript** + Pinia + Vue Router + Vite + **Naive UI** + **ECharts**；**openapi-typescript** 生成 `schema.d.ts` |
-| 部署 | **单容器**：三阶段 Dockerfile（前端 `vite build` → 后端 `uv` 装依赖 → runtime 托管 `static/` + uvicorn）；entrypoint 跑 `alembic upgrade head` |
-| CI | GitHub Actions：backend-quality / codegen-freshness / frontend-build / docker-build；tag 触发多架构镜像发布 |
+| Backend | **FastAPI** + **SQLAlchemy 2.0 (async)** + **Alembic** + **fastapi-users** + **pydantic-settings**; package manager **uv**; Python 3.12 |
+| Database | **PostgreSQL** (used from day one, no SQLite; asyncpg driver) + **row-level security RLS** |
+| Quality gates | **ruff** (line 100; E/F/I/B/UP/ASYNC) + **mypy --strict** + **pytest** (asyncio auto) |
+| Frontend | **Vue 3 + TypeScript** + Pinia + Vue Router + Vite + **Naive UI** + **ECharts**; **openapi-typescript** generates `schema.d.ts` |
+| Deployment | **Single container**: three-stage Dockerfile (frontend `vite build` → backend `uv` install deps → runtime serves `static/` + uvicorn); entrypoint runs `alembic upgrade head` |
+| CI | GitHub Actions: backend-quality / codegen-freshness / frontend-build / docker-build; tag triggers multi-arch image publish |
 
-> **与母版唯一的实质差异**：母版用 `sqlite+aiosqlite`，本项目从 M0 起就用 `postgresql+asyncpg`（为 RLS 铺路）。其余骨架、Dockerfile 分层、CI 四关、codegen 流程**照搬**。
+> **The only material difference from the reference project**: The reference uses `sqlite+aiosqlite`; this project uses `postgresql+asyncpg` from M0 (laying the groundwork for RLS). Everything else — skeleton, Dockerfile layers, CI four-gate, codegen flow — is **copied directly**.
 
-### 3.2 目录骨架（Python 包 = `jai`）
+### 3.2 Directory skeleton (Python package = `jai`)
 
 ```
 backend/src/jai/
-  main.py            # FastAPI app 装配、路由挂载、静态托管 + SPA fallback
-  config.py          # pydantic-settings：DATABASE_URL / SMTP / STATIC_DIR / ...
-  db.py              # async engine / session / Base；RLS 会话上下文（后续）
-  auth/              # fastapi-users：users / backend / deps
-  models/            # SQLAlchemy ORM（含 _enums.py、Money/Decimal 约定）
-  schemas/           # Pydantic 请求/响应（与 models 分离；不进算钱）
-  services/          # 业务逻辑：pricing / numbering / fx / reports ...（算钱在这）
-  api/               # 路由（/api/v1/*）：薄控制器，调 services
-backend/alembic/     # 迁移
+  main.py            # FastAPI app assembly, route mounting, static serving + SPA fallback
+  config.py          # pydantic-settings: DATABASE_URL / SMTP / STATIC_DIR / ...
+  db.py              # async engine / session / Base; RLS session context (later)
+  auth/              # fastapi-users: users / backend / deps
+  models/            # SQLAlchemy ORM (incl. _enums.py, Money/Decimal conventions)
+  schemas/           # Pydantic request/response (separate from models; no money logic)
+  services/          # Business logic: pricing / numbering / fx / reports ... (money logic here)
+  api/               # Routes (/api/v1/*): thin controllers, call services
+backend/alembic/     # migrations
 frontend/src/        # api(schema.d.ts) / stores / views / components / router / ...
-Dockerfile           # 三阶段单容器
+Dockerfile           # three-stage single container
 .github/workflows/   # ci.yml / release.yml
-docs/                # insight(分析) + plan(本路线图 + 里程碑)
+docs/                # insight (analysis) + plan (this roadmap + milestones)
 ```
 
-### 3.3 「多租户友好 schema + 单租户简单逻辑」落地基线
+### 3.3 "Multi-tenant-friendly schema + single-tenant simple logic" baseline
 
-- v1 **单公司单用户**实现，但 schema 不写死成单例：把「公司/业务主体」建成一张表（v1 仅一行），核心业务表预留归属关系。
-- `company_id` 现在就挂还是日后 Alembic 补列，**留到各里程碑建表时定**（默认倾向：核心业务表从 M2 起就挂 `company_id`，给 RLS 留位）。
-- RLS / 多用户 RBAC / 多公司切换 UI 等**应用层复杂度 v1 直接不做**，只在 schema 留口。
-
----
-
-## 4. 里程碑地图 M0–M11（含后插的 M2.5 · 设置 UX 重构 / M6.5 · 成本核算）
-
-> 依赖：**M0 → M1 → M2 →（M2.5）→ {M3, M4}**，然后分两条可并行的线 ——
-> ① **单据线**：M5 → M6 → **M6.5** → M7；② **开支线**：M8（只依赖 M2 本位币 + M4 字典，可选挂 M3 客户，**不依赖发票/报价/收款**）。两线汇合于 **M9 → M10 → M11**。
-> 可并行：M3‖M4；单据线‖开支线（即 M8 可与 M5/M6/M7 同时进行）。**M2.5 是纯前端 UX 修复，非阻塞**——挂在 M2 之后即可，与 M3/M4 并行做也行，不挡任何功能线。每格结尾的「🟢 部署自测点」是该里程碑的验收信号。
-
-### M0 · 地基骨架（walking skeleton）｜对应 P0
-- **目标**：单容器跑通的最薄端到端链路。
-- **关键内容**：仿母版搭 `jai` 后端骨架 + Vue 前端骨架；接入 **PostgreSQL + asyncpg**；Alembic 基线迁移；三阶段 Dockerfile + entrypoint；CI 四关；`/api/health`；**Money/Decimal 货币基础类型**（`NUMERIC` 约定 + 舍入工具）；i18n 脚手架（EN/ZH 骨架）；`openapi-typescript` codegen 接好。
-- **两种运行方式（M0 都要打通，基础 `docker-compose.yml` 含 `app` + `postgres`，DB 不发布宿主机端口；app 只发布到 `127.0.0.1:${APP_HOST_PORT:-8000}` 给本机反代，容器内固定 8000；本地开发叠加 `docker-compose.dev.yml` 只绑定 Postgres 到 `127.0.0.1`，端口可由 dev-only `POSTGRES_DEV_PORT` 调整）**：
-  - **开发态**：前端 `npm run dev`（Vite）｜后端 `uv run uvicorn jai.main:app --reload`｜数据库 **`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres`（只起 Postgres 这一个 service）**。
-  - **部署态**：`docker compose up -d`（起 **单容器 app = 前端构建产物 + 后端**，外加 **Postgres**；生产从 GHCR 拉镜像，本地集成用 dev override `up --build`），migration service 自动 `alembic upgrade head`。
-- **建表/预留**：Alembic 起始；约定 RLS 会话钩子留空实现位。
-- **🟢 部署自测点**：本地集成 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` 起 app + Postgres，生产 `docker compose up -d` 从 GHCR 拉镜像；浏览器打开 `http://localhost:${APP_HOST_PORT:-8000}` 看到（空）占位页 + `/api/health` 返回 ok；CI 全绿。
-
-### M1 · 认证 + 邮件底座｜对应 P1
-- **目标**：能注册/登录的私有应用，且邮件能发出去。
-- **关键内容**：fastapi-users 用户名+密码（**Argon2**）；**MFA(TOTP)，记账软件必须有**；登录/登出 UI；受保护路由 + 空壳 dashboard。
-- **邮件底座（本里程碑一并做掉，后续 M9 直接复用）**：用 Python 现成包实现 **SMTP 发送**；**密码重置邮件**；**设置表基础**（即三层设置的单表 + `level`，先用来存 SMTP 配置）+ **SMTP 配置设置页**（前端填写并保存）。
-- **建表/预留**：`user` 绑 `company_id` + `role` 字段建表即留（RBAC 后补，v1 owner 全权）；**设置表（key-value + level）在此落地**，M2 在其上扩公司/用户层。
-- **🟢 部署自测点**：注册 → 登录 → 绑定 TOTP → 进到空 dashboard；在设置页填 SMTP → 触发密码重置 → 收到邮件；登出后受保护页跳登录。
-
-### M2 · 公司档案 + 三层设置（补全）｜对应 P1
-- **目标**：能配置「你的业务主体」。
-- **关键内容**：单例**业务档案**（name/logo/VAT 号/地址/本位币/编号规则）；在 **M1 已落地的设置表**上补全 **三层语义**（global/company/user，scope id，类型化访问 + 缓存，按 user→company→global 回退）+ 公司/用户级设置 UI 页。
-- **建表/预留**：`company` 表落地（v1 一行）；设置表的 `level`/scope 设计为多公司友好。
-- **🟢 部署自测点**：编辑公司抬头/logo/本位币并持久化；改一个用户级偏好看回退生效。
-
-### M2.5 · 设置入口统一 + 设置 UX 重构（Affine 式可展开面板）｜本路线图新增（UX 修复，不新增后端功能）
-- **目标**：把目前散落、图标语义混乱的设置入口收敛成「右上角**一个齿轮 icon → 一个统一的可展开设置面板**」，对齐 Affine 的设置体验。
-- **依赖**：M2（公司档案 + 三层设置已落地）。**纯前端重构**，不动后端契约、不碰算钱；**非阻塞**，可与 M3/M4 并行。
-- **现状痛点（为什么做）**：
-  - 右上角「人头」图标点进去其实是 Preference，旁边又有一个独立「设置」入口、里面只有 SMTP；
-  - 从 Preference 进去后右上角图标又变成没有 icon 的 Company／其它，**入口四处分散、图标与内容语义不一致**。
-- **边界原则（定位，先认）**：齿轮面板**只装「偏好 / Preference」类设置 + 系统配置**（SMTP、主题…）；**业务主体身份**（抬头 / logo / VAT 号 / 地址 / 本位币 / 编号规则）属于 Company，放在右上角 **Company icon 下的 Company 设置**里，**不进齿轮面板**。两者职责互不重叠。
-- **关键内容**：
-  - **单一入口**：右上角只留**一个齿轮 icon** 作为设置总入口；与右上角**专门的 Company icon（业务主体身份区）明确区分**，Company 那个不混进设置。
-  - **可展开面板（不是纯 Dropdown）**：点齿轮进入一个 Affine 式 **Expandable Menu / 设置面板**——左侧分类、右侧详情，点开即就地编辑。
-  - **设置分类收编**（统一进这一个面板）：
-    1. **偏好类设置（Preference）**：用户/公司级的偏好开关与默认值（语言、默认值…），**不含业务主体身份**（那是 Company 的事）；
-    2. **邮件设置**：SMTP 等，点开即就地填写保存（复用 M1/M2 已有接口）；
-    3. **主题 Theme**：暗黑模式、默认主题等现有零散项**全部整合进来**；
-    4. **未来扩展位**：后续 AI 等设置项统一从此面板进入（**先留分类位**，本里程碑不实现具体功能）。
-- **不做**：不新增后端字段/接口（若需也只做契约对齐，不引入算钱逻辑）；自定义主题、多公司切换不在此里程碑。
-- **follow-up（收尾，已排）· 界面语言账号级持久化**：M2.5 主体把语言做成会话级（沿用旧 🌐 行为，刷新回默认）；收尾补一个 follow-up 让语言**像主题一样跟随账号**——给 USER 级 `UserPreferences` 加一个 `locale` 字段、复用 `GET/PUT /settings/me`，前端照搬 `useTheme` 的「localStorage 缓存 + 服务端为准」。这是对上面「零后端」边界**唯一一处有意识的小扩展**（一个字段、无算钱、要重生成 `schema.d.ts`），细节见 `milestones/M2.5.md` 步骤 4。
-- **🟢 部署自测点**：右上角只剩**一个齿轮 + 一个 Company icon**；点齿轮打开可展开面板，在面板内分别完成「公司偏好 / SMTP / 主题切换」三类设置并持久化；全程不再出现「人头变 Preference、图标消失」的错乱。
-
-### M3 · 客户｜对应 P2（可与 M4 并行）
-- **目标**：能管理客户档案。
-- **关键内容**：Customer CRUD + 列表；账单/收货**地址**；每客户默认币种（有交易后锁定）；**国家 + VAT 号**（为 M10 的 ICP / 反向征收判定铺路）；长尾字段用 **JSONB** 承载。
-- **建表/预留**：`customer.company_id`；地址用 `type`(BILLING/SHIPPING)。
-- **🟢 部署自测点**：新建/编辑/删除客户，填地址与 VAT 号，列表搜索。
-
-### M4 · 字典 / 主数据｜对应 P2（可与 M3 并行）
-- **目标**：单据要用的字典就绪。
-- **关键内容**：**税种/VAT 处理类别**（数据驱动，NL 21/9/0/免税/反向/EU-B2B/出口作种子，见分析文档 §7.4.2）；收款方式；开支分类（对齐 NL/EU 口径）；币种 + 汇率基础（手填，provider 接口留空）；**产品/材料目录（成本核算 M6.5 的数据底座）**——条目带「采购成本(不含税) + 品类 + 单位 + 该品类默认 Margin Rate」，手动 CRUD + 供应商 Excel 粘贴/导入；margin 与品类一律**数据驱动可改**（红线 12），不写死枚举。
-- **建表/预留**：税类别表与「申报格子映射」**解耦**；汇率 provider 抽象接口；产品目录的成本字段是「当前价」，历史快照由用它的 estimate 自己锁（见 M6.5）。
-- **🟢 部署自测点**：维护税率/收款方式/开支分类，种子数据可见可改；新建几条产品/材料并设默认 margin，Excel 导入一批供货价。
-
-### M5 · 定价引擎 + 发票核心｜对应 P3（v1 的"心脏"）
-- **目标**：能开出一张金额由后端算准的发票。
-- **关键内容**：**`services/pricing` 权威计算**（行小计→行/单据折扣→按单/按行计税→含税/不含税→合计→base 换算，定死舍入）；`POST /invoices/calculate` 预览端点；发票 CRUD + 列表；**编号**（模板化 + 可自定义起始 + 跳号 + 并发安全）；**双状态**（生命周期 + 收款状态）；行项目（自由填写 `description` 用 `text`、数量必填、单位可选、可选目录项）。
-- **建表/预留**：税表规范化（单据级/行级分表或正规多态）；`unique_hash` 字段留位（公开链接 v1 不启用）。
-- **🟢 部署自测点**：建发票、加多行、切按单/按行计税、看后端算出的小计/税/合计；改编号起始号生效。
-
-### M6 · 报价 + 转换 + 内容模板｜对应 P3
-- **目标**：报价闭环 + 单据内容复用。
-- **关键内容**：报价 CRUD（与发票同构）；**简化状态** draft/sent/accepted/rejected/expired（去掉 viewed）；**到期自动置 expired**（后端定时，APScheduler）；**Convert 报价→发票**；**文档内容模板**（常见工种报价/发票一键填充）；**标准内容块**（保修/T&C/银行信息/付款条款，公司级默认、单据可覆盖）；单据 **Notes**（自由备注 + 可复用模板）。
-- **🟢 部署自测点**：建报价、套用内容模板、标记 accepted、一键转发票；到期报价被定时置 expired。
-
-### M6.5 · 成本核算 / 报价辅助（内部 estimation → 报价）｜本路线图新增（作者自用核心工作流，替掉现有 Excel）
-- **目标**：用一张**内部**「成本 → 卖价」工作表辅助报价定价（蓝领 / 新能源安装口径）。
-- **依赖**：M4 的**产品/材料目录** + M5 **定价引擎**（复用其 VAT/合计层，**不重算税**）+ M6 **报价实体**。排在单据线 M6 之后、M7 之前。
-- **关键内容**：
-  - **Estimate 实体 + 统一行模型**：每行 `Total = Price × Amount`、`Margin Amount = Total × Margin Rate`、`行卖价(不含税) = Total + Margin Amount`；**labor / shipping / 差旅 / overhead 都是 Margin Rate = 0 的普通行**（不另设行类型）；差旅、overhead 一般挂**单据级各一行**。
-  - **三个滚动汇总**：Total Margin（仅设备利润）/ **Total Excl. VAT**（Σ 行卖价）/ Total Incl. VAT（**交给 M5 引擎加 21% VAT**，costing 自己不算税）。
-  - **`services/costing` 权威计算**：`Decimal` + 定死舍入（逐行 vs 合计口径在本里程碑细化时钉死）；**算钱逻辑必须单测**（红线 1）。
-  - **estimation → 报价联动（非一一对应）**：估算行可**分组**，每组生成**一条报价行**——只带**公开描述（品牌 / kWh 等可公开参数）+ 不含税价（= 该组 Σ 行卖价）**；报价行再走 M5 出含税合计。
-- **建表/预留**：Estimate 行**快照**当时的 cost（与 M4 目录解耦，目录后续改价不影响历史）；estimate 与 quote 用「分组 → 报价行」的弱关联，不强制一一对应。
-- **本里程碑特有护栏（红线 7/8 的延伸，写代码前先认）**：
-  1. **客户面零泄漏**：Estimate 的 cost / Margin / 时薪等字段**永不**序列化进报价 / PDF / 公开链接（红线 7 延伸）。
-  2. **成本快照**：更新目录价**不回灌**历史 estimate，历史不漂移（同红线 8）。
-- **🟢 部署自测点**：建一张 estimate，加若干设备行（带 margin）+ 人工/运费行（margin 0），看后端算出的不含税卖价与 Total Margin；圈一组生成一条**公开报价行**（确认客户面看不到任何 cost/margin/时薪）；该报价走 M5 出 21% 含税合计。
-
-### M7 · 收款｜对应 P4（可与 M8 并行）
-- **目标**：发票能收款、状态自动流转。
-- **关键内容**：Payment 实体（关联发票 / 独立）；**部分/多次付款**（首/中/尾款）；收款方式；**收款时锁汇率**（收款日 EUR 口径）；自动重算 `due_amount` 与 `paid_status`。
-- **🟢 部署自测点**：对一张发票分两次收款，看 UNPAID→PARTIALLY_PAID→PAID 自动流转。
-
-### M7.5 · 货币舍入口径修正（落到「分」）｜本路线图新增（M5 算钱口径修正，跨单据线/开支线）
-- **目标**：让**面向客户 / 对账 / 申报的货币量**统一落到货币最小单位（v1 = EUR = 2 位 / 分），使「前端显示 = 应付额 = 后端对账 = 供应商发票 / 银行流水」自洽；**单价与中间计算保留 ≥3 位**精度不变。
-- **缘起**：M7 收款 walkthrough 暴露——发票含税总额存为 3 位（如 `F2026-009 = 3865.166`），UI 显示 `3865.17`，而收款按「分」走永远凑不平。根因是 M5 把**应付总额**也只量化到 3 位、从未落到分（红线 1「舍入位置定死」指的就是这里）。
-- **依赖 / 位置**：改 **M5 `services/pricing`**（+ M6.5 对客面 costing、M8 expense 落地时对齐）；排在 **M7 之后、M8 之前**（M8 开支同口径，供应商发票/银行流水本就到分）。
-- **关键决策（已冻结 · 详见 `milestones/M7.5.md`）**：**行级到分**（方案 B 伞下子粒度——`数量×unit_price` 乘完即到分、逐行 net/VAT/total 到分、单据=各行相加；多行同率不做组级分摊；`F2026-009`→`3865.16`）；唯 `unit_price` 保留 ≥3 位；舍入方向随 `amounts_include_vat`；适用全部文档级出参（发票/报价/估算对客面/开支）；**不改列类型 / 不改契约 / 无迁移**（`NUMERIC(18,3)` 容得下 2 位）；**不舍到整欧元**（VAT 须按分申报）；引入 `currency_minor_unit`（EUR=2 硬编码 + 口子）；**无历史重算**（项目未上线、全测试数据，旧单据重建即可）；`services/costing`、`services/payment` 零改动。
-- **🟢 部署自测点**：重算后 `F2026-009` 同形态发票总额落到分、可按显示金额收满 `COMPLETED`；多行多税率发票每 VAT 组到分且 excl+vat=total 自洽、与供应商发票/银行流水对得上。
-
-### M8 · 开支｜对应 P4（独立线：仅依赖 M2+M4，可与整条单据线 M5/M6/M7 并行）
-- **目标**：能记账并智能填单。
-- **依赖**：M2（本位币）+ M4（开支分类/收款方式/币种）；可选挂 M3 客户。**不依赖发票/报价/收款**，拿到 M4 即可与单据线并行开工。
-- **关键内容**：Expense CRUD + 分类；**收据上传**（图片/PDF，本地存储 + storage 抽象）；**周期性开支**（固定成本按周期自动生成）；**⭐ AI 票据智能填写**（票据图 → 视觉大模型 → 自动填净额/税额/税率/供应商/日期/分类；外部依赖：Claude 等视觉模型 API）；每笔标「是否可抵扣」。
-- **（follow-on）⭐ AI 供货价单识别 → 灌入产品目录**：**复用本里程碑的视觉模型管道**，把供应商发的供货价格单（图 / PDF / Excel）→ 自动识别 → 灌进 **M4 的产品/材料目录**（给 M6.5 的成本核算供数）；排在 M8 AI 基建落地之后。
-- **🟢 部署自测点**：上传一张票据照片，AI 自动填好开支字段，保存归类；建一条周期性开支看自动生成。
-
-### M8.5 · 开支记账字段补全（对齐作者 NL 记账 Excel）｜本路线图新增（M8 数据模型补全，不新增算钱）
-- **目标**：给开支补三个**纯记录**字段，让数据模型反映作者的荷兰个体户记账 Excel——**付款来源**（私人/公司账户）、**业务使用比例**、**折旧年数**。
-- **依赖 / 位置**：在 **M8** 开支线之上做 additive 字段扩展；排在 **M8 之后、M9 之前**。**不新增算钱**——当年 Actual Expense / 可退 VAT 按年 / 季度聚合 / BTW 格子等派生口径全部顺延 **M10**（依赖「在报哪一年」，属报表引擎职责）。
-- **关键内容**：`paid_by`（PRIVATE/BUSINESS 指示）、`business_percentage`（0–100）、`depreciation_years`（≥1）三列加到 `expense`（+ `recurring_expense` parity）；编辑器/列表 UI + i18n；契约改 → `npm run codegen`。`deductible` 语义不变（= 能否退 VAT）；个人抬头不可退 VAT 由录入法处理（Net 填 Gross、VAT 改 0），不新建模。详见 `milestones/M8.5.md`（D1–D9 已冻结）。
-- **🟢 部署自测点**：新建开支可填私人/公司、业务%、折旧年并持久化；M8 期旧开支迁移回填默认（Business/100/1）；范围校验（%∈[0,100]、年≥1）；列表可见三字段；CI 绿 + `schema.d.ts` 无漂移。
-
-### M9 · 输出：PDF（邮件底座已在 M1）｜对应 P5
-- **目标**：能把单据交付给客户。
-- **关键内容**：**PDF 生成**（一套模板，Jinja2 + WeasyPrint 候选；用户输入清洗）+ 下载（无公开链接，手动发）；**复用 M1 的 SMTP 底座**，加单据**邮件正文模板/占位符** + **Email log**（无已读回执）+ 把 PDF 作附件发出；收款收据 PDF（低优）。
-- **建表/预留**：PDF 模板留 CSS 接口（自定义模板 v1 不做）。
-- **🟢 部署自测点**：下载一张发票 PDF（抬头/行项目/税/合计正确）；用 M1 配好的 SMTP 把发票邮件 + PDF 附件发出，并在 Email log 看到记录。
-
-### M10 · 报表 / 仪表盘｜对应 P6
-- **目标**：报税与经营看得见。
-- **关键内容**：盈亏 **P/L**；**⭐ VAT 申报汇总**（按季度 + VAT 类别聚合进 BTW 格子 1a/1b/1e/2a/3a/3b/4a/4b/5a/5b/5c + 生成 **ICP 清单**，口径见分析文档 §7.4，具体数字口径实现时细化）；开支报表；**Dashboard**（ECharts 图）。
-- **⚠️ 来自 M4 的待办（必做）**：M4 已建 `vat_treatment.report_box` 列但**留空**。本里程碑要把 `(treatment×rate)→BTW 格子` 的映射口径**对照荷兰税务局（Belastingdienst）官网、与作者逐条共定后**再填表落地——**不得由 agent 自作主张**。详见 `milestones/M4.md` 的「JIT review 已定」与记忆 `vat-model-two-axis`。
-- **🟢 部署自测点**：选一个季度，导出 VAT 汇总与 ICP；Dashboard 显示收入/支出/利润图。
-
-### M11 · 收尾 / GA 前体检｜对应 P7
-- **目标**：可长期自托管。
-- **关键内容**：**备份脚本**（pg_dump + 卷快照）；i18n **EN/ZH 补全**；安全/性能打磨；文档（部署 README）；**迁移基线化**——1.0 正式上线前可把累积的 Alembic 迁移压成单一 baseline（彼时无生产数据，dev 库重建即可）；**上线后只追加 additive 迁移，永不再压**。
-- **🟢 部署自测点**：跑一次备份/恢复演练；切换 EN/ZH UI 完整。
+- v1 implements **single company, single user**, but the schema is not hardcoded as a singleton: "company/business entity" is built as a proper table (v1 has one row), with core business tables carrying an ownership reference.
+- Whether `company_id` is added now or via a later Alembic migration is **deferred to each milestone's table design** (default preference: core business tables carry `company_id` from M2 onward, reserving a slot for RLS).
+- RLS / multi-user RBAC / multi-company switching UI and similar **application-layer complexity are explicitly out of scope for v1** — only schema hooks are reserved.
 
 ---
 
-## 4.x 路线图之外（vNext）· 外部银行流水接入（仅备忘，不在 M0–M11）
+## 4. Milestone Map M0–M11 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting)
 
-> **状态**：明确**不做**于当前 11 个里程碑；这里只留一笔备忘，方便日后重拾项目时心里有数。**现在不预留任何 DB schema**——将来要加列/加表都是 additive 迁移，旧数据不受影响，成本可接受，不必提前留位。
+> Dependencies: **M0 → M1 → M2 → (M2.5) → {M3, M4}**, then two parallelisable tracks:
+> ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at **M9 → M10 → M11**.
+> Parallelisable: M3‖M4; document track‖expense track (M8 can run alongside M5/M6/M7). **M2.5 is a pure frontend UX fix, non-blocking** — it slots after M2 and can run in parallel with M3/M4; it blocks nothing. The "🟢 deployment smoke test" at the end of each entry is that milestone's acceptance signal.
 
-- **是什么**：接一个**外部交易供应商**，通过 API 自动拉取合作银行的交易流水（transaction），省去手工录入。**provider 无关**：Plaid（YNAB 背后用的就是它）、GoCardless Bank Account Data（前身 Nordigen，EU 开放银行、AIS 免费）、Tink / TrueLayer… 都可，选型到时再定。
-- **两个用途**：
-  - **收款对账**：读流水 Description（可借大模型识别 Invoice Number 等）→ 尝试匹配现有发票 → 关联 / 建议一笔 Payment（接 M7）。
-  - **开支导入**：把流水直接导成开支，先填已知字段（金额 / 日期 / 对方）；做账时再用 **M8 的 AI 票据填写**补全净额 / 税率 / 类别（接 M8）。
-- **同步语义（关键产品取向，YNAB 式）**：
-  - **只从首次连接之后开始同步**；**历史旧数据不回灌**也没关系，连接时把现状 consolidate 一下即可。
-  - **匹配与否不强求**：对账是 best-effort 的便利功能，不是账目正确性的前提。
-  - **银行流水不是唯一真相**：小商户会有**不走银行账户的现金收支**，所以两边**不要求完全真实同步**；流水只是「方便的录入来源」之一。具体对账 / 去重逻辑到时再议。
-- **落地取向（真做时遵守）**：**轮询而非 webhook**（自托管不开 inbound 入口，红线 9）；provider 走**抽象接口**（同 M4 汇率 provider）；凭证走 M2 类型化设置 + at-rest 加密。同步频率低（一天一两次足够），pay-as-you-go 成本友好。
+### M0 · Foundation skeleton (walking skeleton) | corresponds to P0
+- **Goal**: Thinnest possible end-to-end path running in a single container.
+- **Key content**: Build `jai` backend skeleton + Vue frontend skeleton mirroring the reference project; integrate **PostgreSQL + asyncpg**; Alembic baseline migration; three-stage Dockerfile + entrypoint; CI four gates; `/api/health`; **Money/Decimal currency primitive types** (`NUMERIC` convention + rounding utilities); i18n scaffold (EN/ZH skeleton); `openapi-typescript` codegen wired up.
+- **Two running modes (both must work in M0; base `docker-compose.yml` contains `app` + `postgres`; DB does not publish to the host; app publishes only to `127.0.0.1:${APP_HOST_PORT:-8000}` for local reverse-proxying, container-internal port fixed at 8000; local development overlays `docker-compose.dev.yml` which binds Postgres only to `127.0.0.1`, port adjustable via dev-only `POSTGRES_DEV_PORT`)**:
+  - **Development mode**: Frontend `npm run dev` (Vite) | Backend `uv run uvicorn jai.main:app --reload` | Database **`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres` (only the Postgres service)**.
+  - **Deployment mode**: `docker compose up -d` (starts **single-container app = built frontend + backend**, plus **Postgres**; production pulls from GHCR, local integration uses dev override `up --build`); migration service automatically runs `alembic upgrade head`.
+- **Tables/placeholders**: Alembic starting point; stub RLS session hook location.
+- **🟢 Deployment smoke test**: Local integration `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` starts app + Postgres; production `docker compose up -d` pulls from GHCR; browser opens `http://localhost:${APP_HOST_PORT:-8000}` and sees a (blank) placeholder page + `/api/health` returns ok; CI all green.
+
+### M1 · Authentication + email foundation | corresponds to P1
+- **Goal**: A private application where users can register/log in, and emails can be sent.
+- **Key content**: fastapi-users username+password (**Argon2**); **MFA (TOTP) — essential for accounting software**; login/logout UI; protected routes + empty shell dashboard.
+- **Email foundation (done in this milestone, reused directly by M9)**: SMTP sending via a Python package; **password-reset email**; **settings table basics** (single table + `level` for the three-tier settings, initially used for SMTP config) + **SMTP settings page** (frontend form to fill and save).
+- **Tables/placeholders**: `user` table with `company_id` + `role` fields from the start (RBAC added later; v1 owner has full access); **settings table (key-value + level) lands here**; M2 extends it with company/user tiers.
+- **🟢 Deployment smoke test**: Register → login → bind TOTP → reach the empty dashboard; fill in SMTP on the settings page → trigger password reset → receive the email; after logging out, protected pages redirect to login.
+
+### M2 · Company profile + three-tier settings (complete) | corresponds to P1
+- **Goal**: Ability to configure "your business entity".
+- **Key content**: Singleton **business profile** (name/logo/VAT number/address/base currency/numbering rules); on top of **the settings table landed in M1**, complete **three-tier semantics** (global/company/user, scope id, typed access + caching, fallback order user→company→global) + company/user-level settings UI pages.
+- **Tables/placeholders**: `company` table lands (v1: one row); settings table `level`/scope designed to be multi-company-friendly.
+- **🟢 Deployment smoke test**: Edit company letterhead/logo/base currency and persist; change a user-level preference and verify fallback takes effect.
+
+### M2.5 · Unified settings entry + settings UX refactor (Affine-style expandable panel) | new in this roadmap (UX fix, no new backend features)
+- **Goal**: Consolidate the currently scattered, semantically confusing settings entry points into "a single gear icon in the top-right → a unified expandable settings panel", aligned with the Affine settings UX.
+- **Dependencies**: M2 (company profile + three-tier settings already in place). **Pure frontend refactor** — does not touch backend contracts or money logic; **non-blocking**, can run in parallel with M3/M4.
+- **Current pain points (why we're doing this)**:
+  - The top-right "avatar" icon opens Preference, while a separate "Settings" entry next to it only contains SMTP;
+  - After entering Preference, the top-right icon changes to a no-icon Company/other state — **entries scattered everywhere, icon and content semantics inconsistent**.
+- **Boundary principle (define and acknowledge before coding)**: The gear panel **contains only "Preference" settings + system configuration** (SMTP, theme…); **business entity identity** (letterhead / logo / VAT number / address / base currency / numbering rules) belongs to Company, placed under the **Company icon's Company settings**, **not in the gear panel**. The two have non-overlapping responsibilities.
+- **Key content**:
+  - **Single entry point**: Top-right retains only **one gear icon** as the total settings entry; clearly distinguished from the **dedicated Company icon (business identity area)** in the top-right — the Company one does not merge into settings.
+  - **Expandable panel (not a plain dropdown)**: Clicking the gear opens an Affine-style **Expandable Menu / settings panel** — categories on the left, details on the right, editable in place.
+  - **Settings categories consolidated** (all into this one panel):
+    1. **Preference settings**: User/company-level preference toggles and defaults (language, default values…), **excluding business entity identity** (that's Company's domain);
+    2. **Email settings**: SMTP etc., fill and save in place (reuses M1/M2 existing endpoints);
+    3. **Theme**: Dark mode, default theme, and other scattered items **all consolidated here**;
+    4. **Future expansion slot**: Later settings such as AI are entered from this panel (**category slot reserved**, no concrete functionality in this milestone).
+- **Out of scope**: No new backend fields/endpoints (contract alignment only if needed, no money logic); custom themes and multi-company switching are not in this milestone.
+- **Follow-up (scheduled · account-level language persistence)**: The main M2.5 body makes language session-scoped (retaining the old 🌐 behaviour — resets on refresh); a follow-up adds language persistence **like theme, following the account** — adds a `locale` field to `UserPreferences` at the USER level, reuses `GET/PUT /settings/me`, and the frontend mirrors the `useTheme` pattern of "localStorage cache + server authoritative". This is **the only intentional small extension** to the "zero backend" boundary above (one field, no money logic, requires regenerating `schema.d.ts`); details in `milestones/M2.5.md` step 4.
+- **🟢 Deployment smoke test**: Top-right retains only **one gear + one Company icon**; clicking the gear opens the expandable panel; within the panel, complete "company preference / SMTP / theme switch" for all three setting categories and persist; the "avatar turns into Preference, icon disappears" confusion never recurs.
+
+### M3 · Customers | corresponds to P2 (parallelisable with M4)
+- **Goal**: Ability to manage customer records.
+- **Key content**: Customer CRUD + list; billing/shipping **addresses**; per-customer default currency (locked once a transaction exists); **country + VAT number** (groundwork for M10's ICP / reverse-charge determination); long-tail fields via **JSONB**.
+- **Tables/placeholders**: `customer.company_id`; address uses `type` (BILLING/SHIPPING).
+- **🟢 Deployment smoke test**: Create/edit/delete customers, fill address and VAT number, search the list.
+
+### M4 · Dictionaries / master data | corresponds to P2 (parallelisable with M3)
+- **Goal**: Dictionaries needed by documents are ready.
+- **Key content**: **Tax types/VAT treatment categories** (data-driven; NL 21/9/0/exempt/reverse/EU-B2B/export as seeds, see analysis doc §7.4.2); payment methods; expense categories (aligned with NL/EU conventions); currencies + exchange rate basics (manual entry, provider interface stubbed out); **product/materials catalogue (data foundation for M6.5 cost accounting)** — entries carry "purchase cost (excl. VAT) + category + unit + category-default Margin Rate", manual CRUD + supplier Excel paste/import; margins and categories are always **data-driven and editable** (guardrail 12), not hardcoded enums.
+- **Tables/placeholders**: Tax category table **decoupled** from "filing box mapping"; abstract exchange-rate provider interface; cost field in the product catalogue is the "current price" — historical snapshots are locked by each estimate that uses it (see M6.5).
+- **🟢 Deployment smoke test**: Maintain tax rates/payment methods/expense categories, seed data visible and editable; create a few products/materials with default margins, import a batch of supplier prices via Excel.
+
+### M5 · Pricing engine + invoice core | corresponds to P3 (the "heart" of v1)
+- **Goal**: Ability to issue an invoice with amounts authoritatively calculated by the backend.
+- **Key content**: **`services/pricing` authoritative calculation** (line subtotals → line/document discounts → per-document/per-line tax → inclusive/exclusive → totals → base-currency conversion, rounding fixed); `POST /invoices/calculate` preview endpoint; invoice CRUD + list; **numbering** (templated + custom starting number + gap skipping + concurrency-safe); **dual status** (lifecycle status + payment status); line items (free-form `description` as `text`, quantity required, unit optional, optional catalogue reference).
+- **Tables/placeholders**: Normalised tax tables (document-level/line-level separate tables or proper polymorphism); `unique_hash` field reserved (public link not enabled in v1).
+- **🟢 Deployment smoke test**: Create an invoice, add multiple lines, toggle per-document/per-line tax, observe backend-calculated subtotals/tax/totals; change the starting number and verify it takes effect.
+
+### M6 · Quotes + conversion + content templates | corresponds to P3
+- **Goal**: Complete quote workflow + document content reuse.
+- **Key content**: Quote CRUD (isomorphic with invoices); **simplified status** draft/sent/accepted/rejected/expired (removed: viewed); **auto-expire on due date** (backend timer, APScheduler); **Convert quote → invoice**; **document content templates** (one-click fill for common trade quotes/invoices); **standard content blocks** (warranty/T&C/bank info/payment terms, company-level defaults overridable per document); document **Notes** (free-form notes + reusable templates).
+- **🟢 Deployment smoke test**: Create a quote, apply a content template, mark accepted, one-click convert to invoice; expired quotes automatically set to expired by the timer.
+
+### M6.5 · Cost accounting / quote assistance (internal estimation → quote) | new in this roadmap (core author workflow, replacing the existing Excel)
+- **Goal**: Use an **internal** "cost → selling price" worksheet to assist quote pricing (blue-collar / renewable energy installation context).
+- **Dependencies**: M4 **product/materials catalogue** + M5 **pricing engine** (reuse its VAT/total layer, **no re-computation of tax**) + M6 **quote entity**. Slots after M6 on the document track, before M7.
+- **Key content**:
+  - **Estimate entity + unified line model**: Each line `Total = Price × Amount`, `Margin Amount = Total × Margin Rate`, `line selling price (excl. VAT) = Total + Margin Amount`; **labor / shipping / travel / overhead are all ordinary lines with Margin Rate = 0** (no separate line types); travel and overhead typically appear as **one document-level line each**.
+  - **Three rolling summaries**: Total Margin (equipment profit only) / **Total Excl. VAT** (Σ line selling prices) / Total Incl. VAT (**passed to M5 engine to add 21% VAT**; costing does not compute tax itself).
+  - **`services/costing` authoritative calculation**: `Decimal` + fixed rounding (per-line vs. aggregate mode nailed down when this milestone is detailed); **money logic must have unit tests** (guardrail 1).
+  - **Estimation → quote linkage (non-one-to-one)**: Estimate lines can be **grouped**; each group generates **one quote line** — carrying only the **public description (brand / kWh and other publicly shareable parameters) + excl. VAT price (= that group's Σ line selling prices)**; the quote line then goes through M5 to produce the incl. VAT total.
+- **Tables/placeholders**: Estimate lines **snapshot** the cost at the time (decoupled from M4 catalogue — later price changes in the catalogue do not affect historical estimates); estimate and quote use a "group → quote line" weak association, not forced one-to-one.
+- **Guardrails specific to this milestone (extensions of guardrails 7/8 — acknowledge before writing code)**:
+  1. **Zero customer-facing leakage**: Estimate cost / Margin / hourly-rate fields are **never** serialised into quotes / PDFs / public links (extension of guardrail 7).
+  2. **Cost snapshot**: Updating catalogue prices **does not back-fill** historical estimates; history never drifts (same as guardrail 8).
+- **🟢 Deployment smoke test**: Create an estimate, add several equipment lines (with margins) + labour/freight lines (margin 0), observe the backend-calculated excl. VAT selling price and Total Margin; select a group to generate one **public quote line** (confirm no cost/margin/hourly rate is visible on the customer side); that quote goes through M5 to produce the 21% incl. VAT total.
+
+### M7 · Payments | corresponds to P4 (parallelisable with M8)
+- **Goal**: Invoices can receive payments, and status transitions automatically.
+- **Key content**: Payment entity (linked to invoice / standalone); **partial/multiple payments** (deposit/progress/final); payment methods; **exchange rate locked at payment time** (EUR rate on payment date); automatic recalculation of `due_amount` and `paid_status`.
+- **🟢 Deployment smoke test**: Apply two separate payments to one invoice and observe UNPAID → PARTIALLY_PAID → PAID automatic transitions.
+
+### M7.5 · Currency rounding correction (round to the minor unit) | new in this roadmap (M5 money rounding fix, spans document track / expense track)
+- **Goal**: Make all **customer-facing / reconciliation / filing monetary amounts** consistently land on the currency's minor unit (v1 = EUR = 2 decimal places / cents), so that "frontend display = amount due = backend reconciliation = supplier invoice / bank statement" are all self-consistent; **unit prices and intermediate calculations retain ≥3 decimal places** unchanged.
+- **Background**: The M7 payment walkthrough revealed that invoice incl. VAT totals were stored at 3 decimal places (e.g. `F2026-009 = 3865.166`), the UI displayed `3865.17`, and payments rounded to cents could never balance. Root cause: M5 only quantised the **amount due** to 3 places and never rounded to cents (guardrail 1's "rounding position is fixed" is exactly this).
+- **Dependencies / position**: Modifies **M5 `services/pricing`** (+ M6.5 customer-facing costing and M8 expense when they land); positioned **after M7, before M8** (M8 expenses follow the same convention — supplier invoices and bank statements are already at cent precision).
+- **Key decisions (frozen · see `milestones/M7.5.md`)**: **Round at line level** (sub-variant of Method B — `quantity × unit_price` result rounded to cents immediately; each line's net/VAT/total rounded to cents; document total = sum of lines; multi-line same-rate: no group-level allocation; `F2026-009` → `3865.16`); only `unit_price` retains ≥3 places; rounding direction follows `amounts_include_vat`; applies to all document-level output amounts (invoice/quote/customer-facing estimate/expense); **no column type change / no contract change / no migration** (`NUMERIC(18,3)` can hold 2 decimal places); **no rounding to whole euros** (VAT must be filed at cent precision); introduces `currency_minor_unit` (EUR=2 hardcoded + extension point); **no historical recomputation** (project not yet live, all test data — recreate old documents as needed); `services/costing` and `services/payment` zero changes.
+- **🟢 Deployment smoke test**: After recomputation, an `F2026-009`-style invoice total lands at cents and can be fully paid (reaching `COMPLETED`) using the displayed amount; a multi-line multi-rate invoice has each VAT group rounded to cents with excl+vat=total self-consistent, matching supplier invoices/bank statements.
+
+### M8 · Expenses | corresponds to P4 (independent track: depends only on M2+M4, parallelisable with the entire document track M5/M6/M7)
+- **Goal**: Ability to record expenses and auto-fill receipts intelligently.
+- **Dependencies**: M2 (base currency) + M4 (expense categories/payment methods/currencies); optionally M3 customers. **Independent of invoices/quotes/payments** — available to start in parallel with the document track as soon as M4 is done.
+- **Key content**: Expense CRUD + categories; **receipt upload** (image/PDF, local storage + storage abstraction); **recurring expenses** (fixed costs automatically generated on a schedule); **⭐ AI receipt smart fill** (receipt image → vision language model → auto-fill net amount/VAT amount/rate/supplier/date/category; external dependency: Claude or other vision model APIs); per-expense flag for "deductible".
+- **(Follow-on) ⭐ AI supplier price list recognition → import to product catalogue**: **Reuses this milestone's vision model pipeline** to take supplier price lists (image / PDF / Excel) → auto-recognise → load into **M4's product/materials catalogue** (feeds M6.5 cost accounting); scheduled after M8 AI infrastructure is in place.
+- **🟢 Deployment smoke test**: Upload a receipt photo, AI auto-fills the expense fields, save and categorise; create a recurring expense and observe automatic generation.
+
+### M8.5 · Expense bookkeeping fields (aligned with author's NL bookkeeping Excel) | new in this roadmap (M8 data model completion, no new money logic)
+- **Goal**: Add three **record-only** fields to expenses to make the data model reflect the author's Dutch sole-trader bookkeeping Excel — **payment source** (private/business account), **business use percentage**, **depreciation years**.
+- **Dependencies / position**: Additive field extension on top of the **M8** expense track; positioned **after M8, before M9**. **No new money logic** — current-year actual expense / deductible VAT by year / quarterly aggregation / BTW boxes and other derived values are all deferred to **M10** (they depend on "which year is being filed", a reporting engine concern).
+- **Key content**: Add `paid_by` (PRIVATE/BUSINESS indicator), `business_percentage` (0–100), `depreciation_years` (≥1) columns to `expense` (+ `recurring_expense` parity); editor/list UI + i18n; contract change → `npm run codegen`. `deductible` semantics unchanged (= can VAT be reclaimed); personal-header non-deductible VAT handled at entry time (Net = Gross, VAT = 0), no new modelling. See `milestones/M8.5.md` (D1–D9 frozen).
+- **🟢 Deployment smoke test**: New expenses can fill private/business, business%, depreciation years and persist; M8-era old expenses migrated with defaults (Business/100/1); range validation (%∈[0,100], years≥1); three fields visible in list; CI green + `schema.d.ts` no drift.
+
+### M9 · Output: PDF (email foundation already in M1) | corresponds to P5
+- **Goal**: Ability to deliver documents to customers.
+- **Key content**: **PDF generation** (one template set, Jinja2 + WeasyPrint candidate; user input sanitised) + download (no public link, manual distribution); **reuse M1's SMTP foundation**, add document **email body templates/placeholders** + **Email log** (no read receipts) + send PDF as attachment; payment receipt PDF (low priority).
+- **Tables/placeholders**: PDF template reserves a CSS interface (custom templates not done in v1).
+- **🟢 Deployment smoke test**: Download an invoice PDF (letterhead/line items/tax/totals correct); use the SMTP configured in M1 to send an invoice email + PDF attachment, and see the log entry in Email log.
+
+### M10 · Reports / dashboard | corresponds to P6
+- **Goal**: VAT filing and business performance made visible.
+- **Key content**: **P/L** profit and loss; **⭐ VAT filing summary** (quarterly + VAT category aggregation into BTW boxes 1a/1b/1e/2a/3a/3b/4a/4b/5a/5b/5c + generate **ICP list**; conventions from analysis doc §7.4, exact numeric conventions finalised at implementation time); expense report; **Dashboard** (ECharts charts).
+- **⚠️ Outstanding item from M4 (mandatory)**: M4 created the `vat_treatment.report_box` column but **left it empty**. This milestone must **jointly confirm with the author** the `(treatment × rate) → BTW box` mapping against the official Belastingdienst website before populating it — **agents must not act unilaterally**. See `milestones/M4.md` "JIT review confirmed" and memory `vat-model-two-axis`.
+- **🟢 Deployment smoke test**: Select a quarter, export VAT summary and ICP; Dashboard displays revenue/expense/profit charts.
+
+### M11 · Wrap-up / pre-GA health check | corresponds to P7
+- **Goal**: Ready for long-term self-hosting.
+- **Key content**: **Backup scripts** (pg_dump + volume snapshot); i18n **EN/ZH completion**; security/performance polish; documentation (deployment README); **migration baselining** — before the 1.0 launch, accumulated Alembic migrations can be collapsed into a single baseline (no production data at that point; dev DB can be rebuilt); **after launch only additive migrations, never collapse again**.
+- **🟢 Deployment smoke test**: Run a full backup/restore drill; switch between EN/ZH UI completely.
 
 ---
 
-## 4.y 路线图之外（vNext）· PDF 文档/抬头模板自定义（仅备忘，不在 M0–M11）
+## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M11)
 
-> **状态**：作者 2026-06-14 M9 walkthrough 提出、明确**顺延**。M9 的 OUT「自定义 / 多套 PDF 模板 → 顺延（一套模板族 + CSS 接口）」在此细化。**现在不预留 schema**，将来都是 additive。
+> **Status**: Explicitly **not doing** in the current 11 milestones; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
 
-- **是什么**：把发票/报价 PDF 模板做成**设置里可编辑**，**仿 M9 的 email 模板**——纯文本 + `{{ }}` 占位符（如 `{{COMPANY_NAME}}` / `{{EMAIL}}` / `{{ADDRESS}}` / `{{LEGAL_NAME}}` …），且这些块的**位置 / 顺序可自由调整**。**主要针对抬头**（公司身份块），例如可选加一句「Trade name of <legal name>」，有时加、有时不加。
-- **已有可复用**：typed 设置 + 三层 locale 解析链 + 设置面板（齿轮可展开面板）+ 占位符引擎，都是 M9 email 模板那套现成基建（doc_type × locale）。
-- **大头是安全（红线 7）**：用户输入进 PDF = XSS/SSRF 面，需沿用 / 加强清洗——参考 2026-06-14 修过的 `{{ css | safe }}` 字体转义与 SVG `<style>` 内联清洗两处坑；正文走「纯文本 + 显式占位符 + 转义」而非任意 HTML/CSS。外加模板编辑器 UI + 预览 + 无值回退内置默认。
-- **粒度**：按单据类型（invoice / quote）× 语言（EN / ZH）分别配，沿用 email 模板结构。
-
-## 4.z 路线图之外（vNext）· 客户地址自由文本块（仅备忘，不在 M0–M11）
-
-> **状态**：作者 2026-06-14 M9 walkthrough 提出、明确**顺延**。
-
-- **是什么**：在客户**结构化地址**（街道 / 门牌 / 邮编 / 省 / 市 / 国家）**下方**，加一个**自由输入文本框**。
-- **场景**：**双语客户**——结构化格子按现有字段填拉丁 / 英文地址；自由文本框里**整段再抄一遍另一种文字**（如中文）的完整地址。
-- **落地草图（真做时）**：`address`（或 customer）模型加一个 additive 文本列（红线 10：`text`）+ schema + 客户编辑器 UI + 发票 / 报价 PDF 在结构化地址块下渲染该自由文本（保留换行、autoescape）。范围有界，但横跨 模型 + UI + PDF 多处。
+- **What it is**: Connect an **external transaction provider** and automatically pull transaction feeds from partner banks via API, eliminating manual entry. **Provider-agnostic**: Plaid (used behind YNAB), GoCardless Bank Account Data (formerly Nordigen, EU open banking, AIS free tier), Tink / TrueLayer, etc. — selection deferred.
+- **Two use cases**:
+  - **Payment reconciliation**: Read feed Descriptions (use an LLM to recognise Invoice Numbers etc.) → attempt to match existing invoices → link / suggest a Payment (connects to M7).
+  - **Expense import**: Turn feed entries directly into expenses, pre-filling known fields (amount / date / counterparty); at bookkeeping time, use **M8's AI receipt fill** to complete net amount / VAT rate / category (connects to M8).
+- **Sync semantics (key product direction, YNAB-style)**:
+  - **Sync only from first connection onwards**; it is fine if **historical data is not back-filled** — consolidate the current state at connection time.
+  - **Matching is not required**: Reconciliation is a best-effort convenience feature, not a prerequisite for accounting correctness.
+  - **Bank feed is not the single source of truth**: Small businesses have **cash income/expenses that don't go through bank accounts**, so **full real-time sync is not required** on either side; the feed is just one convenient input source. Specific reconciliation / deduplication logic deferred.
+- **Implementation principles (when actually built)**: **Polling not webhooks** (self-hosted, no inbound entry points, guardrail 9); provider behind an **abstract interface** (same as M4's exchange-rate provider); credentials use M2 typed settings + at-rest encryption. Low sync frequency (once or twice a day is sufficient), pay-as-you-go cost-friendly.
 
 ---
 
-## 5. 每个原子步骤的模板 + Definition of Done
+## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M11)
 
-> 细化里程碑时，每个原子步骤都按这个模板拆（见 `milestones/_TEMPLATE.md`）。**单人开发不强制 PR**：自测 + CI 绿即可合 `main`；想做人工 review 时再开分支/PR。
+> **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**. Elaborates on M9's OUT item "custom / multiple PDF template sets → deferred (one template family + CSS interface)". **No schema reserved now** — everything will be additive.
 
-**一个原子步骤包含：**
-- **目标**：一句话。
-- **契约**：本步新增/改动的 API schema（OpenAPI 片段）——**先定**。
-- **后端任务** / **前端任务**：两栏，可并行（都对着上面的契约）。
-- **迁移**：Alembic（如涉及建表/改列）。
-- **测试**：后端 pytest（services 计算逻辑必测）；必要时前端基本校验。
+- **What it is**: Make invoice/quote PDF templates **editable in Settings**, **modelled on M9's email templates** — plain text + `{{ }}` placeholders (e.g. `{{COMPANY_NAME}}` / `{{EMAIL}}` / `{{ADDRESS}}` / `{{LEGAL_NAME}}` …), with these blocks **freely repositionable**. **Primarily targets the letterhead** (company identity block), e.g. optionally adding "Trade name of <legal name>", sometimes included, sometimes not.
+- **Reusable foundation already available**: Typed settings + three-tier locale resolution chain + settings panel (gear expandable panel) + placeholder engine — all of it is the M9 email template infrastructure (`doc_type × locale`).
+- **The big concern is security (guardrail 7)**: User input entering PDF = XSS/SSRF surface; reuse / strengthen sanitisation — reference the two bugs fixed 2026-06-14: `{{ css | safe }}` font escaping and SVG `<style>` inline class sanitisation; body uses "plain text + explicit placeholders + escaping" rather than arbitrary HTML/CSS. Plus template editor UI + preview + built-in defaults when values are absent.
+- **Granularity**: Configured per document type (invoice / quote) × language (EN / ZH), following the email template structure.
 
-**Definition of Done（每步都要全过）：**
-- [ ] `ruff check` + `mypy --strict` 通过
-- [ ] `pytest` 通过（pricing/numbering/fx/报表等**算钱逻辑必须有单测**）
-- [ ] 若改了契约：`npm run codegen` 重生成 `schema.d.ts`，CI drift 检测过
-- [ ] `frontend` 构建通过（`vue-tsc + vite build`）
-- [ ] **部署冒烟**：`docker build` 通过；该里程碑的「🟢 部署自测点」能手动点到
-- [ ] **CI 四关绿**（绿即可合 `main`，单人开发不强制 PR）
-- [ ] 遵守 [§2 全局约束]，无违反项
-- [ ] 自查：命名/分层与母版一致，`description` 用 `text`，算钱在 `services`
+## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M11)
+
+> **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**.
+
+- **What it is**: Below the customer's **structured address** (street / house number / postcode / province / city / country), add a **free-form text area**.
+- **Use case**: **Bilingual customers** — structured fields are filled with Latin/English address; the free-text area holds the **same address repeated in another script** (e.g. Chinese).
+- **Implementation sketch (when built)**: Add one additive text column to the `address` (or customer) model (guardrail 10: `text`) + schema + customer editor UI + invoice/quote PDF renders the free-text below the structured address block (preserve line breaks, autoescape). Bounded scope, but spans model + UI + PDF.
 
 ---
 
-## 6. 部署与自测 loop
+## 5. Atomic step template + Definition of Done
 
-- **开发态**：前后端分离——前端 `npm run dev`（Vite，代理 `/api`），后端 `uv run uvicorn jai.main:app --reload`，数据库用 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres`（只起 Postgres 这一个 service，DB 端口只绑定 `127.0.0.1`，host 端口可由 dev-only `POSTGRES_DEV_PORT` 调整）。
-- **部署态 / 里程碑验收**：生产 `docker compose up -d`（**单容器 app + Postgres**，从 GHCR 拉镜像；migration service 自动 `alembic upgrade head`），本地集成用 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` → 浏览器走该里程碑的「🟢 部署自测点」。
-- **CI**：每次 push 跑四关；`main`/PR 额外跑 docker-build；打 `v*` tag 发布多架构镜像。绿即可合 `main`（单人开发不强制 PR）。
-- 每个里程碑结束在 `docs/plan/milestones/M<x>.md` 记一行验收结论 + 已知遗留。
+> When detailing a milestone, every atomic step is broken down using this template (see `milestones/_TEMPLATE.md`). **Solo development — no mandatory PR**: self-test + CI green is enough to merge to `main`; open a branch/PR when intentional human review is wanted.
+
+**An atomic step contains:**
+- **Goal**: One sentence.
+- **Contract**: API schema additions/changes for this step (OpenAPI fragment) — **defined first**.
+- **Backend tasks** / **Frontend tasks**: Two columns, parallelisable (both against the contract above).
+- **Migration**: Alembic (if tables are created or columns changed).
+- **Tests**: Backend pytest (services calculation logic must be tested); frontend basic validation where necessary.
+
+**Definition of Done (every step must pass all of these):**
+- [ ] `ruff check` + `mypy --strict` pass
+- [ ] `pytest` passes (pricing/numbering/fx/reports and other **money logic must have unit tests**)
+- [ ] If the contract changed: `npm run codegen` regenerates `schema.d.ts`, CI drift check passes
+- [ ] `frontend` build passes (`vue-tsc + vite build`)
+- [ ] **Deployment smoke**: `docker build` passes; the milestone's "🟢 deployment smoke test" can be manually exercised
+- [ ] **CI four gates green** (green = merge to `main`; solo development, no mandatory PR)
+- [ ] Complies with [§2 Global Constraints], no violations
+- [ ] Self-check: naming/layering consistent with the reference project, `description` uses `text`, money logic in `services`
 
 ---
 
-## 7. 计划文档结构 & JIT 细化流程
+## 6. Deployment and smoke-test loop
+
+- **Development mode**: Frontend/backend separated — frontend `npm run dev` (Vite, proxy `/api`), backend `uv run uvicorn jai.main:app --reload`, database via `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres` (only the Postgres service; DB port bound to `127.0.0.1` only, host port adjustable via dev-only `POSTGRES_DEV_PORT`).
+- **Deployment mode / milestone acceptance**: Production `docker compose up -d` (**single-container app + Postgres**, pulls from GHCR; migration service automatically runs `alembic upgrade head`); local integration uses `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` → browser follows the milestone's "🟢 deployment smoke test".
+- **CI**: Four gates run on every push; `main`/PR additionally runs docker-build; `v*` tags trigger multi-arch image publishing. Green = merge to `main` (solo development, no mandatory PR).
+- At the end of each milestone, record one line of acceptance conclusion + known remainders in `docs/plan/milestones/M<x>.md`.
+
+---
+
+## 7. Plan document structure & JIT refinement flow
 
 ```
 docs/
-  insight/btw-aangifte-2026-guide.md # 荷兰 VAT/BTW 申报口径（权威，税局官方说明的结构化指南）
+  insight/btw-aangifte-2026-guide.md # Dutch VAT/BTW filing conventions (authoritative, structured guide to official Tax Authority instructions)
   plan/
-    roadmap.md                       # 本文：总览 + 方法论 + 约束 + M0–M11
+    roadmap.md                       # This document: overview + methodology + constraints + M0–M11
     milestones/
-      _TEMPLATE.md                   # 里程碑细化模板
-      M0.md, M1.md, ...              # 动手前 JIT 产出（原子步骤清单）
+      _TEMPLATE.md                   # Milestone refinement template
+      M0.md, M1.md, ...              # Produced JIT before starting work (atomic step lists)
 ```
 
-**JIT 细化流程（每进入一个里程碑）**：
-1. 对 agent 说：「读 `docs/plan/roadmap.md` 的 §2 约束 + 目标里程碑那一格，再读分析文档对应章节，然后用 `milestones/_TEMPLATE.md` 把 M<x> 拆成原子步骤。」
-2. 评审该里程碑的原子步骤清单（必要时回填分析文档里"待细化"的产品决策，如单位是否可选、VAT 数字口径等）。
-3. 逐步骤实现，每步过 [§5] DoD。
-4. 里程碑收尾：走「🟢 部署自测点」，记录验收结论。
+**JIT refinement flow (when entering each milestone)**:
+1. Tell the agent: "Read `docs/plan/roadmap.md` §2 constraints + the target milestone's entry, then read the corresponding sections of the analysis documents, then use `milestones/_TEMPLATE.md` to break M<x> into atomic steps."
+2. Review the atomic step list for that milestone (backfill "to be refined" product decisions from the analysis docs as needed, e.g. whether units are optional, exact VAT numeric conventions, etc.).
+3. Implement step by step, each step passing [§5] DoD.
+4. Milestone wrap-up: walk through "🟢 deployment smoke test" and record acceptance conclusion.
 
 ---
 
-## 进度追踪
+## Progress tracker
 
-| 里程碑 | 内容 | 状态 |
+| Milestone | Content | Status |
 | --- | --- | --- |
-| M0 | 地基骨架 | 🟢 完成 |
-| M1 | 认证 + 邮件底座 | 🟢 完成（2026-06-05；步骤 1–4 + 部署自测点 1–7 全过） |
-| M2 | 公司档案 + 三层设置（补全） | 🟢 完成（2026-06-08；步骤 1–4 + 部署自测点 1–6 全过） |
-| M2.5 | 设置入口统一 + 设置 UX 重构（Affine 式可展开面板） | 🟢 完成（2026-06-08 步骤 1–3 + 自测点 1–6 + SMTP radio follow-up；2026-06-09 步骤 4 语言账号级持久化收尾 · 全过） |
-| M3 | 客户 | 🟢 完成（2026-06-09；步骤 1–4 + 部署自测点 1–8 全过） |
-| M4 | 字典 / 主数据（+ 产品/材料目录） | 🟢 完成（2026-06-10；步骤 1–5 + 部署自测点 1–8 全过） |
-| M5 | 定价引擎 + 发票核心 | 🟢 完成（2026-06-11；步骤 1–4 + 部署自测点 1–11 全过） |
-| M6 | 报价 + 转换 + 内容模板 | 🟢 完成（2026-06-11；步骤 1–6；自测点 1–9 手动通过，10–11 集成测试覆盖，12 待 CI） |
-| M6.5 | 成本核算 / 报价辅助（内部 estimation → 报价） | 🟢 完成（2026-06-12；步骤 1–5 + 部署自测点 1–8 全过；987 测试绿） |
-| M7 | 收款 | 🟢 完成（2026-06-13；orchestrator 5 步，每步盲审+返工收敛；ruff/mypy/单测 404/集成 641/codegen 无漂移/build 全绿；人工 walkthrough 自测点 1–8 通过，#9 单币种 UI 待 FX 前端落地后补、隔离/cascade 由集成测试覆盖）。收款 sub-cent 边界（3 位总额不可按分收满）顺延 M7.5 |
-| M7.5 | 货币舍入口径修正（落到「分」） | 🟢 完成（2026-06-13；orchestrator 3 步逐步盲审收敛，步骤2 一处 docstring fixup、步骤1/3 零 finding；**行级到分**、`F2026-009`→`3865.16`；ruff/mypy/单测 426/集成 644（+3 F2026-009 收满回归）全绿；零迁移/零契约/无 codegen；payment/costing/estimate 服务代码零改动；作者人工 walkthrough 自测点 1–3 通过、无 finding） |
-| M8 | 开支（含 AI 填单 + AI 供货价单识别，可与单据线并行） | 🟢 完成（2026-06-14；orchestrator 5 步逐步盲审收敛 [expense+分存 / storage 收据 / 周期开支 / AI 票据填单 / 前端收尾]；末轮 walkthrough refinements 单列一轮压进同一收尾 commit [可抵扣随分类联动 / 收据 bind-mount uid1000 / AI 探针 64×64 / 注入当前日期 / 摘要写 note 跟随界面语言 / 选率自动算 VAT 后端端点 / 提示词「默认常驻+自定义追加」]；ruff/mypy/单测 599/集成/build/无漂移全绿；自测点 1–5 人工通过、7 集成覆盖、8 通过，6 周期性开支作者暂不用未走（不影响验收）、9 远端 CI 待确认。AI 走 OpenAI 兼容 Chat Completions（`httpx` 自构造、非 SDK；base_url/model/key/提示词 用户自填 + 多模态测试；PDF 用 pypdfium2 栅格化成图统一走 image_url）。**follow-on 未做**：AI 供货价单 → M4 目录） |
-| M8.5 | 开支记账字段补全（付款来源 / 业务% / 折旧年，对齐 NL 记账 Excel） | 🟢 完成（2026-06-14；orchestrator 2 步逐步盲审收敛，两步**零 finding / 零返工**；3 个**纯存储** additive 字段 [`paid_by` / `business_percentage` / `depreciation_years`]，`expense` + `recurring_expense` parity，迁移 0021 NOT NULL+server_default 自动回填；**不新增算钱**——当年摊销 / 可退 VAT 按年 / 季度 / BTW 全顺延 M10；ruff/mypy/单测 626[+27]/集成切片 79[+19]/build/无 codegen 漂移全绿；作者人工 walkthrough：后端/迁移/契约/周期 parity 通过，旧数据迁移回填因已删旧数据+未上线略过实测、walkthrough 发现的**前端展示问题统一留 GA 前前端翻新处理**；D1–D9 与作者逐列对照 Excel 共定） |
-| M9 | PDF（邮件底座在 M1） | 🟢 完成（2026-06-14；orchestrator 8 步逐步盲审收敛，步骤 1/4/5 各 1 轮返工[Content-Disposition RFC6266 filename / 收据标签键 / 集成缺建公司]、步骤 2/3/6/7 零 finding，每步一 commit；WeasyPrint+Jinja，发票/报价/收据 PDF 按 locale 下载[解析链 override>customer>company>en]、公司级可编辑邮件模板+占位符引擎、email_log 发送[附件+抄送, SENT/FAILED 脱敏]、迁移 0022 customer.locale / 0023 email_log、前端下载+发送对话框+Email log；ruff/mypy/默认 760/集成 785/build/i18n EN-ZH 对称 1001/docker build+镜像内中文 PDF 渲染 全绿。**作者人工 walkthrough 通过**，walkthrough 提出并已修[均 Opus 盲审无 finding、各自 commit]：① PDF 应用内预览[`0f75310`，同 commit 含发票/报价版式：删 Description 列+Item 加粗描述下挂+全 2 位小数 money2/pct+`css\|safe` 字体修复] ② SVG logo `<style>` 类内联清洗[`4cfd369`，class-styled logo 不再纯黑，**需重新上传 logo**] ③ 多页每页页脚[`b9090ae`]；改后默认 802/PDF 集成 138 全绿。**顺延**：完整 PDF 抬头模板自定义→§4.y、客户地址自由文本块→§4.z、公开链接/unique_hash、已读回执、收据邮件/多笔汇总收据、PDF 缓存/队列、NL 语言 PDF、VAT 报表→M10、渐变 SVG logo 不支持） |
-| M10 | 报表 / 仪表盘（含 VAT 申报） | 🟢 完成（2026-06-15；orchestrator 5 步逐步盲审收敛 [P/L → ⭐BTW 申报汇总 → ICP → 开支报表 → Dashboard]，每步一 commit `89ab353`→`273ed75`；ruff/mypy/单测 966+集成 788/codegen 无漂移/build/docker build 全绿。**税法决策 2026-06-15 与作者对照官方指南 `docs/insight/btw-aangifte-2026-guide.md`（Opus 通读 41 页）逐条共定冻结**：NL ruleset 按 `company.country_code` 选+其它国 fallback+banner、hoog/laag/zero 税率档位落盘默认 21/9/0、5b 全额抵+私用走 1d（年末按 business% 算）、5a/净应缴为辅助合计（官方只命名 5b、不标 5c）、EU 内采购=4b（非 art.23 进口）、非欧盟进口/境内反向征收/OSS/herziening/KOR 均 N/A v1、报表带免责声明。**作者导入 2026 Q1–Q2 数据人工 walkthrough 通过**，walkthrough 发现并已修 [均 Opus 盲审无 finding、各自 commit]：① Expense 日期选择器 off-by-one [`1a5a94a`] ② 对外单据抬头泄漏客户花名→派生 billing_name [`853f07c`] ③ P/L 月/季粒度换成 MTD/QTD/YTD 周期预设+高亮由区间派生 [`df2ba13`]。详见 `milestones/M10.md` 验收结论。**顺延**：多币种 ICP/3b 列分叉留 FX、Dashboard 死常量/未用键留 M11） |
-| M11 | 收尾 / GA 前体检 | ⬜ |
+| M0 | Foundation skeleton | 🟢 Done |
+| M1 | Authentication + email foundation | 🟢 Done (2026-06-05; steps 1–4 + deployment smoke tests 1–7 all passed) |
+| M2 | Company profile + three-tier settings (complete) | 🟢 Done (2026-06-08; steps 1–4 + deployment smoke tests 1–6 all passed) |
+| M2.5 | Unified settings entry + settings UX refactor (Affine-style expandable panel) | 🟢 Done (2026-06-08 steps 1–3 + smoke tests 1–6 + SMTP radio follow-up; 2026-06-09 step 4 account-level language persistence wrap-up · all passed) |
+| M3 | Customers | 🟢 Done (2026-06-09; steps 1–4 + deployment smoke tests 1–8 all passed) |
+| M4 | Dictionaries / master data (+ product/materials catalogue) | 🟢 Done (2026-06-10; steps 1–5 + deployment smoke tests 1–8 all passed) |
+| M5 | Pricing engine + invoice core | 🟢 Done (2026-06-11; steps 1–4 + deployment smoke tests 1–11 all passed) |
+| M6 | Quotes + conversion + content templates | 🟢 Done (2026-06-11; steps 1–6; smoke tests 1–9 manual pass, 10–11 integration test coverage, 12 pending CI) |
+| M6.5 | Cost accounting / quote assistance (internal estimation → quote) | 🟢 Done (2026-06-12; steps 1–5 + deployment smoke tests 1–8 all passed; 987 tests green) |
+| M7 | Payments | 🟢 Done (2026-06-13; orchestrator 5 steps, each blind-reviewed + rework converged; ruff/mypy/unit tests 404/integration 641/codegen no drift/build all green; manual walkthrough smoke tests 1–8 passed, #9 single-currency UI pending FX frontend, isolation/cascade covered by integration tests). Payment sub-cent edge case (3-decimal total can never balance at cents) deferred to M7.5 |
+| M7.5 | Currency rounding correction (round to minor unit) | 🟢 Done (2026-06-13; orchestrator 3 steps blind-reviewed converged; step 2 one docstring fixup, steps 1/3 zero findings; **round at line level**, `F2026-009`→`3865.16`; ruff/mypy/unit tests 426/integration 644 (+3 F2026-009 full-payment regression) all green; zero migration/zero contract/no codegen; payment/costing/estimate service code zero changes; author manual walkthrough smoke tests 1–3 passed, no findings) |
+| M8 | Expenses (incl. AI receipt fill + AI supplier price list recognition, parallelisable with document track) | 🟢 Done (2026-06-14; orchestrator 5 steps blind-reviewed converged [expense+split storage / storage receipts / recurring expenses / AI receipt fill / frontend wrap-up]; final walkthrough refinements collapsed into one wrap-up commit [deductible follows category / receipt bind-mount uid1000 / AI probe 64×64 / inject current date / summary written to note follows UI language / auto-compute VAT backend endpoint / prompt "permanent default + custom append"]; ruff/mypy/unit tests 599/integration/build/no drift all green; smoke tests 1–5 manual pass, 7 integration covered, 8 passed, 6 recurring expense author not using yet (does not affect acceptance), 9 remote CI pending confirmation. AI uses OpenAI-compatible Chat Completions (`httpx` hand-built, no SDK; base_url/model/key/prompt user-configured + multimodal test; PDF rasterised via pypdfium2 to image for unified image_url). **Follow-on not done**: AI supplier price list → M4 catalogue) |
+| M8.5 | Expense bookkeeping fields (payment source / business% / depreciation years, aligned with NL bookkeeping Excel) | 🟢 Done (2026-06-14; orchestrator 2 steps blind-reviewed converged, both steps **zero findings / zero rework**; 3 **record-only** additive fields [`paid_by` / `business_percentage` / `depreciation_years`], `expense` + `recurring_expense` parity, migration 0021 NOT NULL+server_default auto-backfill; **no new money logic** — current-year amortisation / deductible VAT by year / quarterly / BTW all deferred to M10; ruff/mypy/unit tests 626[+27]/integration slice 79[+19]/build/no codegen drift all green; author manual walkthrough: backend/migration/contract/recurring parity passed, old data migration backfill skipped due to deleted data+not yet live, **frontend display issues found in walkthrough unified under pre-GA frontend refresh**; D1–D9 jointly confirmed against author's Excel column by column) |
+| M9 | PDF (email foundation in M1) | 🟢 Done (2026-06-14; orchestrator 8 steps blind-reviewed converged; steps 1/4/5 each 1 rework round [Content-Disposition RFC6266 filename / receipt label key / integration missing company setup], steps 2/3/6/7 zero findings, one commit per step; WeasyPrint+Jinja, invoice/quote/receipt PDF by locale download [resolution chain override>customer>company>en], company-editable email templates+placeholder engine, email_log sending [attachment+cc, SENT/FAILED redacted], migrations 0022 customer.locale / 0023 email_log, frontend download+send dialog+Email log; ruff/mypy/default 760/integration 785/build/i18n EN-ZH symmetric 1001/docker build+in-container Chinese PDF rendering all green. **Author manual walkthrough passed**; walkthrough raised and fixed [each Opus blind-reviewed zero findings, separate commits]: ① PDF in-app preview [`0f75310`, same commit includes invoice/quote layout: remove Description column+Item bold with description below+all 2-decimal money2/pct+`css\|safe` font fix] ② SVG logo `<style>` inline class sanitisation [`4cfd369`, class-styled logos no longer all-black, **logo must be re-uploaded**] ③ multi-page per-page footer [`b9090ae`]; after fixes default 802/PDF integration 138 all green. **Deferred**: full PDF letterhead template customisation→§4.y, customer address free-text block→§4.z, public link/unique_hash, read receipts, receipt email/multi-payment summary receipt, PDF cache/queue, NL language PDF, VAT reports→M10, gradient SVG logo not supported) |
+| M10 | Reports / dashboard (incl. VAT filing) | 🟢 Done (2026-06-15; orchestrator 5 steps blind-reviewed converged [P/L → ⭐BTW filing summary → ICP → expense report → Dashboard], one commit per step `89ab353`→`273ed75`; ruff/mypy/unit tests 966+integration 788/codegen no drift/build/docker build all green. **Tax law decisions 2026-06-15 jointly confirmed with author against official guide `docs/insight/btw-aangifte-2026-guide.md` (Opus read all 41 pages) and frozen**: NL ruleset selected by `company.country_code` + other-country fallback+banner, hoog/laag/zero rate bands persisted as defaults 21/9/0, 5b full deduction+private use via 1d (year-end computed by business%), 5a/net payable as auxiliary totals (official only names 5b, not 5c), EU intra-community purchases=4b (not art.23 import), non-EU import/domestic reverse charge/OSS/herziening/KOR all N/A v1, reports carry disclaimer. **Author imported 2026 Q1–Q2 data and manual walkthrough passed**; walkthrough raised and fixed [each Opus blind-reviewed zero findings, separate commits]: ① Expense date picker off-by-one [`1a5a94a`] ② outbound document letterhead leaking customer alias → derived billing_name [`853f07c`] ③ P/L month/quarter granularity replaced with MTD/QTD/YTD period presets + highlight derived from interval [`df2ba13`]. See `milestones/M10.md` acceptance conclusion. **Deferred**: multi-currency ICP/3b column split deferred to FX, Dashboard dead constants/unused keys deferred to M11) |
+| M11 | Wrap-up / pre-GA health check | ⬜ |
 
-> 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）
+> Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed)

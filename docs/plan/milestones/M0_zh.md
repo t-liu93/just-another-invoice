@@ -1,0 +1,170 @@
+# M0 · 地基骨架（walking skeleton）
+
+> 🌐 [English](M0.md) · **中文**
+
+> 进场先读：`docs/plan/roadmap.md` 的 §2 全局约束 + §3 技术栈/骨架 + M0 那一格；以及架构母版 `~/workspace/trading-journal`（后端看 `backend/`，前端看 `frontend/`，Dockerfile/CI 看根目录）。
+> **本里程碑唯一与母版的实质差异：数据库用 PostgreSQL + asyncpg（母版是 SQLite）。其余照搬约定。**
+
+## 目标与范围
+- **目标**：单容器跑通的最薄端到端链路——`docker compose up` 能打开一个（空）占位页，`/api/health` 返回 ok，CI 全绿。
+- **纳入（IN）**：`jai` 后端骨架 + Vue 前端骨架；PostgreSQL + asyncpg；Alembic 接好；FastAPI `/api/health`；Money/Decimal 货币基础类型 + 舍入；前端占位页 + i18n(EN/ZH) 脚手架 + OpenAPI→TS codegen；三阶段 Dockerfile + entrypoint + 单容器 compose；CI 四关；开发态/部署态两种跑法。
+- **不纳入（OUT）**：任何业务实体（User/Company/客户… 从 M1 起）；认证；RLS 的真实实现（只留会话钩子空位）。
+- **对应文档**：roadmap M0 / §1.2 / §3；分析文档 §3.1、§2.5（金额精度）。
+
+## 待回填的产品决策（动手前先定，已给默认值）
+- [ ] **金额精度/舍入**：默认 `NUMERIC(18, 3)`（scale=3，到 1/1000）+ `ROUND_HALF_UP`；逐行先算后舍、合计再汇总的口径在 M5 定，M0 只提供工具与默认。
+- [ ] **Postgres 版本**：默认 `postgres:18`。
+- [ ] **包名/端口**：Python 包 `jai`；人工开发时后端固定 `:8000`，前端 dev `:5173`，Docker app 容器内固定 `:8000`；生产 compose 只把 app 发布到 `127.0.0.1:${APP_HOST_PORT:-8000}` 给 Nginx 反代；Postgres 容器内 `:5432` 且基础 compose 不暴露 DB 端口；本地开发用 `docker-compose.dev.yml` 绑定 `127.0.0.1:${POSTGRES_DEV_PORT:-5433}:5432`，需要改端口时用 `--env-file .env --env-file .env.dev` 叠加 `.env.dev`；DB 名 `jai`。
+
+## 契约（先行 · 两个 agent 都对着这份写）
+> M0 只有一个端点，但端口/env/代理约定必须先统一，否则前后端对不上。
+
+- **健康检查**：`GET /api/health` → `200`，体 `{"status": "ok", "version": "<app version>"}`。（不在 `/api/v1` 下；业务端点从 M1 起一律 `/api/v1/*`。）
+- **OpenAPI**：`GET /api/v1/openapi.json`（FastAPI 自带）；前端 codegen 以此为源。
+- **端口**：人工开发时后端固定 `8000`，前端 dev `5173`（Vite 把 `/api` 代理到 `http://localhost:8000`）。Docker 部署态容器内固定监听 `8000`，compose 只发布 `127.0.0.1:${APP_HOST_PORT:-8000}:8000` 给本机反代。
+- **环境变量**（`.env.example` 落地；Docker Compose 自动读取根目录 `.env`）：数据库连接通过独立的 ``POSTGRES_*`` 变量配置：``POSTGRES_HOST``（默认 ``localhost``）、``POSTGRES_PORT``（默认 ``5432``）、``POSTGRES_USER``（默认 ``jai``）、``POSTGRES_PASSWORD``（默认 ``jai``）、``POSTGRES_DB``（默认 ``jai``）。后端用 ``sqlalchemy.engine.URL.create()`` 自动拼装 ``database_url``，正确处理密码中的特殊字符。如需完全控制，可直接设 ``DATABASE_URL`` 覆盖。另有 ``APP_HOST_PORT``（Docker Compose 宿主机 loopback 发布端口，默认 ``8000``）、``STATIC_DIR``（部署态指向前端 ``dist``）、``APP_VERSION``。开发态在 ``.env`` 里覆盖 ``POSTGRES_PORT=5433``（与 ``docker-compose.dev.yml`` 的 ``POSTGRES_DEV_PORT`` 对齐）；生产 Docker Compose 在 app/db-migration service 里设 ``POSTGRES_HOST=postgres``（走内网），Postgres 不发布宿主机端口。
+- **部署态**：后端在 `STATIC_DIR` 存在时托管前端构建产物，并对非 `/api` 路由做 SPA fallback。
+
+## 数据模型 / 迁移
+- **M0 无业务表**。Alembic 接好（async `env.py` 通过 `jai.config.Settings` 取得 `database_url`，默认由 `POSTGRES_*` 组装，仍允许 `DATABASE_URL` 覆盖；`target_metadata = Base.metadata`）+ 一条**空基线迁移**，确保 `alembic upgrade head` 在 Postgres 上跑通（首个真实迁移在 M1 随 User 落地）。
+
+---
+
+## 轨道与边界（并行的关键）
+
+| 轨道 | 负责目录 | 谁做 | 何时 |
+| --- | --- | --- | --- |
+| **Track 0 · 共享地基** | 根目录（`docker-compose.yml`/`.gitignore`/`.env.example`/`README`）+ 建 `backend/` `frontend/` 空骨架 | 一个独立 agent | **最先**，单独提交 |
+| **Track A · 后端** | **仅 `backend/`** | 一个独立 agent | Track 0 之后 |
+| **Track B · 前端** | **仅 `frontend/`** | 一个独立 agent | Track A 之后（可对真实后端跑 codegen） |
+| **Track C · 集成部署** | 根 `Dockerfile`/`.dockerignore`/`docker-entrypoint`、compose 的 `app` service、`.github/workflows/` | 一个独立 agent | A、B 都合入后 |
+
+> **执行顺序（当前串行，非并行编排）**：Track 0 → A → B → C，每条轨道交给一个独立 agent，前一条合入后再起下一条。下游可假定上游已就绪（B 对已完成的 A 跑真实 codegen，C 拿 A+B 成品集成）。
+> **目录边界仍要守**（A 只碰 `backend/`、B 只碰 `frontend/`、根 Docker/CI 归 C）——即便串行，也让每条轨道职责单一、改动可回溯。
+
+---
+
+## Track 0 · 共享地基（先做，1 个提交）
+- **0.1** 建目录骨架：`backend/`（空 `src/jai/__init__.py`）、`frontend/`（占位）；根 `.gitignore`（Python/Node/.env/data）、`.env.example`（见上契约）、`.env.dev.example`（仅开发端口）、`README.md` 桩、`docker-compose.yml` **只含不发布宿主机端口的 `postgres` service**（`postgres:18`，env `POSTGRES_USER/PASSWORD/DB` 从 `.env` 读取并默认 `jai`，命名卷）；`docker-compose.dev.yml` 仅为本地开发发布 `127.0.0.1:${POSTGRES_DEV_PORT:-5433}:5432`。
+- **独立验证**：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres` 起得来；`psql` 能连上。
+- **DoD**：roadmap §5（此步无前端构建/codegen，跳过相关项）。
+
+---
+
+## Track A · 后端（agent #1，仅 `backend/`）
+
+> 交接话术见文末「给 agent 的交接」。镜像母版 `~/workspace/trading-journal/backend` 的写法与约定。
+
+### A1 · 后端工程脚手架
+- `backend/pyproject.toml`：name `just-another-invoice`，Python 3.12，deps = `fastapi[standard]` / `sqlalchemy[asyncio]` / `asyncpg` / `alembic` / `pydantic-settings` / `uvicorn[standard]`（`fastapi-users` 留到 M1）；dev = `pytest` / `pytest-asyncio` / `httpx` / `mypy` / `ruff`。ruff line=100 select E/F/I/B/UP/ASYNC；mypy strict；pytest asyncio auto。`.python-version`。
+- **独立验证**：`uv sync` → `uv run ruff check .` → `uv run mypy --strict src` → `uv run pytest`（含一个 trivial 测试）全绿。
+
+### A2 · config + db
+- `src/jai/config.py`：pydantic-settings 读 `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` 并安全组装 `database_url`；`DATABASE_URL` 可作为完整连接串覆盖；另读 `STATIC_DIR`/`APP_VERSION`。
+- `src/jai/db.py`：async engine + `async_sessionmaker` + `Base(DeclarativeBase)` + `get_session` 依赖；**预留 RLS 会话钩子**（空函数 + 注释，M-multitenant 再实现）。
+- **独立验证**：pytest 用真实/容器 Postgres 开一个 session 跑 `SELECT 1` 通过。
+
+### A3 · FastAPI app + 健康检查
+- `src/jai/main.py`：建 app；dev 期开 CORS（允许 `:5173`）；挂 `api` 路由；**`STATIC_DIR` 存在时**托管静态 + SPA fallback（不存在则跳过，方便纯后端开发）。
+- `src/jai/api/health.py`：`GET /api/health` → `{"status":"ok","version": settings.APP_VERSION}`。
+- **独立验证**：`uv run uvicorn jai.main:app --reload --port 8000` + `curl "localhost:8000/api/health"` 得 ok；httpx 测试客户端断言 200。
+
+### A4 · Money/Decimal 基础类型 + 舍入
+- `src/jai/models/_types.py`：`Money` 列类型 = `Numeric(18, 3)` 的注解封装；`models/__init__.py`、`models/_enums.py` 占位。
+- `src/jai/services/money.py`：`quantize_money()`（scale=3，`ROUND_HALF_UP`）等工具 + docstring 写明口径（逐行/合计舍入策略 M5 细化）。
+- **独立验证**：`pytest` 覆盖舍入边界（half-up、scale 截断、负数）。
+
+### A5 · Alembic 接好 + 空基线
+- `backend/alembic.ini` + `alembic/env.py`（async，通过 `Settings.database_url` 取连接串，`target_metadata=Base.metadata`）+ 一条空基线 revision；`docker-entrypoint.sh` 由 Track C 接，但迁移本身在此可测。
+- **独立验证**：`uv run alembic upgrade head` 对 Postgres 跑通；`alembic downgrade base` 可回滚。
+
+### 🔬 Track A 整体独立验收配方
+```
+cp .env.example .env      # 首次 checkout；本地开发默认连 127.0.0.1:5433
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
+cd backend && uv sync
+uv run alembic upgrade head
+uv run ruff check . && uv run mypy --strict src && uv run pytest
+uv run uvicorn jai.main:app --port 8000   # 另开终端：curl "localhost:8000/api/health" → {"status":"ok",...}
+```
+
+---
+
+## Track B · 前端（agent #2，仅 `frontend/`）
+
+> 镜像母版 `~/workspace/trading-journal/frontend` 的写法与约定。
+
+### B1 · 前端脚手架
+- Vite + Vue 3 + TS：`package.json`（deps `vue`/`vue-router`/`pinia`/`naive-ui`/`echarts`/`vue-i18n`；dev `typescript`/`vue-tsc`/`vite`/`@vitejs/plugin-vue`/`openapi-typescript`）；`.npmrc`（`legacy-peer-deps=true`）；`tsconfig*.json`；`vite.config.ts`（`server.proxy['/api'] → http://localhost:8000`）；`index.html`；`src/main.ts`；`src/App.vue`；`src/styles/`。`npm run build = vue-tsc -b && vite build`。
+- **独立验证**：`npm install` → `npm run build` 通过；`npm run dev` 起得来。
+
+### B2 · 路由 + 占位页 + Naive UI
+- `src/router/`（一条 `/` 路由）；`src/views/Home.vue` 占位页（显示 "Just Another Invoice" + 版本）；`App.vue` 套 Naive UI 的 provider（`n-config-provider` 等）；`src/stores/` 建一个空 Pinia store 占位。
+- **独立验证**：`npm run dev` → 浏览器 `:5173` 看到占位页。
+
+### B3 · i18n(EN/ZH) 脚手架
+- vue-i18n 接好；`src/locales/en.json` + `zh.json`（占位页文案）；语言切换器放占位页；`composables/useLocale.ts`。
+- **独立验证**：页面上切 EN/ZH 文案随之变化。
+
+### B4 · API client + codegen 接线
+- `src/api/`：轻量 fetch 封装；`package.json` 加 `"codegen": "node scripts/codegen.mjs"`，脚本默认读取 `http://localhost:8000/api/v1/openapi.json`（需要时可用 `OPENAPI_URL` 显式覆盖），并在生成前校验 OpenAPI title。**Track A 已先完成**：确认已有本地 `.env`（首次 checkout：`cp .env.example .env`），起一份后端（`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres` + `uv run uvicorn ... --port 8000`），跑 `npm run codegen` 生成并**提交真实的 `schema.d.ts`**（不要手写桩，避免与后端漂移）。
+- **可选锦上添花**：占位页 ping `/api/health`，显示 "backend: ok"（端到端更直观；后端没起时优雅降级）。
+- **独立验证**：`npm run build` 用已提交的 `schema.d.ts` 自洽通过（构建本身不依赖后端在线）。
+
+### 🔬 Track B 整体独立验收配方
+```
+cd frontend && npm install
+npm run build          # vue-tsc + vite，绿
+npm run dev            # 浏览器 :5173 看占位页，切 EN/ZH
+```
+
+---
+
+## Track C · 集成与部署（A、B 合入后，主 agent）
+
+### C1 · 单容器 Dockerfile + entrypoint
+- 根 `Dockerfile`（三阶段：①`node` 跑 `vite build` 出 `dist` ②`uv` 装后端运行时依赖 ③`python-slim` runtime：拷 venv+src+alembic + 前端 `dist`→`STATIC_DIR`，`uvicorn jai.main:app`）；`backend/docker-entrypoint.sh`（`alembic upgrade head` 后 `exec "$@"`）；根 `.dockerignore`。
+- compose 加 `db-migration` + `app` service：生产基础 compose 使用 GHCR `image:`，本地构建由 `docker-compose.dev.yml` 覆盖 `build: .`；`db-migration` 等待 Postgres healthy 后跑 `alembic upgrade head`，`app` 等 migration 成功后启动；env `POSTGRES_HOST=postgres`；app 端口映射 `127.0.0.1:${APP_HOST_PORT:-8000}:8000`；Postgres 不发布宿主机端口。
+- **验证**：本地集成用 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` → app + postgres 起来；生产部署在 GHCR 镜像发布后用 `docker compose up -d`。
+
+### C2 · 后端托管 SPA（端到端打通）
+- 确认 `main.py` 在 `STATIC_DIR` 托管 `dist` + 非 `/api` 路由 SPA fallback。
+- **验证**：本地集成或生产 compose 启动后 → 浏览器 `:${APP_HOST_PORT:-8000}`（注意是 compose 宿主机端口，非容器内 8000 / Vite 5173）看到占位页 + `/api/health` ok。
+
+### C3 · CI 四关
+- `.github/workflows/ci.yml`：`backend-quality`(ruff+mypy+pytest，service 容器跑 postgres) / `codegen-freshness`(起后端→`npm run codegen`→`git diff --exit-code schema.d.ts`) / `frontend-build`(vue-tsc+vite) / `docker-build`。`release.yml`（tag→多架构镜像）。
+- **验证**：push 后四关绿；codegen-freshness 确认 `schema.d.ts` 无漂移。
+
+---
+
+## 🟢 部署自测点（里程碑验收 · 你人工测）
+1. 本地集成：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` → Postgres healthy → db-migration 成功退出 → app healthy。生产部署：GHCR 镜像发布后 `docker compose up -d` 走 image-only。
+2. 浏览器开 `http://localhost:${APP_HOST_PORT:-8000}` → 看到（空）占位页，能切 EN/ZH，（可选）显示 "backend: ok"。
+3. `curl "http://localhost:${APP_HOST_PORT:-8000}/api/health"` → `{"status":"ok",...}`。
+4. 开发态另测：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres` + 后端 `uv run uvicorn ... --reload` + 前端 `npm run dev`，`:5173` 占位页正常、`/api` 代理通。
+5. CI 四关全绿。
+
+---
+
+## 给 agent 的交接（复制粘贴用）
+
+**给后端 agent（Track A）**：
+> 读 `docs/plan/milestones/M0.md` 的「契约」+「Track A」，以及 `docs/plan/roadmap.md` 的 §2/§3，并参照母版 `~/workspace/trading-journal/backend` 的写法。**只在 `backend/` 下工作，不要碰 `frontend/` 和根目录的 Docker/CI。**按 A1→A5 实现，每步跑「Track A 独立验收配方」，全绿后告诉我。数据库用 PostgreSQL+asyncpg（母版是 SQLite，注意替换）。
+
+**给前端 agent（Track B）**：
+> 读 `docs/plan/milestones/M0.md` 的「契约」+「Track B」，以及 `docs/plan/roadmap.md` 的 §1.1/§3，并参照母版 `~/workspace/trading-journal/frontend` 的写法。**只在 `frontend/` 下工作，不要碰 `backend/` 和根目录的 Docker/CI。**按 B1→B4 实现，每步跑「Track B 独立验收配方」，全绿后告诉我。Track A 后端已先完成，B4 起一份后端跑 `npm run codegen` 生成真实 `schema.d.ts`。
+
+---
+
+## 验收结论（收尾时回填）
+- **完成日期**：2026-06-03 · **状态：✅ 通过**
+- **验收（部署自测点 1–5 全过）**：
+  1. **栈起来**：单容器栈在运行——`jai-postgres` healthy、`jai-db-migration` 退出码 0、`jai-app` healthy；DB `alembic_version=0001`、`SELECT 1` 通。
+  2. **占位页**：`http://localhost:8000/` 由后端托管 SPA（构建产物哈希与当前源码一致）；EN/ZH 切换由作者人工验收。
+  3. **health**：`GET /api/health` → `{"status":"ok","version":"0.1.0"}`。
+  4. **开发态分离**：作者人工验收（仅起 Postgres + `uvicorn --reload` + `npm run dev`，`/api` 代理通）。
+  5. **CI 四关**：本地等价复核全绿——`ruff` ✓ / `mypy --strict src` ✓ / `pytest` **81 passed**（含 alembic upgrade/downgrade + 真实 DB session，跑在隔离的一次性 Postgres 上）✓ / `npm run build` ✓ / codegen 重生成 `schema.d.ts` **无漂移** ✓；`docker-build` 由当前运行中的健康镜像 + 作者人工验收覆盖。
+- **已知遗留 / 顺延项**：
+  - 无业务表（空基线迁移 `0001`）；首批真实表（`setting` / `user`）在 **M1** 落地。
+  - track-c review 三项 finding 均已闭环：P1（CI pytest 端口断言）改由临时 env file 验证 `.env` 解析（81 passed 含该用例）；P2/P3（基础 compose 用 GHCR `image:`、本地集成走 `docker-compose.dev.yml` build、容器内固定 `8000`、host 侧 `APP_HOST_PORT` 发布）已在 compose / `.env.example` / README / 本文档对齐。
+  - RLS 仍为空会话钩子（按设计顺延至多租户里程碑）。
