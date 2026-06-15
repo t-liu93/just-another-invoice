@@ -14,8 +14,10 @@ import { ApiError, get } from '../api/http'
 type ProfitLossReport = components['schemas']['ProfitLossReport']
 type ProfitLossSeriesItem = components['schemas']['ProfitLossSeriesItem']
 type VatReturnReport = components['schemas']['VatReturnReport']
+type IcpReport = components['schemas']['IcpReport']
+type IcpLine = components['schemas']['IcpLine']
 
-export type { ProfitLossReport, ProfitLossSeriesItem, VatReturnReport }
+export type { ProfitLossReport, ProfitLossSeriesItem, VatReturnReport, IcpReport, IcpLine }
 
 export const useReportsStore = defineStore('reports', () => {
   // P/L report state
@@ -27,6 +29,11 @@ export const useReportsStore = defineStore('reports', () => {
   const vatReport = ref<VatReturnReport | null>(null)
   const vatLoading = ref(false)
   const vatError = ref<string | null>(null)
+
+  // ICP report state
+  const icpReport = ref<IcpReport | null>(null)
+  const icpLoading = ref(false)
+  const icpError = ref<string | null>(null)
 
   /**
    * Fetch the P/L report for the given date range and granularity.
@@ -75,6 +82,25 @@ export const useReportsStore = defineStore('reports', () => {
     }
   }
 
+  /**
+   * Fetch the ICP (Opgaaf ICP) report for the given year and quarter.
+   *
+   * @param year     Calendar year (e.g. 2026).
+   * @param quarter  Quarter number 1–4.
+   */
+  async function fetchIcp(year: number, quarter: number): Promise<void> {
+    icpLoading.value = true
+    icpError.value = null
+    try {
+      const params = new URLSearchParams({ year: String(year), quarter: String(quarter) })
+      icpReport.value = await get<IcpReport>(`/api/v1/reports/icp?${params.toString()}`)
+    } catch (e: unknown) {
+      icpError.value = e instanceof ApiError ? e.message : String(e)
+    } finally {
+      icpLoading.value = false
+    }
+  }
+
   return {
     plReport,
     plLoading,
@@ -84,5 +110,9 @@ export const useReportsStore = defineStore('reports', () => {
     vatLoading,
     vatError,
     fetchVatReturn,
+    icpReport,
+    icpLoading,
+    icpError,
+    fetchIcp,
   }
 })

@@ -2058,6 +2058,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/icp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Icp Report
+         * @description Return the ICP (Opgaaf ICP) quarterly report for the given year and quarter.
+         *
+         *     Lists all EU-B2B reverse-charge invoices (``requires_icp=True``) grouped
+         *     by customer.  The ``total_net`` must equal the BTW box 3b net amount for
+         *     the same quarter (guide §3.2: '3b ≡ Opgaaf ICP').
+         *
+         *     Warnings are generated for customers missing a VAT ID or billing
+         *     country code – both are required for the official Opgaaf ICP filing.
+         */
+        get: operations["get_icp_report_api_v1_reports_icp_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3483,6 +3510,73 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * IcpLine
+         * @description One customer line in the ICP report.
+         *
+         *     Represents one EU-B2B customer's aggregated net amount for the quarter.
+         */
+        IcpLine: {
+            /**
+             * Customer Id
+             * @description Customer UUID as string.
+             */
+            customer_id: string;
+            /**
+             * Customer Name
+             * @description Customer display name (live join, not snapshotted).
+             */
+            customer_name: string;
+            /**
+             * Country Code
+             * @description ISO 3166-1 alpha-2 country code from the customer's BILLING address. None if no billing address is on file.
+             */
+            country_code?: string | null;
+            /**
+             * Vat Id
+             * @description Customer VAT number (live join).  None if not set.
+             */
+            vat_id?: string | null;
+            /**
+             * Net Amount
+             * @description Sum of base_taxable_amount for all requires_icp invoices in the quarter (EUR).
+             */
+            net_amount: string;
+        };
+        /**
+         * IcpReport
+         * @description Response schema for GET /api/v1/reports/icp.
+         *
+         *     The ``total_net`` must equal the BTW 3b net amount for the same quarter
+         *     (D-ICP / guide §3.2 '3b ≡ Opgaaf ICP').
+         */
+        IcpReport: {
+            /**
+             * Year
+             * @description Calendar year.
+             */
+            year: number;
+            /**
+             * Quarter
+             * @description Quarter (1–4).
+             */
+            quarter: number;
+            /**
+             * Lines
+             * @description One line per customer with ICP invoices in the period.
+             */
+            lines: components["schemas"]["IcpLine"][];
+            /**
+             * Total Net
+             * @description Sum of all line net_amounts.  Must equal BTW box 3b for the same quarter.
+             */
+            total_net: string;
+            /**
+             * Warnings
+             * @description Advisory messages for customers missing vat_id or billing country_code – both are required fields for the Opgaaf ICP filing.
+             */
+            warnings?: string[];
         };
         /**
          * InvoiceCalculationRead
@@ -10665,6 +10759,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VatReturnReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_icp_report_api_v1_reports_icp_get: {
+        parameters: {
+            query: {
+                /** @description Calendar year of the ICP report period (e.g. 2026). */
+                year: number;
+                /** @description Quarter of the ICP report period (1–4). */
+                quarter: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IcpReport"];
                 };
             };
             /** @description Validation Error */

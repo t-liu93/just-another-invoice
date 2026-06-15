@@ -27,9 +27,10 @@ from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.company import Company
 from jai.models.user import User
-from jai.schemas.report import ProfitLossReport, VatReturnReport
+from jai.schemas.report import IcpReport, ProfitLossReport, VatReturnReport
 from jai.schemas.setting import SETTING_KEY_VAT_RATE_TIERS, VatRateTiers
 from jai.services.reporting.btw import compute_vat_return
+from jai.services.reporting.icp import compute_icp
 from jai.services.reporting.pl import compute_profit_loss
 from jai.services.settings import get_setting
 
@@ -173,4 +174,57 @@ async def get_vat_return(
         year=year,
         quarter=quarter,
         tiers=tiers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# ICP report (M10 step 3)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/reports/icp",
+    response_model=IcpReport,
+)
+async def get_icp_report(
+    year: int = Query(
+        description="Calendar year of the ICP report period (e.g. 2026).",
+        ge=2000,
+        le=2100,
+    ),
+    quarter: int = Query(
+        description="Quarter of the ICP report period (1–4).",
+        ge=1,
+        le=4,
+    ),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> IcpReport:
+    """Return the ICP (Opgaaf ICP) quarterly report for the given year and quarter.
+
+    Lists all EU-B2B reverse-charge invoices (``requires_icp=True``) grouped
+    by customer.  The ``total_net`` must equal the BTW box 3b net amount for
+    the same quarter (guide §3.2: '3b ≡ Opgaaf ICP').
+
+    Warnings are generated for customers missing a VAT ID or billing
+    country code – both are required for the official Opgaaf ICP filing.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    # Fetch the company record.
+    stmt_co = select(Company).where(Company.id == company_id)
+    result_co = await session.execute(stmt_co)
+    company = result_co.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile not found.",
+        )
+
+    return await compute_icp(
+        session,
+        company=company,
+        year=year,
+        quarter=quarter,
     )

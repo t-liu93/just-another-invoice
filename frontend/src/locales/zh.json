@@ -1149,6 +1149,32 @@
       "outputVatTotal": "销项合计（≈ 5a，参考位）",
       "netPayable": "总应缴 / 应退（Totaal te betalen / terug te vragen）",
       "q4Note": "1d 仅在 Q4 年末申报时非零（私用回补汇总整年）。"
+    },
+    "icp": {
+      "title": "ICP 清单（Opgaaf ICP）",
+      "navLink": "ICP 清单",
+      "year": "年份",
+      "quarter": "季度",
+      "q1": "Q1（1–3月）",
+      "q2": "Q2（4–6月）",
+      "q3": "Q3（7–9月）",
+      "q4": "Q4（10–12月）",
+      "refresh": "刷新",
+      "period": "申报期",
+      "linesTitle": "EU B2B 客户明细",
+      "colCustomer": "客户",
+      "colCountry": "国家",
+      "colVatId": "VAT 号",
+      "colNetAmount": "净额（EUR）",
+      "totalNet": "净额合计",
+      "totalNetHelp": "此合计应与同季度 BTW 格子 3b 净额一致。",
+      "vatBox3bNote": "净额合计应与 BTW 3b 一致：{amount}",
+      "warnings": "注意事项",
+      "empty": "本季度无 ICP 发票。",
+      "missingVatId": "缺 VAT 号",
+      "missingCountry": "缺国家代码",
+      "disclaimer": "免责声明",
+      "disclaimerText": "本报表仅为记账辅助，不构成税务或会计建议。提交 Opgaaf ICP 前请务必与您的会计师核对并以税局为准。"
     }
   }
 }

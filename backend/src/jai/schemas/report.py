@@ -164,6 +164,59 @@ class VatReturnTotals(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# ICP report (step 3)
+# ---------------------------------------------------------------------------
+
+
+class IcpLine(BaseModel):
+    """One customer line in the ICP report.
+
+    Represents one EU-B2B customer's aggregated net amount for the quarter.
+    """
+
+    customer_id: str = Field(description="Customer UUID as string.")
+    customer_name: str = Field(description="Customer display name (live join, not snapshotted).")
+    country_code: str | None = Field(
+        default=None,
+        description=(
+            "ISO 3166-1 alpha-2 country code from the customer's BILLING address. "
+            "None if no billing address is on file."
+        ),
+    )
+    vat_id: str | None = Field(
+        default=None,
+        description="Customer VAT number (live join).  None if not set.",
+    )
+    net_amount: Decimal = Field(
+        description="Sum of base_taxable_amount for all requires_icp invoices in the quarter (EUR)."
+    )
+
+
+class IcpReport(BaseModel):
+    """Response schema for GET /api/v1/reports/icp.
+
+    The ``total_net`` must equal the BTW 3b net amount for the same quarter
+    (D-ICP / guide §3.2 '3b ≡ Opgaaf ICP').
+    """
+
+    year: int = Field(description="Calendar year.")
+    quarter: int = Field(description="Quarter (1–4).")
+    lines: list[IcpLine] = Field(
+        description="One line per customer with ICP invoices in the period."
+    )
+    total_net: Decimal = Field(
+        description="Sum of all line net_amounts.  Must equal BTW box 3b for the same quarter."
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Advisory messages for customers missing vat_id or billing country_code – "
+            "both are required fields for the Opgaaf ICP filing."
+        ),
+    )
+
+
 class VatReturnReport(BaseModel):
     """Response schema for GET /api/v1/reports/vat-return.
 

@@ -1149,6 +1149,32 @@
       "outputVatTotal": "Output VAT total (≈ 5a)",
       "netPayable": "Totaal te betalen / terug te vragen",
       "q4Note": "1d is non-zero only in Q4 (year-end private-use correction)."
+    },
+    "icp": {
+      "title": "ICP Report (Opgaaf ICP)",
+      "navLink": "ICP Report",
+      "year": "Year",
+      "quarter": "Quarter",
+      "q1": "Q1 (Jan–Mar)",
+      "q2": "Q2 (Apr–Jun)",
+      "q3": "Q3 (Jul–Sep)",
+      "q4": "Q4 (Oct–Dec)",
+      "refresh": "Refresh",
+      "period": "Period",
+      "linesTitle": "EU B2B Customers",
+      "colCustomer": "Customer",
+      "colCountry": "Country",
+      "colVatId": "VAT ID",
+      "colNetAmount": "Net Amount (EUR)",
+      "totalNet": "Total Net",
+      "totalNetHelp": "This amount must equal BTW box 3b for the same quarter.",
+      "vatBox3bNote": "Total net should match BTW return box 3b: {amount}",
+      "warnings": "Warnings",
+      "empty": "No ICP invoices in this quarter.",
+      "missingVatId": "Missing VAT ID",
+      "missingCountry": "Missing country",
+      "disclaimer": "Disclaimer",
+      "disclaimerText": "This output is for bookkeeping assistance only and does not constitute tax or accounting advice. Always verify with your accountant and/or the Belastingdienst before filing your Opgaaf ICP."
     }
   }
 }
