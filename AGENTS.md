@@ -48,7 +48,7 @@ A self-hosted **invoicing / personal-company management system**, for the author
 - **Cross-reference** each pair with a blockquote on the line right under the H1:
   - in `X.md` (English): `> 🌐 **English** · [中文](X_zh.md)`
   - in `X_zh.md` (Chinese): `> 🌐 [English](X.md) · **中文**`
-- Inter-document links point to the canonical `.md` in both versions (don't rewrite them to `_zh`).
+- **Same-language links**: in `X.md`, link to other docs' `.md`; in `X_zh.md`, link to their `_zh.md`. The only exception is the `🌐` cross-reference header itself, which is the language toggle and deliberately points to the other-language file.
 
 ## Common commands
 > These all become available once the M0 scaffolding lands; the commands themselves are a stable convention.

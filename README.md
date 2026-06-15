@@ -1,66 +1,97 @@
 # Yet Another Ledger
 
-Self-hosted invoicing application for Dutch freelancers and small businesses.
+> 🌐 **English** · [中文](README_zh.md)
 
-Built with FastAPI + Vue 3 + PostgreSQL.
+Self-hosted invoicing and small-business administration for freelancers and small businesses. Invoices, quotes, expenses, payments, PDF + email, and Dutch **BTW (VAT) return** summaries — all in a single Docker container.
 
-## Quick Start (Track 0)
+Built with **FastAPI + Vue 3 + PostgreSQL**.
+
+> **Status — early / pre-release (`v0.x`).** Open source and self-hosted. There is **no published Docker image yet**, so the quick start below builds the image from source. A pull-and-run quick start will be added once images are published.
+
+## Features
+
+- **Invoices** — backend pricing engine (line/document discounts, inclusive/exclusive VAT, multiple rates), concurrency-safe custom numbering, lifecycle + payment status.
+- **Quotes** — reusable content blocks/templates, one-click convert to invoice, auto-expiry.
+- **Cost estimation → quote** — internal margin-based costing that never leaks cost/margin to the customer.
+- **Payments** — partial payments with automatic `UNPAID → PARTIALLY_PAID → PAID` transitions.
+- **Expenses** — AI receipt extraction, recurring expenses, bookkeeping fields (paid-by / business-use % / depreciation years).
+- **Customers & catalog** — addresses, VAT IDs, per-customer currency & document language; product/material catalog.
+- **Documents** — invoice / quote / receipt PDFs (EN/ZH) and email sending with editable templates.
+- **Reports** — Profit & Loss, **Dutch BTW VAT-return summary**, ICP listing, expense report, and an ECharts dashboard.
+- **Platform** — TOTP two-factor auth, typed three-tier settings, `Decimal` money math, bilingual UI (English / 中文), single-container deploy.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Backend | FastAPI · SQLAlchemy 2.0 (async) · Alembic · fastapi-users · PostgreSQL (asyncpg) · Python 3.12 (uv) |
+| Frontend | Vue 3 + TypeScript · Pinia · Vue Router · Vite · Naive UI · ECharts |
+| Packaging | Single Docker container (frontend build + backend + uvicorn) + PostgreSQL |
+
+## Quick start (build from source)
+
+The published image isn't available yet, so build it locally and run the production single-container compose.
+
+**Prerequisites:** Docker + Docker Compose, and `git`.
 
 ```bash
-# Copy environment template
+# 1. Clone
+git clone https://github.com/yet-another-ledger/yet-another-ledger.git
+cd yet-another-ledger
+
+# 2. Configure (the template already sets COOKIE_SECURE=false for local HTTP)
 cp .env.example .env
 
-# Start PostgreSQL for local development; the dev compose file binds only 127.0.0.1
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
+# 3. Pre-create the receipt-storage folder owned by your user
+#    (the app container runs as uid:gid 1000:1000 by default; set PUID/PGID
+#    in .env if your user differs)
+mkdir -p data/storage
 
-# Verify the database responds
-docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1 AS connected;"'
-```
+# 4. Build the image with the tag compose expects
+docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .
 
-Docker Compose reads `.env` automatically. PostgreSQL always listens on `5432`
-inside the container. The base `docker-compose.yml` does not publish the database
-port; `docker-compose.dev.yml` binds `127.0.0.1:${POSTGRES_DEV_PORT:-5433}` for
-local tools and the backend `DATABASE_URL`.
-
-To use a different local dev port:
-
-```bash
-cp .env.dev.example .env.dev
-# Edit POSTGRES_DEV_PORT, and keep the port in DATABASE_URL in .env in sync.
-docker compose --env-file .env --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
-```
-
-## Ports
-
-- Production Compose: the app container listens on `8000` internally and is
-  published only as `127.0.0.1:${APP_HOST_PORT:-8000}:8000` for Nginx or another
-  local reverse proxy. PostgreSQL is not published to the host; app containers
-  reach it on the Compose network as `postgres:5432`.
-- Split development: start the backend manually on port `8000` with
-  `uv run uvicorn jai.main:app --reload --port 8000`. The Vite dev proxy and
-  OpenAPI codegen use that fixed backend port by default.
-
-## Later M0 Tracks
-
-These commands become available after the backend, frontend, and deployment
-tracks are implemented:
-
-```bash
-# Backend (from backend/)
-cd backend && uv sync
-uv run uvicorn jai.main:app --reload --port 8000
-
-# Frontend (from frontend/)
-cd frontend && npm install && npm run dev
-
-# Local single-container integration build
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-# App available at http://localhost:${APP_HOST_PORT:-8000}
-
-# Production deployment after an image has been published to GHCR
+# 5. Start (runs DB migrations, then app + PostgreSQL)
 docker compose up -d
 ```
 
+Open **http://localhost:8000**, register the first (owner) account, and set up TOTP two-factor authentication. The app is published on `127.0.0.1` only; put it behind a TLS reverse proxy for remote access.
+
+To stop: `docker compose down` (add `-v` to also drop the database volume).
+
+## Configuration
+
+Compose reads `.env` automatically. The most useful variables:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `jai` | Database credentials (shared by app + Postgres). |
+| `APP_HOST_PORT` | `8000` | Host port the app is published on (loopback). |
+| `COOKIE_SECURE` | `false` in `.env.example` | Must be `true` in production behind HTTPS. |
+| `BASE_URL` | `http://localhost:8000` | Public URL used for absolute links in emails. |
+| `STORAGE_DIR` | `./data/storage` | Host folder bind-mounted for receipts/attachments. |
+| `PUID` / `PGID` | `1000` | Host uid:gid the app runs as (owns the storage folder). |
+| `AUTH_SECRET` | auto | Auto-generated and persisted on first boot; set only to pin an external secret. |
+
+SMTP (for password-reset and sending invoices) is configured in-app under Settings after first login.
+
+## Development
+
+Run the full dev stack (app + Postgres, with the dev override) from source:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ...`). Conventions, red lines, and the contract-first workflow are documented in [`AGENTS.md`](AGENTS.md).
+
+## Roadmap
+
+Milestones M0–M10 are complete (auth, settings, customers, catalog, invoices, quotes, costing, payments, expenses, PDF/email, reporting + Dutch BTW return). M11 (self-hosting polish: backups, i18n completion, docs) is pending. See [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
+
+## Documentation
+
+Docs are English-first with a synchronized Chinese mirror (`*_zh.md`). Start at [`docs/plan/roadmap.md`](docs/plan/roadmap.md); the Dutch VAT/BTW filing basis is in [`docs/insight/btw-aangifte-2026-guide.md`](docs/insight/btw-aangifte-2026-guide.md).
+
 ## License
 
-See [LICENSE](LICENSE).
+[MIT](LICENSE).
