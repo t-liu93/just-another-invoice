@@ -4,9 +4,9 @@
  *
  * Features:
  * - Date range picker (from / to)
- * - Granularity toggle (month / quarter)
+ * - Period presets: MTD / QTD / YTD (replaces granularity toggle)
  * - Summary KPI cards (revenue, expense, profit)
- * - Time-series table with all buckets
+ * - Time-series table with all monthly buckets
  */
 import { computed, h, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -41,13 +41,62 @@ const store = useReportsStore()
 const today = new Date()
 const currentYear = today.getFullYear()
 
-// Default: current year from Jan 1 to today
-const dateRange = ref<[number, number]>([
+// Default: current year from Jan 1 to today (YTD)
+const dateRange = ref<[number, number] | null>([
   new Date(currentYear, 0, 1).getTime(),
   today.getTime(),
 ])
 
-const granularity = ref<'month' | 'quarter'>('month')
+// ─── Period presets ───────────────────────────────────────────────────────────
+
+/** Compute the first month of the current quarter: 0/3/6/9 */
+function quarterStartMonth(): number {
+  return Math.floor(today.getMonth() / 3) * 3
+}
+
+/** Return [fromTs, toTs] for each preset using local date construction. */
+function presetRange(key: 'mtd' | 'qtd' | 'ytd'): [number, number] {
+  const y = today.getFullYear()
+  const m = today.getMonth()
+  const todayTs = today.getTime()
+  if (key === 'mtd') {
+    return [new Date(y, m, 1).getTime(), todayTs]
+  }
+  if (key === 'qtd') {
+    return [new Date(y, quarterStartMonth(), 1).getTime(), todayTs]
+  }
+  // ytd
+  return [new Date(y, 0, 1).getTime(), todayTs]
+}
+
+/**
+ * Derived computed: which preset does the current dateRange match?
+ * Returns null when dateRange is null or doesn't match any preset.
+ * Comparison is done on the YYYY-MM-DD string level to avoid timestamp noise.
+ */
+const activePreset = computed<'mtd' | 'qtd' | 'ytd' | null>(() => {
+  if (!dateRange.value) return null
+  const [fromTs, toTs] = dateRange.value
+  const fromStr = localDateStr(new Date(fromTs))
+  const toStr = localDateStr(new Date(toTs))
+  const todayStr = localDateStr(today)
+
+  // To must always equal today for any preset
+  if (toStr !== todayStr) return null
+
+  for (const key of ['mtd', 'qtd', 'ytd'] as const) {
+    const [pFrom] = presetRange(key)
+    if (fromStr === localDateStr(new Date(pFrom))) return key
+  }
+  return null
+})
+
+/** Apply a period preset: set dateRange and reload. */
+function applyPreset(key: string) {
+  const range = presetRange(key as 'mtd' | 'qtd' | 'ytd')
+  dateRange.value = range
+  load()
+}
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +105,7 @@ async function load() {
   const [fromTs, toTs] = dateRange.value
   const from = localDateStr(new Date(fromTs))
   const to = localDateStr(new Date(toTs))
-  await store.fetchProfitLoss(from, to, granularity.value)
+  await store.fetchProfitLoss(from, to, 'month')
 }
 
 onMounted(load)
@@ -92,12 +141,7 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
     key: 'period',
     width: 120,
     render(row) {
-      // Format period label by granularity: YYYY-MM or Q1 YYYY etc.
-      if (granularity.value === 'quarter') {
-        const d = new Date(row.period)
-        const q = Math.floor(d.getMonth() / 3) + 1
-        return `Q${q} ${d.getFullYear()}`
-      }
+      // Always monthly: YYYY-MM
       const d = new Date(row.period)
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     },
@@ -149,9 +193,11 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
               clearable
               @update:value="load"
             />
-            <n-radio-group v-model:value="granularity" @update:value="load">
-              <n-radio-button value="month">{{ t('reports.pl.granMonth') }}</n-radio-button>
-              <n-radio-button value="quarter">{{ t('reports.pl.granQuarter') }}</n-radio-button>
+            <!-- Period presets: MTD / QTD / YTD -->
+            <n-radio-group :value="activePreset" @update:value="applyPreset">
+              <n-radio-button value="mtd">{{ t('reports.pl.periodMtd') }}</n-radio-button>
+              <n-radio-button value="qtd">{{ t('reports.pl.periodQtd') }}</n-radio-button>
+              <n-radio-button value="ytd">{{ t('reports.pl.periodYtd') }}</n-radio-button>
             </n-radio-group>
             <n-button :loading="store.plLoading" @click="load">
               {{ t('reports.pl.refresh') }}
