@@ -67,7 +67,25 @@
   "dashboard": {
     "welcome": "欢迎使用 Just Another Invoice",
     "emptyHint": "仪表盘暂无内容，更多功能即将上线！",
-    "settings": "设置"
+    "settings": "设置",
+    "title": "仪表盘",
+    "year": "年份",
+    "refresh": "刷新",
+    "kpiTitle": "关键指标（KPI）",
+    "ytdRevenue": "本年销项净额",
+    "ytdExpense": "本年实际开支",
+    "ytdProfit": "本年利润",
+    "currentQuarterVat": "本季度应缴 VAT",
+    "currentQuarterVatHint": "第 {q} 季度净应缴（+）/ 应退（−）VAT。",
+    "monthlyTitle": "月度收入 / 支出 / 利润",
+    "topCategoriesTitle": "开支分类 Top 5",
+    "topCategoriesEmpty": "本年暂无开支分类数据。",
+    "categoryName": "分类",
+    "categoryNet": "净额（EUR）",
+    "chartLegendRevenue": "收入",
+    "chartLegendExpense": "支出",
+    "chartLegendProfit": "利润",
+    "loadError": "仪表盘数据加载失败。"
   },
   "onboarding": {
     "stepCompany": "公司",

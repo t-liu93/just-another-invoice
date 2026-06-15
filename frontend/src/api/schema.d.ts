@@ -2116,6 +2116,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dashboard
+         * @description Return the dashboard summary for the given year.
+         *
+         *     Aggregates:
+         *     - KPI (YTD revenue / expense / profit, current-quarter VAT payable)
+         *     - Monthly series (12 months Jan–Dec)
+         *     - Top 5 expense categories by net amount
+         *
+         *     All numbers are derived from the same underlying P/L, BTW, and expense
+         *     report services so they are guaranteed consistent with those sub-reports.
+         *
+         *     ``current_quarter_vat_payable`` uses:
+         *     - The current quarter (today's quarter) when ``year`` == current year.
+         *     - Q4 (year-end) when ``year`` is a prior year.
+         */
+        get: operations["get_dashboard_api_v1_reports_dashboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2525,6 +2557,119 @@ export interface components {
             };
             /** Addresses */
             addresses?: components["schemas"]["AddressWrite"][];
+        };
+        /**
+         * DashboardKpi
+         * @description Key performance indicators for the dashboard.
+         *
+         *     ytd_* values are for the full selected year (Jan–Dec).
+         *     Invariant: ytd_* == Σ monthly (both derived from the same P/L call).
+         */
+        DashboardKpi: {
+            /**
+             * Ytd Revenue
+             * @description Year-to-date net revenue (EUR).
+             */
+            ytd_revenue: string;
+            /**
+             * Ytd Expense
+             * @description Year-to-date depreciation-adjusted, business%-prorated expense (EUR).
+             */
+            ytd_expense: string;
+            /**
+             * Ytd Profit
+             * @description ytd_revenue − ytd_expense (EUR).
+             */
+            ytd_profit: string;
+            /**
+             * Current Quarter Vat Payable
+             * @description Net VAT payable (+) or refundable (−) for the current/last quarter (compute_vat_return.totals.net_payable_or_refundable.vat, EUR).
+             */
+            current_quarter_vat_payable: string;
+        };
+        /**
+         * DashboardMonthly
+         * @description One month in the dashboard time series.
+         *
+         *     ``month`` is an ISO date string representing the first day of the month
+         *     (YYYY-MM-01).  Exactly 12 items are always returned for the selected year.
+         */
+        DashboardMonthly: {
+            /**
+             * Month
+             * @description Month start date in YYYY-MM-01 format.
+             */
+            month: string;
+            /**
+             * Revenue
+             * @description Net revenue in this month (EUR).
+             */
+            revenue: string;
+            /**
+             * Expense
+             * @description Depreciation-adjusted, business%-prorated expense in this month (EUR).
+             */
+            expense: string;
+            /**
+             * Profit
+             * @description revenue − expense for this month (EUR).
+             */
+            profit: string;
+        };
+        /**
+         * DashboardSummary
+         * @description Response schema for GET /api/v1/reports/dashboard.
+         *
+         *     Aggregated from P/L, BTW VAT return, and expense report services so that
+         *     all numbers are guaranteed consistent with those sub-reports.
+         */
+        DashboardSummary: {
+            /**
+             * Year
+             * @description The selected calendar year.
+             */
+            year: number;
+            /**
+             * Quarter
+             * @description The quarter used for current_quarter_vat_payable: current quarter if year == today's year, else Q4.
+             */
+            quarter: number;
+            /** @description Key performance indicators. */
+            kpi: components["schemas"]["DashboardKpi"];
+            /**
+             * Monthly
+             * @description 12-month series (Jan–Dec) for the selected year.
+             */
+            monthly: components["schemas"]["DashboardMonthly"][];
+            /**
+             * Top Expense Categories
+             * @description Top expense categories by net amount (descending), up to 5 entries. Fewer entries if fewer than 5 categories have expenses in the year.
+             */
+            top_expense_categories: components["schemas"]["DashboardTopCategory"][];
+        };
+        /**
+         * DashboardTopCategory
+         * @description One entry in the top expense categories list.
+         *
+         *     Derived from compute_expense_report.by_category sorted descending by net,
+         *     top 5 (fewer if fewer categories exist).
+         */
+        DashboardTopCategory: {
+            /**
+             * Category Id
+             * @description Category UUID as string, or null for deleted/uncategorised categories.
+             */
+            category_id?: string | null;
+            /**
+             * Category Name
+             * @description Category display name.
+             */
+            category_name: string;
+            /**
+             * Net
+             * @description Total net expense amount in this category for the year (EUR).
+             */
+            net: string;
         };
         /**
          * DiscountInput
@@ -10964,6 +11109,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExpenseReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dashboard_api_v1_reports_dashboard_get: {
+        parameters: {
+            query: {
+                /** @description Calendar year for the dashboard (e.g. 2026). */
+                year: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardSummary"];
                 };
             };
             /** @description Validation Error */

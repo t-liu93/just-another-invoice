@@ -18,6 +18,10 @@ type IcpReport = components['schemas']['IcpReport']
 type IcpLine = components['schemas']['IcpLine']
 type ExpenseReport = components['schemas']['ExpenseReport']
 type ExpenseCategoryRow = components['schemas']['ExpenseCategoryRow']
+type DashboardSummary = components['schemas']['DashboardSummary']
+type DashboardKpi = components['schemas']['DashboardKpi']
+type DashboardMonthly = components['schemas']['DashboardMonthly']
+type DashboardTopCategory = components['schemas']['DashboardTopCategory']
 
 export type {
   ProfitLossReport,
@@ -27,6 +31,10 @@ export type {
   IcpLine,
   ExpenseReport,
   ExpenseCategoryRow,
+  DashboardSummary,
+  DashboardKpi,
+  DashboardMonthly,
+  DashboardTopCategory,
 }
 
 export const useReportsStore = defineStore('reports', () => {
@@ -49,6 +57,11 @@ export const useReportsStore = defineStore('reports', () => {
   const expenseReport = ref<ExpenseReport | null>(null)
   const expenseLoading = ref(false)
   const expenseError = ref<string | null>(null)
+
+  // Dashboard state (step 5)
+  const dashboardReport = ref<DashboardSummary | null>(null)
+  const dashboardLoading = ref(false)
+  const dashboardError = ref<string | null>(null)
 
   /**
    * Fetch the P/L report for the given date range and granularity.
@@ -137,6 +150,26 @@ export const useReportsStore = defineStore('reports', () => {
     }
   }
 
+  /**
+   * Fetch the dashboard summary for the given year.
+   *
+   * @param year  Calendar year (e.g. 2026).
+   */
+  async function fetchDashboard(year: number): Promise<void> {
+    dashboardLoading.value = true
+    dashboardError.value = null
+    try {
+      const params = new URLSearchParams({ year: String(year) })
+      dashboardReport.value = await get<DashboardSummary>(
+        `/api/v1/reports/dashboard?${params.toString()}`,
+      )
+    } catch (e: unknown) {
+      dashboardError.value = e instanceof ApiError ? e.message : String(e)
+    } finally {
+      dashboardLoading.value = false
+    }
+  }
+
   return {
     plReport,
     plLoading,
@@ -154,5 +187,9 @@ export const useReportsStore = defineStore('reports', () => {
     expenseLoading,
     expenseError,
     fetchExpenseReport,
+    dashboardReport,
+    dashboardLoading,
+    dashboardError,
+    fetchDashboard,
   }
 })

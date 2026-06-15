@@ -67,7 +67,25 @@
   "dashboard": {
     "welcome": "Welcome to Just Another Invoice",
     "emptyHint": "Your dashboard is empty. More features coming soon!",
-    "settings": "Settings"
+    "settings": "Settings",
+    "title": "Dashboard",
+    "year": "Year",
+    "refresh": "Refresh",
+    "kpiTitle": "Key Performance Indicators",
+    "ytdRevenue": "YTD Revenue",
+    "ytdExpense": "YTD Expenses",
+    "ytdProfit": "YTD Profit",
+    "currentQuarterVat": "Current Quarter VAT Payable",
+    "currentQuarterVatHint": "Net VAT payable (+) or refundable (−) for Q{q}.",
+    "monthlyTitle": "Monthly Revenue / Expenses / Profit",
+    "topCategoriesTitle": "Top 5 Expense Categories",
+    "topCategoriesEmpty": "No expense categories in this year.",
+    "categoryName": "Category",
+    "categoryNet": "Net (EUR)",
+    "chartLegendRevenue": "Revenue",
+    "chartLegendExpense": "Expenses",
+    "chartLegendProfit": "Profit",
+    "loadError": "Failed to load dashboard data."
   },
   "onboarding": {
     "stepCompany": "Company",

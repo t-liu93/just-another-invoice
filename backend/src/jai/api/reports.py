@@ -27,9 +27,16 @@ from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.company import Company
 from jai.models.user import User
-from jai.schemas.report import ExpenseReport, IcpReport, ProfitLossReport, VatReturnReport
+from jai.schemas.report import (
+    DashboardSummary,
+    ExpenseReport,
+    IcpReport,
+    ProfitLossReport,
+    VatReturnReport,
+)
 from jai.schemas.setting import SETTING_KEY_VAT_RATE_TIERS, VatRateTiers
 from jai.services.reporting.btw import compute_vat_return
+from jai.services.reporting.dashboard import compute_dashboard
 from jai.services.reporting.expenses import compute_expense_report
 from jai.services.reporting.icp import compute_icp
 from jai.services.reporting.pl import compute_profit_loss
@@ -274,4 +281,67 @@ async def get_expense_report(
         company_id=company_id,
         date_from=date_from,
         date_to=date_to,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dashboard summary (M10 step 5)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/reports/dashboard",
+    response_model=DashboardSummary,
+)
+async def get_dashboard(
+    year: int = Query(
+        description="Calendar year for the dashboard (e.g. 2026).",
+        ge=2000,
+        le=2100,
+    ),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> DashboardSummary:
+    """Return the dashboard summary for the given year.
+
+    Aggregates:
+    - KPI (YTD revenue / expense / profit, current-quarter VAT payable)
+    - Monthly series (12 months Jan–Dec)
+    - Top 5 expense categories by net amount
+
+    All numbers are derived from the same underlying P/L, BTW, and expense
+    report services so they are guaranteed consistent with those sub-reports.
+
+    ``current_quarter_vat_payable`` uses:
+    - The current quarter (today's quarter) when ``year`` == current year.
+    - Q4 (year-end) when ``year`` is a prior year.
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+
+    # Fetch the company record (needed for country_code in VAT service).
+    stmt_co = select(Company).where(Company.id == company_id)
+    result_co = await session.execute(stmt_co)
+    company = result_co.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company profile not found.",
+        )
+
+    # Load VAT rate tier thresholds (with defaults).
+    tiers_setting = await get_setting(
+        session,
+        SETTING_KEY_VAT_RATE_TIERS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=VatRateTiers,
+    )
+    tiers = tiers_setting if tiers_setting is not None else VatRateTiers()
+
+    return await compute_dashboard(
+        session,
+        company=company,
+        year=year,
+        tiers=tiers,
     )

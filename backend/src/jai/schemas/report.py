@@ -306,6 +306,89 @@ class ExpenseCategoryRow(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# Dashboard summary (step 5)
+# ---------------------------------------------------------------------------
+
+
+class DashboardKpi(BaseModel):
+    """Key performance indicators for the dashboard.
+
+    ytd_* values are for the full selected year (Jan–Dec).
+    Invariant: ytd_* == Σ monthly (both derived from the same P/L call).
+    """
+
+    ytd_revenue: Decimal = Field(description="Year-to-date net revenue (EUR).")
+    ytd_expense: Decimal = Field(
+        description="Year-to-date depreciation-adjusted, business%-prorated expense (EUR)."
+    )
+    ytd_profit: Decimal = Field(description="ytd_revenue − ytd_expense (EUR).")
+    current_quarter_vat_payable: Decimal = Field(
+        description=(
+            "Net VAT payable (+) or refundable (−) for the current/last quarter "
+            "(compute_vat_return.totals.net_payable_or_refundable.vat, EUR)."
+        )
+    )
+
+
+class DashboardMonthly(BaseModel):
+    """One month in the dashboard time series.
+
+    ``month`` is an ISO date string representing the first day of the month
+    (YYYY-MM-01).  Exactly 12 items are always returned for the selected year.
+    """
+
+    month: str = Field(description="Month start date in YYYY-MM-01 format.")
+    revenue: Decimal = Field(description="Net revenue in this month (EUR).")
+    expense: Decimal = Field(
+        description="Depreciation-adjusted, business%-prorated expense in this month (EUR)."
+    )
+    profit: Decimal = Field(description="revenue − expense for this month (EUR).")
+
+
+class DashboardTopCategory(BaseModel):
+    """One entry in the top expense categories list.
+
+    Derived from compute_expense_report.by_category sorted descending by net,
+    top 5 (fewer if fewer categories exist).
+    """
+
+    category_id: str | None = Field(
+        default=None,
+        description="Category UUID as string, or null for deleted/uncategorised categories.",
+    )
+    category_name: str = Field(description="Category display name.")
+    net: Decimal = Field(
+        description="Total net expense amount in this category for the year (EUR)."
+    )
+
+
+class DashboardSummary(BaseModel):
+    """Response schema for GET /api/v1/reports/dashboard.
+
+    Aggregated from P/L, BTW VAT return, and expense report services so that
+    all numbers are guaranteed consistent with those sub-reports.
+    """
+
+    year: int = Field(description="The selected calendar year.")
+    quarter: int = Field(
+        description=(
+            "The quarter used for current_quarter_vat_payable: "
+            "current quarter if year == today's year, else Q4."
+        )
+    )
+    kpi: DashboardKpi = Field(description="Key performance indicators.")
+    monthly: list[DashboardMonthly] = Field(
+        description="12-month series (Jan–Dec) for the selected year."
+    )
+    top_expense_categories: list[DashboardTopCategory] = Field(
+        description=(
+            "Top expense categories by net amount (descending), up to 5 entries. "
+            "Fewer entries if fewer than 5 categories have expenses in the year."
+        )
+    )
+
+
 class ExpenseReport(BaseModel):
     """Response schema for GET /api/v1/reports/expenses.
 
