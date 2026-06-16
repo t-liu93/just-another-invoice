@@ -11,7 +11,6 @@ import {
 } from 'naive-ui'
 import { AddOutline, TrashOutline, DocumentTextOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import InvoicePaymentPanel from '../../components/InvoicePaymentPanel.vue'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
@@ -547,11 +546,7 @@ function handleSent(_log: EmailLogRead) {
 
 <template>
   <div class="invoice-edit-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <n-spin :show="pageLoading">
+    <n-spin :show="pageLoading">
           <div class="invoice-edit-container">
 
             <!-- Page title + status actions -->
@@ -1012,9 +1007,7 @@ function handleSent(_log: EmailLogRead) {
             </n-space>
 
           </div>
-        </n-spin>
-      </n-layout-content>
-    </n-layout>
+    </n-spin>
 
     <!-- Document template picker modal -->
     <n-modal
@@ -1083,9 +1076,6 @@ function handleSent(_log: EmailLogRead) {
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
 
 .invoice-edit-container {
   max-width: 1080px;

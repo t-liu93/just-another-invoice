@@ -9,7 +9,6 @@ import {
 } from 'naive-ui'
 import { AddOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { get, post, put, del } from '../../api/http'
 import type { components } from '../../api/schema'
 
@@ -447,11 +446,7 @@ const appliesToOptions = computed(() => [
 
 <template>
   <div class="content-library-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="content-library-container">
+    <div class="content-library-container">
           <h2>{{ t('contentLibrary.title') }}</h2>
 
           <n-tabs type="line" animated>
@@ -523,9 +518,7 @@ const appliesToOptions = computed(() => [
             </n-tab-pane>
 
           </n-tabs>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
 
     <!-- Document Template Modal -->
     <n-modal
@@ -690,10 +683,6 @@ const appliesToOptions = computed(() => [
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .content-library-container {
   max-width: 1100px;
   margin: 0 auto;

@@ -8,7 +8,6 @@ import {
 } from 'naive-ui'
 import { SearchOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { usePaymentsStore } from '../../stores/payments'
 import type { PaymentListItem } from '../../stores/payments'
 import { get } from '../../api/http'
@@ -193,11 +192,7 @@ const columns = computed(() => [
 
 <template>
   <div class="payment-list-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="payment-list-container">
+    <div class="payment-list-container">
           <div class="payment-list-header">
             <h2>{{ t('payments.title') }}</h2>
             <n-space align="center" wrap>
@@ -281,17 +276,11 @@ const columns = computed(() => [
               />
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .payment-list-container {
   max-width: 1200px;
   margin: 0 auto;

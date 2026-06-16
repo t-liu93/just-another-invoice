@@ -9,7 +9,6 @@ import {
 } from 'naive-ui'
 import { AddOutline, TrashOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useEstimatesStore } from '../../stores/estimates'
 import { get } from '../../api/http'
 import { ApiError } from '../../api/http'
@@ -481,11 +480,7 @@ function handleDeleteGroup(i: number) {
 
 <template>
   <div class="estimate-edit-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <n-spin :show="pageLoading">
+    <n-spin :show="pageLoading">
           <div class="estimate-edit-container">
 
             <!-- Page header -->
@@ -816,17 +811,11 @@ function handleDeleteGroup(i: number) {
             </n-space>
 
           </div>
-        </n-spin>
-      </n-layout-content>
-    </n-layout>
+    </n-spin>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .estimate-edit-container {
   max-width: 1100px;
   margin: 0 auto;

@@ -6,7 +6,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMessage, NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert, NDivider, NSelect, NText } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import AddressFieldsForm, { type AddressModel } from '../../components/AddressFieldsForm.vue'
 import { useCustomersStore } from '../../stores/customers'
 import type { components } from '../../api/schema'
@@ -149,11 +148,7 @@ function handleCancel() {
 
 <template>
   <div class="customer-edit-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="customer-edit-container">
+    <div class="customer-edit-container">
           <h2>{{ isEdit ? t('customers.edit') : t('customers.create') }}</h2>
 
           <n-alert v-if="pageError" type="error" style="margin-bottom: 16px">
@@ -266,17 +261,11 @@ function handleCancel() {
               </n-space>
             </n-card>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .customer-edit-container {
   max-width: 720px;
   margin: 0 auto;

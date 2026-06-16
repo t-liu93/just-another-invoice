@@ -32,15 +32,12 @@ import {
   NGi,
   NGrid,
   NInputNumber,
-  NLayout,
-  NLayoutContent,
   NSpace,
   NSpin,
   NStatistic,
   NText,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import AppHeader from '../components/AppHeader.vue'
 import { useReportsStore } from '../stores/reports'
 import type { DashboardMonthly, DashboardTopCategory } from '../stores/reports'
 
@@ -185,11 +182,7 @@ const topCategoryColumns = computed<DataTableColumns<DashboardTopCategory>>(() =
 
 <template>
   <div class="dashboard-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="dashboard-container">
+    <div class="dashboard-container">
           <h2>{{ t('dashboard.title') }}</h2>
 
           <!-- Year selector + refresh -->
@@ -279,17 +272,11 @@ const topCategoryColumns = computed<DataTableColumns<DashboardTopCategory>>(() =
               <n-text v-else depth="3">{{ t('dashboard.topCategoriesEmpty') }}</n-text>
             </n-card>
           </template>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .dashboard-container {
   max-width: 1100px;
   margin: 0 auto;

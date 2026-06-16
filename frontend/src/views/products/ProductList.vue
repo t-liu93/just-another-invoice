@@ -14,7 +14,6 @@ import {
 } from 'naive-ui'
 import { AddOutline, SearchOutline, CreateOutline, TrashOutline, CloudUploadOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useProductsStore } from '../../stores/products'
 import type { components } from '../../api/schema'
 
@@ -328,11 +327,7 @@ const columns = computed(() => [
 
 <template>
   <div class="product-list-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="product-list-container">
+    <div class="product-list-container">
           <div class="product-list-header">
             <h2>{{ t('products.title') }}</h2>
             <n-space align="center" wrap>
@@ -408,9 +403,7 @@ const columns = computed(() => [
               />
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 
   <!-- Excel Import Modal -->
@@ -563,10 +556,6 @@ const columns = computed(() => [
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .product-list-container {
   max-width: 1100px;
   margin: 0 auto;

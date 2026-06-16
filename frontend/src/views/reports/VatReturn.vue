@@ -19,15 +19,12 @@ import {
   NDataTable,
   NGrid,
   NGridItem,
-  NLayout,
-  NLayoutContent,
   NSelect,
   NSpin,
   NStatistic,
   NText,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useReportsStore } from '../../stores/reports'
 
 const { t } = useI18n()
@@ -209,9 +206,7 @@ const periodLabel = computed<string>(() => {
 </script>
 
 <template>
-  <n-layout>
-    <AppHeader />
-    <n-layout-content class="page-content">
+  <div class="vat-return-page page-content">
       <!-- Page header -->
       <div class="page-header">
         <h1 class="page-title">{{ t('reports.vat.title') }}</h1>
@@ -324,8 +319,7 @@ const periodLabel = computed<string>(() => {
           </n-text>
         </n-alert>
       </template>
-    </n-layout-content>
-  </n-layout>
+  </div>
 </template>
 
 <style scoped>

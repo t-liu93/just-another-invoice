@@ -18,8 +18,6 @@ import {
   NDatePicker,
   NGrid,
   NGridItem,
-  NLayout,
-  NLayoutContent,
   NRadioButton,
   NRadioGroup,
   NSpace,
@@ -28,7 +26,6 @@ import {
   NText,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useReportsStore } from '../../stores/reports'
 import type { ProfitLossSeriesItem } from '../../stores/reports'
 import { localDateStr } from '../../utils/date'
@@ -177,10 +174,7 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
 
 <template>
   <div class="pl-report-page">
-    <n-layout>
-      <AppHeader />
-      <n-layout-content class="app-content">
-        <div class="report-container">
+    <div class="report-container">
           <h2>{{ t('reports.pl.title') }}</h2>
 
           <!-- Filters -->
@@ -253,17 +247,11 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
               size="small"
             />
           </n-card>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .report-container {
   max-width: 960px;
   margin: 0 auto;

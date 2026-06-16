@@ -9,7 +9,6 @@ import {
 } from 'naive-ui'
 import { AddOutline, SearchOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useEstimatesStore } from '../../stores/estimates'
 import type { EstimateListItem } from '../../stores/estimates'
 import { get } from '../../api/http'
@@ -207,11 +206,7 @@ const columns = computed(() => [
 
 <template>
   <div class="estimate-list-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="estimate-list-container">
+    <div class="estimate-list-container">
           <div class="estimate-list-header">
             <h2>{{ t('estimates.title') }}</h2>
             <n-space align="center" wrap>
@@ -283,17 +278,11 @@ const columns = computed(() => [
               />
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .estimate-list-container {
   max-width: 1200px;
   margin: 0 auto;

@@ -28,7 +28,6 @@ import {
   ArrowBackOutline, CloudUploadOutline, TrashOutline,
   DownloadOutline, SparklesOutline,
 } from '@vicons/ionicons5'
-import AppHeader from '../../components/AppHeader.vue'
 import { useExpensesStore } from '../../stores/expenses'
 import type { ExpenseRead, ExpenseAttachmentRead } from '../../stores/expenses'
 import { get, post, ApiError } from '../../api/http'
@@ -363,10 +362,7 @@ async function handleAiExtract(attachmentId: string) {
 
 <template>
   <div class="expense-edit-page">
-    <n-layout>
-      <AppHeader />
-      <n-layout-content class="app-content">
-        <div class="expense-edit-container">
+    <div class="expense-edit-container">
           <!-- Header -->
           <div class="page-header">
             <n-button text @click="router.push('/expenses')">
@@ -668,17 +664,11 @@ async function handleAiExtract(attachmentId: string) {
               </div>
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .expense-edit-container {
   max-width: 1200px;
   margin: 0 auto;

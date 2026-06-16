@@ -9,7 +9,6 @@ import {
 } from 'naive-ui'
 import { AddOutline, SearchOutline, CreateOutline, TrashOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import { useInvoicesStore } from '../../stores/invoices'
@@ -370,11 +369,7 @@ const columns = computed(() => [
 
 <template>
   <div class="invoice-list-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="invoice-list-container">
+    <div class="invoice-list-container">
           <div class="invoice-list-header">
             <h2>{{ t('invoices.title') }}</h2>
             <n-space align="center" wrap>
@@ -462,9 +457,7 @@ const columns = computed(() => [
               />
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
 
     <!-- Send email dialog -->
     <DocumentSendDialog
@@ -486,10 +479,6 @@ const columns = computed(() => [
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .invoice-list-container {
   max-width: 1200px;
   margin: 0 auto;

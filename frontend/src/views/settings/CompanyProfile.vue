@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useCompanyStore } from '../../stores/company'
 import { useI18n } from 'vue-i18n'
-import AppHeader from '../../components/AppHeader.vue'
 import AddressFieldsForm, { type AddressModel } from '../../components/AddressFieldsForm.vue'
 import { get, put } from '../../api/http'
 
@@ -338,11 +337,7 @@ async function handleSaveQuoteDefaultValidDays() {
 
 <template>
   <div class="settings-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="company-profile">
+    <div class="company-profile">
           <n-card :title="t('settings.company.title')">
             <n-spin :show="loading">
               <n-alert v-if="loadError" type="error" style="margin-bottom: 16px">
@@ -584,16 +579,11 @@ async function handleSaveQuoteDefaultValidDays() {
               </n-form>
             </n-spin>
           </n-card>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
 
 .company-profile {
   max-width: 640px;

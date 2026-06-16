@@ -19,8 +19,6 @@ import {
   NDataTable,
   NGrid,
   NGridItem,
-  NLayout,
-  NLayoutContent,
   NSelect,
   NSpin,
   NStatistic,
@@ -28,7 +26,6 @@ import {
   NText,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useReportsStore } from '../../stores/reports'
 import type { IcpLine } from '../../stores/reports'
 
@@ -136,9 +133,7 @@ function rowClass(row: IcpLine): string {
 </script>
 
 <template>
-  <n-layout>
-    <AppHeader />
-    <n-layout-content class="page-content">
+  <div class="icp-page page-content">
       <!-- Page header -->
       <div class="page-header">
         <h1 class="page-title">{{ t('reports.icp.title') }}</h1>
@@ -248,8 +243,7 @@ function rowClass(row: IcpLine): string {
           </n-text>
         </n-alert>
       </template>
-    </n-layout-content>
-  </n-layout>
+  </div>
 </template>
 
 <style scoped>

@@ -14,7 +14,8 @@
     "contentLibrary": "Content Library",
     "expenses": "Expenses",
     "recurring": "Recurring",
-    "reports": "Reports"
+    "reports": "Reports",
+    "openMenu": "Open navigation menu"
   },
   "health": {
     "backend": "backend: {status}",

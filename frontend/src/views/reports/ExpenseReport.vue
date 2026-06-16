@@ -20,15 +20,12 @@ import {
   NEmpty,
   NGrid,
   NGridItem,
-  NLayout,
-  NLayoutContent,
   NSpace,
   NSpin,
   NStatistic,
   NText,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useReportsStore } from '../../stores/reports'
 import type { ExpenseCategoryRow } from '../../stores/reports'
 import { localDateStr } from '../../utils/date'
@@ -171,10 +168,7 @@ const hasRows = computed(
 
 <template>
   <div class="expense-report-page">
-    <n-layout>
-      <AppHeader />
-      <n-layout-content class="app-content">
-        <div class="report-container">
+    <div class="report-container">
           <h2>{{ t('reports.expenses.title') }}</h2>
 
           <!-- Filters -->
@@ -263,16 +257,11 @@ const hasRows = computed(
               size="small"
             />
           </n-card>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
 
 .report-container {
   max-width: 1100px;

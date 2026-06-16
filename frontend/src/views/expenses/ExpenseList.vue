@@ -9,7 +9,6 @@ import {
 } from 'naive-ui'
 import { SearchOutline, AddOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useExpensesStore } from '../../stores/expenses'
 import type { ExpenseListItem } from '../../stores/expenses'
 import { get } from '../../api/http'
@@ -316,11 +315,7 @@ const columns = computed(() => [
 
 <template>
   <div class="expense-list-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="expense-list-container">
+    <div class="expense-list-container">
           <div class="expense-list-header">
             <h2>{{ t('expenses.title') }}</h2>
             <n-space align="center" wrap>
@@ -416,16 +411,11 @@ const columns = computed(() => [
               />
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
 
 .expense-list-container {
   max-width: 1300px;

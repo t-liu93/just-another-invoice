@@ -14,7 +14,8 @@
     "contentLibrary": "内容库",
     "expenses": "开支",
     "recurring": "周期开支",
-    "reports": "报表"
+    "reports": "报表",
+    "openMenu": "打开导航菜单"
   },
   "health": {
     "backend": "后端：{status}",

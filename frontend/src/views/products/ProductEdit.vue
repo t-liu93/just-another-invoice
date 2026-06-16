@@ -12,7 +12,6 @@ import {
   NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert,
   NDivider, NInputNumber, NSelect, NModal, NSwitch,
 } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useProductsStore } from '../../stores/products'
 import { useVatStore } from '../../stores/vat'
 import { useUnitStore } from '../../stores/dictionaries'
@@ -224,11 +223,7 @@ function handleDeleteCategory(id: string, _name: string) {
 
 <template>
   <div class="product-edit-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="product-edit-container">
+    <div class="product-edit-container">
           <h2>{{ isEdit ? t('products.edit') : t('products.create') }}</h2>
 
           <n-alert v-if="pageError" type="error" style="margin-bottom: 16px">
@@ -368,9 +363,7 @@ function handleDeleteCategory(id: string, _name: string) {
               </n-space>
             </n-card>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
 
     <!-- Category management modal -->
     <n-modal v-model:show="showCategoryModal" preset="card" style="width: 400px" :title="editingCatId ? t('products.category.edit') : t('products.category.add')">
@@ -407,10 +400,6 @@ function handleDeleteCategory(id: string, _name: string) {
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .product-edit-container {
   max-width: 720px;
   margin: 0 auto;

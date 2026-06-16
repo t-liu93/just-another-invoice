@@ -9,7 +9,6 @@ import {
 } from 'naive-ui'
 import { AddOutline, SearchOutline, CreateOutline, TrashOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import { useQuotesStore } from '../../stores/quotes'
@@ -349,11 +348,7 @@ const columns = computed(() => [
 
 <template>
   <div class="quote-list-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="quote-list-container">
+    <div class="quote-list-container">
           <div class="quote-list-header">
             <h2>{{ t('quotes.title') }}</h2>
             <n-space align="center" wrap>
@@ -433,9 +428,7 @@ const columns = computed(() => [
               />
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
 
     <!-- Send email dialog -->
     <DocumentSendDialog
@@ -457,9 +450,6 @@ const columns = computed(() => [
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
 
 .quote-list-container {
   max-width: 1200px;

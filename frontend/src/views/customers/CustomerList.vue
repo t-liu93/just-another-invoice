@@ -8,7 +8,6 @@ import { useI18n } from 'vue-i18n'
 import { useMessage, useDialog, NButton, NSpace, NInput, NDataTable, NAlert, NSpin, NPagination, NSelect } from 'naive-ui'
 import { AddOutline, SearchOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useCustomersStore } from '../../stores/customers'
 
 const router = useRouter()
@@ -152,11 +151,7 @@ const columns = computed(() => [
 
 <template>
   <div class="customer-list-page">
-    <n-layout>
-      <AppHeader />
-
-      <n-layout-content class="app-content">
-        <div class="customer-list-container">
+    <div class="customer-list-container">
           <div class="customer-list-header">
             <h2>{{ t('customers.title') }}</h2>
             <n-space align="center">
@@ -215,17 +210,11 @@ const columns = computed(() => [
               />
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .customer-list-container {
   max-width: 960px;
   margin: 0 auto;

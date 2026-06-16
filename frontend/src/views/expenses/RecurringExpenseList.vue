@@ -9,7 +9,6 @@ import {
 } from 'naive-ui'
 import { AddOutline, PlayOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import AppHeader from '../../components/AppHeader.vue'
 import { useRecurringExpensesStore } from '../../stores/recurringExpenses'
 import type { RecurringExpenseRead, RecurringExpenseInput } from '../../stores/recurringExpenses'
 import { get, ApiError } from '../../api/http'
@@ -370,10 +369,7 @@ const columns = computed(() => [
 
 <template>
   <div class="recurring-list-page">
-    <n-layout>
-      <AppHeader />
-      <n-layout-content class="app-content">
-        <div class="recurring-container">
+    <div class="recurring-container">
           <div class="recurring-header">
             <div>
               <h2>{{ t('recurring.title') }}</h2>
@@ -418,9 +414,7 @@ const columns = computed(() => [
               />
             </div>
           </n-spin>
-        </div>
-      </n-layout-content>
-    </n-layout>
+    </div>
 
     <!-- Create / Edit modal -->
     <n-modal
@@ -536,10 +530,6 @@ const columns = computed(() => [
 </template>
 
 <style scoped>
-.app-content {
-  min-height: calc(100vh - 57px);
-}
-
 .recurring-container {
   max-width: 1200px;
   margin: 0 auto;
