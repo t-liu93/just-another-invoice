@@ -42,11 +42,13 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # latest=auto: only non-prerelease semver tags (e.g. v0.1.0) move
+          # :latest; prereleases (v0.1.0-betaN) never touch it.
+          flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7

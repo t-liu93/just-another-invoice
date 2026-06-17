@@ -233,7 +233,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 ### M11 · Wrap-up / pre-GA health check | corresponds to P7
 - **Goal**: Ready for long-term self-hosting.
 - **Key content**: **Backup scripts** (pg_dump + volume snapshot); i18n **EN/ZH completion**; security/performance polish; documentation (deployment README); **migration baselining** — before the 1.0 launch, accumulated Alembic migrations can be collapsed into a single baseline (no production data at that point; dev DB can be rebuilt); **after launch only additive migrations, never collapse again**.
-- **Release tagging — `latest` handling (decided 2026-06-17, revisit at GA)**: `release.yml` tags `latest` unconditionally (`type=raw,value=latest`), so every `v*` tag (including prereleases like `v0.1.0-betaN`) moves `:latest`. **Kept intentionally for now**: there is no stable `0.1.0` yet, so each beta must also be `latest` because production runs the `:latest` image. **Once a stable `0.1.0` ships, before cutting any further beta**, change this so prereleases no longer move `latest` — e.g. set `flavor: latest=auto` (and drop the raw `latest` line), or gate it with `enable=${{ !contains(github.ref_name, '-') }}`.
+- **Release tagging — `latest` handling (done 2026-06-17, with `v0.1.0`)**: `release.yml` now uses `flavor: latest=auto`, so only non-prerelease semver tags (e.g. `v0.1.0`) move `:latest`; prereleases (`v0.1.0-betaN`) never touch it. (Before the stable `0.1.0`, betas intentionally moved `:latest` so production running the `:latest` image could pick them up; that exception ended the moment `0.1.0` shipped.)
 - **🟢 Deployment smoke test**: Run a full backup/restore drill; switch between EN/ZH UI completely.
 
 ---

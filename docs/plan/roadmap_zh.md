@@ -233,7 +233,7 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 ### M11 · 收尾 / GA 前体检｜对应 P7
 - **目标**：可长期自托管。
 - **关键内容**：**备份脚本**（pg_dump + 卷快照）；i18n **EN/ZH 补全**；安全/性能打磨；文档（部署 README）；**迁移基线化**——1.0 正式上线前可把累积的 Alembic 迁移压成单一 baseline（彼时无生产数据，dev 库重建即可）；**上线后只追加 additive 迁移，永不再压**。
-- **发布打标签——`latest` 处理（2026-06-17 决定，GA 时再改）**：`release.yml` 无条件给 `latest` 打标签（`type=raw,value=latest`），所以每个 `v*` tag（含 `v0.1.0-betaN` 这类预发布）都会移动 `:latest`。**目前刻意保留**：还没有正式的 `0.1.0`，每个 beta 必须同时是 `latest`，因为生产跑的就是 `:latest` 镜像。**等正式 `0.1.0` 发布后、再发任何 beta 之前**，要改成预发布不再移动 `latest`——例如设 `flavor: latest=auto`（并删掉那行 raw `latest`），或用 `enable=${{ !contains(github.ref_name, '-') }}` 加条件。
+- **发布打标签——`latest` 处理（2026-06-17 随 `v0.1.0` 落地）**：`release.yml` 现用 `flavor: latest=auto`，只有非预发布的 semver tag（如 `v0.1.0`）才移动 `:latest`；预发布（`v0.1.0-betaN`）不再碰它。（在正式 `0.1.0` 之前，beta 刻意移动 `:latest`，好让跑 `:latest` 的生产能用上;这个例外在 `0.1.0` 发布的那一刻结束。）
 - **🟢 部署自测点**：跑一次备份/恢复演练；切换 EN/ZH UI 完整。
 
 ---
