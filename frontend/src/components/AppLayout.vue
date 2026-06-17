@@ -13,9 +13,10 @@
  *   - Clicking the hamburger opens an n-drawer (placement="left") that contains
  *     the same vertical n-menu.  Selecting a nav item closes the drawer.
  */
-import { computed, h, ref, watch, type Component } from 'vue'
+import { computed, h, onMounted, ref, watch, type Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useCompanyStore } from '../stores/company'
 import { useI18n } from 'vue-i18n'
 import { useSettingsPanel } from '../composables/useSettingsPanel'
 import { useLocale } from '../composables/useLocale'
@@ -43,10 +44,17 @@ import { NIcon, type MenuOption } from 'naive-ui'
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const companyStore = useCompanyStore()
 const { t } = useI18n()
 const { open } = useSettingsPanel()
 const { currentLocale, setLocale } = useLocale()
 const { isDesktop } = useBreakpoint()
+
+onMounted(() => {
+  if (!companyStore.company && !companyStore.loading) {
+    void companyStore.fetchCompany()
+  }
+})
 
 /** Controls the mobile drawer open/close state. */
 const drawerOpen = ref(false)
@@ -246,6 +254,11 @@ async function handleLogout() {
               </template>
               {{ currentLocale === 'en' ? '中文' : 'EN' }}
             </n-button>
+            <span
+              v-if="companyStore.company?.name"
+              class="topbar-company-name"
+              :title="companyStore.company.name"
+            >{{ companyStore.company.name }}</span>
             <n-tag v-if="auth.user" size="small" type="info">
               {{ auth.user.email }}
             </n-tag>
@@ -341,6 +354,18 @@ async function handleLogout() {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* ── Company name chip in top bar ── */
+.topbar-company-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 /* ── Content ── */
