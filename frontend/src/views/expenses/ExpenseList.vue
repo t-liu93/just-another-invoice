@@ -13,7 +13,7 @@ import { useExpensesStore } from '../../stores/expenses'
 import type { ExpenseListItem } from '../../stores/expenses'
 import { get } from '../../api/http'
 import type { components } from '../../api/schema'
-import { localDateStr } from '../../utils/date'
+import { localDateStr, formatDate } from '../../utils/date'
 
 type ExpenseCategoryRead = components['schemas']['ExpenseCategoryRead']
 type ExpenseCategoryListResponse = components['schemas']['ExpenseCategoryListResponse']
@@ -163,7 +163,7 @@ const columns = computed(() => [
     key: 'expense_date',
     width: 120,
     render(row: ExpenseListItem) {
-      return new Date(row.expense_date).toLocaleDateString()
+      return formatDate(row.expense_date)
     },
   },
   {

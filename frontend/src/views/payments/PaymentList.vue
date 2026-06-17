@@ -12,7 +12,7 @@ import { usePaymentsStore } from '../../stores/payments'
 import type { PaymentListItem } from '../../stores/payments'
 import { get } from '../../api/http'
 import type { components } from '../../api/schema'
-import { localDateStr } from '../../utils/date'
+import { localDateStr, formatDate } from '../../utils/date'
 
 type CustomerRead = components['schemas']['CustomerRead']
 type PaymentMethodRead = components['schemas']['PaymentMethodRead']
@@ -123,7 +123,7 @@ const columns = computed(() => [
     key: 'payment_date',
     width: 120,
     render(row: PaymentListItem) {
-      return new Date(row.payment_date).toLocaleDateString()
+      return formatDate(row.payment_date)
     },
   },
   {
@@ -167,7 +167,7 @@ const columns = computed(() => [
     key: 'created_at',
     width: 130,
     render(row: PaymentListItem) {
-      return new Date(row.created_at).toLocaleDateString()
+      return formatDate(row.created_at)
     },
   },
   {

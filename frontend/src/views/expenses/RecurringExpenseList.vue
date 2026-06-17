@@ -13,6 +13,7 @@ import { useRecurringExpensesStore } from '../../stores/recurringExpenses'
 import type { RecurringExpenseRead, RecurringExpenseInput } from '../../stores/recurringExpenses'
 import { get, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
+import { formatDate } from '../../utils/date'
 
 type PaidBy = components['schemas']['PaidBy']
 
@@ -277,7 +278,7 @@ const columns = computed(() => [
     key: 'next_run_date',
     width: 120,
     render(row: RecurringExpenseRead) {
-      return new Date(row.next_run_date).toLocaleDateString()
+      return formatDate(row.next_run_date)
     },
   },
   {

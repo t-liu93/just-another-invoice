@@ -14,6 +14,7 @@ import {
   NCard, NTag, NText, NSpin, NEmpty, NAlert, NSpace, NDivider,
 } from 'naive-ui'
 import { get } from '../api/http'
+import { formatDateTime } from '../utils/date'
 import type { components } from '../api/schema'
 
 type EmailLogRead = components['schemas']['EmailLogRead']
@@ -59,7 +60,7 @@ function statusType(status: string): 'success' | 'error' {
 }
 
 function fmtDate(dt: string): string {
-  return new Date(dt).toLocaleString()
+  return formatDateTime(dt)
 }
 </script>
 

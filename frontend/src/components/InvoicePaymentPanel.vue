@@ -29,7 +29,7 @@ import type { InvoicePaymentsResponse, PaymentRead } from '../stores/payments'
 import { get, downloadBlob } from '../api/http'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
 import type { components } from '../api/schema'
-import { localDateStr } from '../utils/date'
+import { localDateStr, formatDate } from '../utils/date'
 
 type PaymentMethodRead = components['schemas']['PaymentMethodRead']
 type PaymentMethodListResponse = components['schemas']['PaymentMethodListResponse']
@@ -363,7 +363,7 @@ function handleDelete(payment: PaymentRead) {
               <div class="payment-item-main">
                 <n-text strong>{{ fmtMoney(payment.amount) }}</n-text>
                 <n-text depth="3" style="margin-left: 8px; font-size: 13px">
-                  {{ new Date(payment.payment_date).toLocaleDateString() }}
+                  {{ formatDate(payment.payment_date) }}
                 </n-text>
                 <n-text v-if="payment.payment_method_name" depth="3" style="margin-left: 8px; font-size: 13px">
                   · {{ payment.payment_method_name }}

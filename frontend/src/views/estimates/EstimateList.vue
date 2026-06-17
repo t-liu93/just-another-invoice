@@ -13,6 +13,7 @@ import { useEstimatesStore } from '../../stores/estimates'
 import type { EstimateListItem } from '../../stores/estimates'
 import { get } from '../../api/http'
 import type { components } from '../../api/schema'
+import { formatDate } from '../../utils/date'
 
 type CustomerRead = components['schemas']['CustomerRead']
 
@@ -165,7 +166,7 @@ const columns = computed(() => [
     key: 'updated_at',
     width: 130,
     render(row: EstimateListItem) {
-      return new Date(row.updated_at).toLocaleDateString()
+      return formatDate(row.updated_at)
     },
   },
   {
