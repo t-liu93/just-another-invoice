@@ -1,10 +1,33 @@
+# Dev override — a fully isolated dev stack that can run *alongside* the
+# production stack (jai-app / jai-postgres) without colliding.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# How it stays out of production's way:
+#   - own Compose project ("jai-dev") → separate volume + network, so the dev
+#     database never shares production's data
+#   - "-dev" container names so they don't clash with the running prod containers
+#     (container names are global, which is why plain `up` collided on jai-postgres)
+#   - builds the image from source instead of pulling the published one
+#   - dev-only host ports: Postgres 5433, app 8000 (prod app is on 8891)
+#   - COOKIE_SECURE=false + localhost BASE_URL so login works over plain HTTP
+name: jai-dev
+
 services:
   db-migration:
+    container_name: jai-db-migration-dev
     build: .
 
   app:
+    container_name: jai-app-dev
     build: .
+    environment:
+      # Dev runs over plain HTTP on localhost — Secure cookies would never be
+      # sent, breaking login. Override the production HTTPS settings here.
+      COOKIE_SECURE: "false"
+      BASE_URL: http://localhost:8000
 
   postgres:
+    container_name: jai-postgres-dev
     ports:
       - "127.0.0.1:${POSTGRES_DEV_PORT:-5433}:5432"
