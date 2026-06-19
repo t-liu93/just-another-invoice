@@ -573,6 +573,7 @@ function handleDeleteGroup(i: number) {
                           :options="productOptions"
                           :placeholder="t('estimates.productSearch')"
                           size="small"
+                          :consistent-menu-width="false"
                           @search="searchProducts"
                           @update:value="(v: string | null) => handleProductSelect(i, v)"
                         />
