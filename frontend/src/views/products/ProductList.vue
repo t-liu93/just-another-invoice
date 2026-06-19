@@ -244,7 +244,7 @@ const columns = computed(() => [
   {
     title: t('products.name'),
     key: 'name',
-    ellipsis: true,
+    ellipsis: { tooltip: true },
   },
   {
     title: t('products.sku'),
@@ -255,7 +255,7 @@ const columns = computed(() => [
     },
   },
   {
-    title: t('products.category'),
+    title: t('products.categoryLabel'),
     key: 'category_id',
     ellipsis: true,
     render(row: { category_id: string | null }) {
@@ -274,6 +274,7 @@ const columns = computed(() => [
   {
     title: t('products.effectiveMargin'),
     key: 'effective_margin_rate',
+    width: 140,
     render(row: { effective_margin_rate: string | null }) {
       if (row.effective_margin_rate == null) return '—'
       return `${(Number(row.effective_margin_rate) * 100).toFixed(1)}%`

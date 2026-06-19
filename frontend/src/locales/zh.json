@@ -492,6 +492,7 @@
       "defaultMargin": "默认 Margin",
       "defaultMarginPlaceholder": "如：30"
     },
+    "categoryLabel": "类别",
     "categoryPlaceholder": "选择品类",
     "unit": "单位",
     "unitPlaceholder": "选择单位",

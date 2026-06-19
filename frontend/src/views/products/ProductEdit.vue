@@ -250,7 +250,7 @@ function handleDeleteCategory(id: string, _name: string) {
                   />
                 </n-form-item>
 
-                <n-form-item :label="t('products.category')">
+                <n-form-item :label="t('products.categoryLabel')">
                   <n-space align="center">
                     <n-select
                       v-model:value="categoryId"

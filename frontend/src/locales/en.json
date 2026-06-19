@@ -492,6 +492,7 @@
       "defaultMargin": "Default margin",
       "defaultMarginPlaceholder": "e.g. 30"
     },
+    "categoryLabel": "Category",
     "categoryPlaceholder": "Select category",
     "unit": "Unit",
     "unitPlaceholder": "Select unit",
