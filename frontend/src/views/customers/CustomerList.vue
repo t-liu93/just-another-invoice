@@ -91,12 +91,12 @@ const columns = computed(() => [
   {
     title: t('customers.name'),
     key: 'name',
-    ellipsis: true,
+    ellipsis: { tooltip: true },
   },
   {
     title: t('customers.companyName'),
     key: 'company_name',
-    ellipsis: true,
+    ellipsis: { tooltip: true },
   },
   {
     title: t('customers.email'),
