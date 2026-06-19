@@ -109,11 +109,6 @@ const columns = computed(() => [
     ellipsis: true,
   },
   {
-    title: t('customers.currency'),
-    key: 'currency',
-    minWidth: 130,
-  },
-  {
     title: t('customers.actions'),
     key: 'actions',
     width: 96,
