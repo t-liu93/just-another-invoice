@@ -8,6 +8,7 @@ Public API
 - ``get_estimate``                – fetch by id + company_id (returns None if not found)
 - ``list_estimates``              – filtered/paginated list with customer name JOIN
 - ``generate_quote_from_estimate`` – zero-leak estimate→quote projection (Step 3)
+- ``duplicate_estimate``          – copy estimate with groups/lines (snapshot-locked)
 
 Red-line compliance
 -------------------
@@ -39,7 +40,9 @@ from jai.models.quote import Quote
 from jai.models.vat import VatRate
 from jai.schemas.estimate import (
     EstimateCalculationRequest,
+    EstimateGroupInput,
     EstimateGroupRead,
+    EstimateLineInput,
     EstimateLineRead,
     EstimateListItem,
     EstimateListResponse,
@@ -624,3 +627,73 @@ async def generate_quote_from_estimate(
     await session.commit()
 
     return quote_read
+
+
+async def duplicate_estimate(
+    session: AsyncSession,
+    estimate_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> EstimateRead | None:
+    """Copy an estimate (groups + lines) and return the new EstimateRead.
+
+    Returns None if the estimate is not found or does not belong to this company
+    (caller converts to 404).
+
+    Snapshot-locked (red line 8): unit_cost_excl_vat / margin_rate are carried
+    over verbatim from the source lines; product catalogue prices are NOT
+    re-queried.  The generated_quote_id is NOT copied — the duplicate is a
+    fresh draft.
+    """
+    src = (
+        await session.execute(
+            select(Estimate).where(
+                Estimate.id == estimate_id,
+                Estimate.company_id == company_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if src is None:
+        return None
+
+    # Build group.id → new client-side ref mapping.
+    # Deterministic sort key (sort_order, id) mirrors generate_quote_from_estimate
+    # and the estimate read order, so the copy preserves group ordering.
+    group_id_to_ref: dict[uuid.UUID, str] = {}
+    group_inputs: list[EstimateGroupInput] = []
+    for i, g in enumerate(sorted(src.groups, key=lambda g: (g.sort_order, g.id))):
+        ref = f"g{i + 1}"
+        group_id_to_ref[g.id] = ref
+        group_inputs.append(
+            EstimateGroupInput(
+                ref=ref,
+                public_description=g.public_description,
+                vat_rate_id=g.vat_rate_id,
+                sort_order=i,
+            )
+        )
+
+    line_inputs: list[EstimateLineInput] = [
+        EstimateLineInput(
+            product_id=ln.product_id,
+            name=ln.name,
+            description=ln.description,
+            unit_cost_excl_vat=Decimal(str(ln.unit_cost_excl_vat)),
+            quantity=Decimal(str(ln.quantity)),
+            margin_rate=Decimal(str(ln.margin_rate)),
+            unit_id=ln.unit_id,
+            unit_name=ln.unit_name,
+            group_ref=group_id_to_ref.get(ln.group_id) if ln.group_id else None,
+        )
+        for ln in sorted(src.lines, key=lambda x: x.sort_order)
+    ]
+
+    body = EstimateWrite(
+        name=f"{src.name} (copy)",
+        customer_id=src.customer_id,
+        notes=src.notes,
+        groups=group_inputs,
+        lines=line_inputs,
+    )
+    # Delegate to create_estimate: validates FKs, recomputes costing, persists.
+    # generated_quote_id is not set on EstimateWrite → duplicate is always a fresh draft.
+    return await create_estimate(session, company_id, body)

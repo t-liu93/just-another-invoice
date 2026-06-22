@@ -1459,6 +1459,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/estimates/{estimate_id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicate Estimate Endpoint
+         * @description Duplicate an estimate (owner-only).
+         *
+         *     Creates a full copy of the estimate including groups and lines.
+         *     The copy's name has " (copy)" appended; generated_quote_id is not copied
+         *     (the duplicate is always a fresh draft).
+         */
+        post: operations["duplicate_estimate_endpoint_api_v1_estimates__estimate_id__duplicate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/estimates/{estimate_id}/generate-quote": {
         parameters: {
             query?: never;
@@ -9715,6 +9739,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    duplicate_estimate_endpoint_api_v1_estimates__estimate_id__duplicate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                estimate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateRead"];
+                };
             };
             /** @description Validation Error */
             422: {

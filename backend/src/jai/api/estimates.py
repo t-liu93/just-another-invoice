@@ -36,6 +36,7 @@ from jai.services.costing import compute_estimate
 from jai.services.estimate import (
     create_estimate,
     delete_estimate,
+    duplicate_estimate,
     generate_quote_from_estimate,
     get_estimate,
     list_estimates,
@@ -237,6 +238,34 @@ async def delete_estimate_endpoint(
     deleted = await delete_estimate(session, estimate_id=estimate_id, company_id=company_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estimate not found.")
+
+
+@router.post(
+    "/estimates/{estimate_id}/duplicate",
+    response_model=EstimateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_estimate_endpoint(
+    estimate_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EstimateRead:
+    """Duplicate an estimate (owner-only).
+
+    Creates a full copy of the estimate including groups and lines.
+    The copy's name has \" (copy)\" appended; generated_quote_id is not copied
+    (the duplicate is always a fresh draft).
+    """
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    result = await duplicate_estimate(
+        session, estimate_id=estimate_id, company_id=company_id
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Estimate not found."
+        )
+    return result
 
 
 @router.post(
