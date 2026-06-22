@@ -91,6 +91,10 @@ export const useEstimatesStore = defineStore('estimates', () => {
     return await post<QuoteRead>(`/api/v1/estimates/${estimateId}/generate-quote`, {})
   }
 
+  async function duplicateEstimate(id: string): Promise<EstimateRead> {
+    return await post<EstimateRead>(`/api/v1/estimates/${id}/duplicate`, {})
+  }
+
   return {
     items,
     total,
@@ -109,5 +113,6 @@ export const useEstimatesStore = defineStore('estimates', () => {
     deleteEstimate,
     calculatePreview,
     generateQuote,
+    duplicateEstimate,
   }
 })

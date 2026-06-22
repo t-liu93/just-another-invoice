@@ -7,7 +7,7 @@ import {
   NButton, NSpace, NInput, NDataTable, NAlert, NSpin,
   NPagination, NSelect, NTag, NText,
 } from 'naive-ui'
-import { AddOutline, SearchOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
+import { AddOutline, SearchOutline, CreateOutline, TrashOutline, CopyOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { useEstimatesStore } from '../../stores/estimates'
 import type { EstimateListItem } from '../../stores/estimates'
@@ -74,6 +74,16 @@ function handleCreate() {
 
 function handleEdit(id: string) {
   router.push(`/estimates/${id}/edit`)
+}
+
+async function handleDuplicate(id: string) {
+  try {
+    const dup = await store.duplicateEstimate(id)
+    message.success(t('estimates.duplicateSuccess'))
+    router.push(`/estimates/${dup.id}/edit`)
+  } catch {
+    message.error(t('estimates.duplicateFailed'))
+  }
 }
 
 function handleDelete(name: string, id: string) {
@@ -172,7 +182,7 @@ const columns = computed(() => [
   {
     title: t('estimates.actions'),
     key: 'actions',
-    width: 88,
+    width: 120,
     align: 'center' as const,
     render(row: EstimateListItem) {
       return h(NSpace, { size: 4, justify: 'center', wrapItem: false }, () => [
@@ -186,6 +196,17 @@ const columns = computed(() => [
             onClick: () => handleEdit(row.id),
           },
           () => h(NIcon, null, { default: () => h(CreateOutline) }),
+        ),
+        h(
+          NButton,
+          {
+            size: 'small',
+            quaternary: true,
+            circle: true,
+            title: t('estimates.duplicate'),
+            onClick: () => handleDuplicate(row.id),
+          },
+          () => h(NIcon, null, { default: () => h(CopyOutline) }),
         ),
         h(
           NButton,

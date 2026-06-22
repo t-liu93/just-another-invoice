@@ -76,6 +76,7 @@ const savedEstimateId = ref<string | null>(null)
 const pageLoading = ref(false)
 const saving = ref(false)
 const generating = ref(false)
+const duplicating = ref(false)
 const pageError = ref<string | null>(null)
 const generatedQuoteId = ref<string | null>(null)
 const generatedQuoteNumber = ref<string | null>(null)
@@ -388,6 +389,32 @@ async function handleGenerateQuote() {
   }
 }
 
+// ------------------------------------------------------------------ duplicate this estimate
+
+async function handleDuplicateThis() {
+  const groupErr = validateGroups()
+  if (groupErr) { message.error(groupErr); return }
+  const payload = buildWritePayload()
+  if (!payload) { message.error(t('estimates.nameRequired')); return }
+  duplicating.value = true
+  try {
+    let id = savedEstimateId.value
+    if (!id) {
+      const saved = await store.createEstimate(payload as Parameters<typeof store.createEstimate>[0])
+      id = saved.id
+    } else {
+      await store.updateEstimate(id, payload as Parameters<typeof store.updateEstimate>[1])
+    }
+    const dup = await store.duplicateEstimate(id)
+    message.success(t('estimates.duplicateSuccess'))
+    router.push(`/estimates/${dup.id}/edit`)
+  } catch (e: unknown) {
+    message.error(e instanceof ApiError ? e.message : t('estimates.duplicateFailed'))
+  } finally {
+    duplicating.value = false
+  }
+}
+
 // ------------------------------------------------------------------ load existing estimate
 
 function populateFromEstimate(est: EstimateRead) {
@@ -500,6 +527,14 @@ function handleDeleteGroup(i: number) {
                 >
                   {{ generatedQuoteNumber ? `${t('estimates.viewQuote')}: ${generatedQuoteNumber}` : t('estimates.viewQuote') }}
                 </n-tag>
+                <template v-if="isEdit && savedEstimateId">
+                  <n-button v-if="duplicating" :loading="true" disabled>
+                    {{ t('estimates.duplicateThis') }}
+                  </n-button>
+                  <n-button v-else @click="handleDuplicateThis">
+                    {{ t('estimates.duplicateThis') }}
+                  </n-button>
+                </template>
                 <n-button
                   type="success"
                   :loading="generating"
