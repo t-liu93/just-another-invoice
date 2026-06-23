@@ -131,6 +131,14 @@ async def _create_invoice(
     return resp.json()["id"]
 
 
+async def _issue_invoice(client: AsyncClient, invoice_id: str) -> None:
+    """Issue (DRAFT -> SENT) the invoice so its legal number is allocated."""
+    resp = await client.post(
+        f"/api/v1/invoices/{invoice_id}/status", json={"status": "SENT"}
+    )
+    assert resp.status_code == 200, resp.text
+
+
 # ---------------------------------------------------------------------------
 # Test: html_to_pdf produces a valid PDF
 # ---------------------------------------------------------------------------
@@ -164,6 +172,8 @@ async def test_invoice_pdf_download_endpoint(db_client: AsyncClient) -> None:
     refs = await _setup_company(db_client)
     customer_id = await _create_customer(db_client)
     invoice_id = await _create_invoice(db_client, customer_id, refs)
+    # A real legal PDF is of an issued (numbered) invoice; issue it first.
+    await _issue_invoice(db_client, invoice_id)
 
     resp = await db_client.get(f"/api/v1/invoices/{invoice_id}/pdf?locale=en")
     assert resp.status_code == 200, resp.text
@@ -179,6 +189,7 @@ async def test_invoice_pdf_zh_locale(db_client: AsyncClient) -> None:
     refs = await _setup_company(db_client)
     customer_id = await _create_customer(db_client, name="中文客户")
     invoice_id = await _create_invoice(db_client, customer_id, refs)
+    await _issue_invoice(db_client, invoice_id)
 
     resp = await db_client.get(f"/api/v1/invoices/{invoice_id}/pdf?locale=zh")
     assert resp.status_code == 200

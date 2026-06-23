@@ -4,7 +4,8 @@ Requires a running PostgreSQL instance (``pytest -m integration``).
 
 Test coverage:
 - Happy flow: create (LINE / DOCUMENT), list, get, update, delete
-- Number allocation: first invoice, jump sequence, delete doesn't recycle
+- Number allocation: deferred to DRAFT->SENT issue; create yields no number,
+  jump sequence, delete-draft leaves no gap
 - LINE mode: per-line taxes with correct amounts
 - DOCUMENT mode: single document tax entry
 - Incl-VAT: reverse calculation round-trip
@@ -156,6 +157,15 @@ def _invoice_payload(
     return payload
 
 
+async def _issue_invoice(client: AsyncClient, invoice_id: str) -> dict:
+    """Issue (DRAFT -> SENT) an invoice; the number is allocated on issue."""
+    resp = await client.post(
+        f"/api/v1/invoices/{invoice_id}/status", json={"status": "SENT"}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
 # ---------------------------------------------------------------------------
 # Happy flow: CRUD
 # ---------------------------------------------------------------------------
@@ -185,9 +195,16 @@ class TestInvoiceCRUDHappyFlow:
         assert inv["vat_total"] == "21.000"
         assert inv["total_incl_vat"] == "121.000"
         assert inv["due_amount"] == "121.000"
-        assert inv["invoice_number"].startswith("INV-")
+        # A fresh DRAFT carries no number; it is allocated only at issue.
+        assert inv["invoice_number"] is None
+        assert inv["sequence_number"] is None
         assert len(inv["lines"]) == 1
         assert len(inv["lines"][0]["line_taxes"]) == 1
+
+        # Issuing the invoice allocates the legal number.
+        issued = await _issue_invoice(db_client, inv["id"])
+        assert issued["invoice_number"].startswith("INV-")
+        assert issued["sequence_number"] == 1
 
         # Verify treatment snapshot
         snap = inv["vat_treatment_snapshot"]
@@ -232,7 +249,12 @@ class TestInvoiceCRUDHappyFlow:
         assert inv["taxes"][0]["vat_rate_percent"] == "21.000"
 
     async def test_update_invoice_preserves_number(self, db_client: AsyncClient) -> None:
-        """PUT /invoices/{id} must preserve invoice_number."""
+        """PUT /invoices/{id} must preserve the numbering fields verbatim.
+
+        Only DRAFT invoices are editable, and a DRAFT carries no number yet, so
+        the preserved value is None: editing a draft must never accidentally
+        allocate a number (that only happens at DRAFT -> SENT).
+        """
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
@@ -243,8 +265,9 @@ class TestInvoiceCRUDHappyFlow:
             "/api/v1/invoices",
             json=_invoice_payload(customer_id, rate_21),
         )
-        original_number = create_resp.json()["invoice_number"]
-        inv_id = create_resp.json()["id"]
+        created = create_resp.json()
+        assert created["invoice_number"] is None
+        inv_id = created["id"]
 
         update_resp = await db_client.put(
             f"/api/v1/invoices/{inv_id}",
@@ -260,7 +283,9 @@ class TestInvoiceCRUDHappyFlow:
         )
         assert update_resp.status_code == 200
         updated = update_resp.json()
-        assert updated["invoice_number"] == original_number
+        # Editing a draft must not allocate a number.
+        assert updated["invoice_number"] is None
+        assert updated["sequence_number"] is None
         assert updated["vat_total"] == "9.000"  # 100 * 9%
         assert updated["total_incl_vat"] == "109.000"
 
@@ -367,7 +392,9 @@ class TestInvoiceCRUDHappyFlow:
             "/api/v1/invoices",
             json=_invoice_payload(customer_id, rate_21),
         )
-        number = resp.json()["invoice_number"]
+        # Numbers are only allocated on issue; issue first, then search by it.
+        issued = await _issue_invoice(db_client, resp.json()["id"])
+        number = issued["invoice_number"]
 
         search_resp = await db_client.get(f"/api/v1/invoices?q={number}")
         assert search_resp.json()["total"] == 1
@@ -413,15 +440,15 @@ class TestInvoiceCRUDHappyFlow:
 
 
 # ---------------------------------------------------------------------------
-# Numbering: create assigns number; delete doesn't recycle
+# Numbering: deferred to issue (DRAFT->SENT); delete-draft leaves no gap
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 class TestInvoiceNumbering:
 
-    async def test_first_invoice_gets_default_number(self, db_client: AsyncClient) -> None:
-        """First invoice with default config gets INV-000001."""
+    async def test_create_yields_no_number(self, db_client: AsyncClient) -> None:
+        """A freshly created invoice (DRAFT) has no number/sequence yet."""
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
@@ -433,11 +460,33 @@ class TestInvoiceNumbering:
         )
         assert resp.status_code == 201
         inv = resp.json()
-        assert inv["invoice_number"] == "INV-000001"
-        assert inv["sequence_number"] == 1
+        assert inv["invoice_number"] is None
+        assert inv["sequence_number"] is None
 
-    async def test_sequential_numbering(self, db_client: AsyncClient) -> None:
-        """Second invoice gets INV-000002."""
+    async def test_first_invoice_gets_default_number_on_issue(
+        self, db_client: AsyncClient
+    ) -> None:
+        """Issuing the first invoice (default config) allocates INV-000001."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        resp = await db_client.post(
+            "/api/v1/invoices",
+            json=_invoice_payload(customer_id, rate_21),
+        )
+        assert resp.status_code == 201
+        issued = await _issue_invoice(db_client, resp.json()["id"])
+        assert issued["invoice_number"] == "INV-000001"
+        assert issued["sequence_number"] == 1
+
+        # The company sequence advanced by exactly 1 (next is now 2).
+        seq_resp = await db_client.get("/api/v1/settings/invoice-number-sequence")
+        assert seq_resp.json()["next_sequence"] == 2
+
+    async def test_sequential_numbering_on_issue(self, db_client: AsyncClient) -> None:
+        """Two issued invoices get consecutive numbers (no duplicate)."""
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
@@ -449,29 +498,90 @@ class TestInvoiceNumbering:
         resp2 = await db_client.post(
             "/api/v1/invoices", json=_invoice_payload(customer_id, rate_21)
         )
-        assert resp1.json()["invoice_number"] == "INV-000001"
-        assert resp2.json()["invoice_number"] == "INV-000002"
+        # Both are unnumbered drafts until issued.
+        assert resp1.json()["invoice_number"] is None
+        assert resp2.json()["invoice_number"] is None
 
-    async def test_delete_does_not_recycle_number(self, db_client: AsyncClient) -> None:
-        """Deleting INV-000001 then creating a new invoice gives INV-000002, not INV-000001."""
+        issued1 = await _issue_invoice(db_client, resp1.json()["id"])
+        issued2 = await _issue_invoice(db_client, resp2.json()["id"])
+        assert issued1["invoice_number"] == "INV-000001"
+        assert issued2["invoice_number"] == "INV-000002"
+        assert issued1["invoice_number"] != issued2["invoice_number"]
+
+    async def test_delete_draft_leaves_no_gap(self, db_client: AsyncClient) -> None:
+        """Core regression: deleting an unissued draft skips no number.
+
+        Create a draft (no number) → delete it → create another draft → issue
+        it. The issued invoice must receive INV-000001 (the very first number),
+        because the deleted draft never consumed the company sequence.
+        """
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
         rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        # Company sequence starts at 1 and has not moved.
+        seq_before = await db_client.get("/api/v1/settings/invoice-number-sequence")
+        assert seq_before.json()["next_sequence"] == 1
 
         resp1 = await db_client.post(
             "/api/v1/invoices", json=_invoice_payload(customer_id, rate_21)
         )
         inv1_id = resp1.json()["id"]
-        await db_client.delete(f"/api/v1/invoices/{inv1_id}")
+        assert resp1.json()["invoice_number"] is None
+        del_resp = await db_client.delete(f"/api/v1/invoices/{inv1_id}")
+        assert del_resp.status_code == 204
+
+        # The sequence has NOT advanced because of the deleted draft.
+        seq_after_delete = await db_client.get(
+            "/api/v1/settings/invoice-number-sequence"
+        )
+        assert seq_after_delete.json()["next_sequence"] == 1
 
         resp2 = await db_client.post(
             "/api/v1/invoices", json=_invoice_payload(customer_id, rate_21)
         )
-        assert resp2.json()["invoice_number"] == "INV-000002"
+        issued2 = await _issue_invoice(db_client, resp2.json()["id"])
+        # No gap inherited from the deleted draft: it gets the first number.
+        assert issued2["invoice_number"] == "INV-000001"
+        assert issued2["sequence_number"] == 1
+
+    async def test_reissue_allocates_number_only_once(
+        self, db_client: AsyncClient
+    ) -> None:
+        """DRAFT->CANCELLED->DRAFT->SENT allocates exactly one number.
+
+        An invoice issued after a cancel/reactivate cycle still consumes only a
+        single sequence value (idempotent on already-numbered invoices).
+        """
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        resp = await db_client.post(
+            "/api/v1/invoices", json=_invoice_payload(customer_id, rate_21)
+        )
+        inv_id = resp.json()["id"]
+
+        # DRAFT -> CANCELLED -> DRAFT (never numbered yet).
+        await db_client.post(
+            f"/api/v1/invoices/{inv_id}/status", json={"status": "CANCELLED"}
+        )
+        await db_client.post(
+            f"/api/v1/invoices/{inv_id}/status", json={"status": "DRAFT"}
+        )
+
+        issued = await _issue_invoice(db_client, inv_id)
+        assert issued["invoice_number"] == "INV-000001"
+        assert issued["sequence_number"] == 1
+
+        # Sequence advanced by exactly one (next is 2).
+        seq_resp = await db_client.get("/api/v1/settings/invoice-number-sequence")
+        assert seq_resp.json()["next_sequence"] == 2
 
     async def test_jump_sequence_with_settings(self, db_client: AsyncClient) -> None:
-        """Set start=100 → first invoice is INV-000100; jump to 200 → next is INV-000200."""
+        """Set start=100 → first issued invoice is INV-000100; jump→200 issues INV-000200."""
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
@@ -486,7 +596,8 @@ class TestInvoiceNumbering:
         resp1 = await db_client.post(
             "/api/v1/invoices", json=_invoice_payload(customer_id, rate_21)
         )
-        assert resp1.json()["invoice_number"] == "INV-000100"
+        issued1 = await _issue_invoice(db_client, resp1.json()["id"])
+        assert issued1["invoice_number"] == "INV-000100"
 
         # Jump to 200
         await db_client.put(
@@ -496,7 +607,8 @@ class TestInvoiceNumbering:
         resp2 = await db_client.post(
             "/api/v1/invoices", json=_invoice_payload(customer_id, rate_21)
         )
-        assert resp2.json()["invoice_number"] == "INV-000200"
+        issued2 = await _issue_invoice(db_client, resp2.json()["id"])
+        assert issued2["invoice_number"] == "INV-000200"
 
 
 # ---------------------------------------------------------------------------

@@ -2,12 +2,13 @@
 
 Public API
 ----------
-- ``create_invoice``          – allocate number, calculate, persist (within transaction)
+- ``create_invoice``          – calculate + persist an unnumbered DRAFT (within transaction)
 - ``update_invoice``          – recalculate + replace sub-tables (preserves number)
 - ``delete_invoice``          – DB cascade removes lines/taxes; number not recycled
 - ``get_invoice``             – fetch by id + company_id (returns None if not found)
 - ``list_invoices``           – filtered/paginated list
-- ``transition_status``       – M5 lifecycle state machine (DRAFT/SENT/CANCELLED)
+- ``transition_status``       – M5 lifecycle state machine; allocates the number
+                                on DRAFT -> SENT (issue time)
 - ``list_invoice_product_options`` – customer-safe product projection
 
 Red-line compliance
@@ -369,7 +370,9 @@ async def _build_and_persist_invoice(
     customer: Customer,
     treatment: VatTreatment,
     vat_rates: dict[uuid.UUID, tuple[str, Decimal]],
-    # For update: provide existing number; for create: None → allocate
+    # For update: provide the existing number (kept verbatim); for create:
+    # leave None — a DRAFT carries no number, which is allocated only at the
+    # DRAFT -> SENT issue transition (see ``transition_status``).
     invoice_number: str | None = None,
     sequence_number: int | None = None,
     customer_sequence_number: int | None = None,
@@ -377,9 +380,11 @@ async def _build_and_persist_invoice(
 ) -> Invoice:
     """Calculate pricing and persist a new or updated invoice.
 
-    For creates: invoice_number/sequence_number must be None; they are
-    allocated inside this function.
-    For updates: invoice_number/sequence_number must be provided (kept).
+    For creates: the invoice is persisted as a DRAFT with NO number
+    (``invoice_number``/``sequence_number``/``customer_sequence_number`` all
+    None).  The legal number is allocated later, at the DRAFT -> SENT
+    transition, so deleting an unissued draft leaves no gap in the sequence.
+    For updates: the caller passes the existing number, which is preserved.
     """
     request_currency = body.currency or company_currency
     if request_currency != company_currency:
@@ -410,20 +415,9 @@ async def _build_and_persist_invoice(
     if body.tax_mode == InvoiceTaxMode.DOCUMENT and calc.document_taxes:
         calc.document_taxes[0].vat_rate_id = body.document_vat_rate_id  # type: ignore[assignment]
 
-    # Allocate number (create only)
-    if invoice_number is None:
-        numbering_config = await _load_numbering_config(session, company_id)
-        invoice_number, sequence_number, customer_sequence_number = (
-            await allocate_invoice_number(
-                session,
-                company_id,
-                customer.id,
-                body.invoice_date,
-                numbering_config=numbering_config,
-                customer_invoice_prefix=customer.invoice_prefix,
-            )
-        )
-
+    # No number is allocated here.  Drafts are created unnumbered; the legal
+    # number is assigned at the DRAFT -> SENT issue transition (red line 4
+    # preserved: allocation stays row-locked + same-transaction, just later).
     total_incl_vat = quantize_to_minor_unit(calc.total_incl_vat)
 
     # Determine treatment effect string for snapshot
@@ -601,34 +595,19 @@ async def clone_quote_to_invoice(
 
     No pricing re-computation occurs.  All amounts, VAT rate labels/percentages,
     and the treatment snapshot are cloned directly from the quote's persisted
-    rows.  Only a fresh invoice number is allocated.
+    rows.  The new invoice is a DRAFT with NO number; the legal number is
+    allocated later, at the DRAFT -> SENT issue transition.
 
     The caller owns the ``session.commit()`` so that invoice creation and the
     quote's ``converted_invoice_id`` back-link update are atomic.
     """
-    # Need customer only for customer_invoice_prefix (invoice numbering).
-    cust_stmt = select(Customer).where(Customer.id == quote.customer_id)
-    cust_result = await session.execute(cust_stmt)
-    customer = cust_result.scalar_one()
-
-    numbering_config = await _load_numbering_config(session, company_id)
-    invoice_number, sequence_number, customer_sequence_number = (
-        await allocate_invoice_number(
-            session,
-            company_id,
-            customer.id,
-            date.today(),
-            numbering_config=numbering_config,
-            customer_invoice_prefix=customer.invoice_prefix,
-        )
-    )
-
     inv = Invoice()
     inv.company_id = company_id
     inv.customer_id = quote.customer_id
-    inv.invoice_number = invoice_number
-    inv.sequence_number = sequence_number
-    inv.customer_sequence_number = customer_sequence_number
+    # DRAFT carries no number; allocated at DRAFT -> SENT (see transition_status).
+    inv.invoice_number = None
+    inv.sequence_number = None
+    inv.customer_sequence_number = None
     inv.reference_number = quote.reference_number
     inv.invoice_date = date.today()
     inv.due_date = None
@@ -755,7 +734,11 @@ async def create_invoice(
     company_currency: str,
     creator_id: uuid.UUID | None,
 ) -> InvoiceRead:
-    """Create a new invoice: allocate number, calculate, persist."""
+    """Create a new invoice as an unnumbered DRAFT: calculate + persist.
+
+    No number is allocated at create; the legal number is assigned at the
+    DRAFT -> SENT issue transition (see ``transition_status``).
+    """
     # Validate customer belongs to this company
     cust_stmt = select(Customer).where(
         Customer.id == body.customer_id,
@@ -984,11 +967,18 @@ async def transition_status(
     """Transition invoice lifecycle status.
 
     M5 allowed transitions:
-    - DRAFT → SENT
+    - DRAFT → SENT  (allocates the legal invoice number on issue, if not yet set)
     - DRAFT → CANCELLED
     - CANCELLED → DRAFT  (reactivate a mistakenly-cancelled draft)
     SENT is a lock state: use a credit note (M9/M10) to reverse a sent invoice.
     COMPLETED cannot be set manually (M7 drives it via payments).
+
+    Numbering (red line 4): the invoice number is allocated here at the
+    DRAFT -> SENT issue transition (not at create), within this same
+    transaction and before commit, via the row-locked
+    ``allocate_invoice_number``.  Allocation is idempotent — an invoice that
+    already carries a number (e.g. re-issued after CANCELLED -> DRAFT) is never
+    re-numbered.
     """
     stmt = select(Invoice).where(
         Invoice.id == invoice_id,
@@ -1015,8 +1005,40 @@ async def transition_status(
             f"Allowed transitions: {', '.join(s.value for s in allowed) or 'none'}."
         )
 
-    inv.status = new_status
-    await session.commit()
+    # Allocate the legal number on issue (DRAFT -> SENT), only if not yet set.
+    needs_number = (
+        current_status == InvoiceStatus.DRAFT
+        and new_status == InvoiceStatus.SENT
+        and inv.invoice_number is None
+    )
+
+    try:
+        inv.status = new_status
+        if needs_number:
+            numbering_config = await _load_numbering_config(session, company_id)
+            cust_stmt = select(Customer).where(
+                Customer.id == inv.customer_id,
+                Customer.company_id == company_id,
+            )
+            cust_result = await session.execute(cust_stmt)
+            customer = cust_result.scalar_one()
+            (
+                inv.invoice_number,
+                inv.sequence_number,
+                inv.customer_sequence_number,
+            ) = await allocate_invoice_number(
+                session,
+                company_id,
+                inv.customer_id,
+                inv.invoice_date,
+                numbering_config=numbering_config,
+                customer_invoice_prefix=customer.invoice_prefix,
+            )
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ValueError("Invoice number already exists (concurrent issue).") from exc
+
     await session.refresh(inv)
     return _invoice_to_read(inv)
 

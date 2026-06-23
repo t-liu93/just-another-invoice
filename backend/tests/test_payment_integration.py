@@ -933,8 +933,10 @@ class TestListPayments:
         seeds = await _setup_company(client)
         customer_id = await _create_customer(client)
         rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
-        inv = await _create_invoice(client, customer_id, rate_21)
-        await _send_invoice(client, inv["id"])
+        created = await _create_invoice(client, customer_id, rate_21)
+        # The number is allocated on issue; use the SENT response so callers see
+        # the allocated invoice_number (the create response has it as None).
+        inv = await _send_invoice(client, created["id"])
 
         payment_ids: list[str] = []
         for i in range(num_payments):

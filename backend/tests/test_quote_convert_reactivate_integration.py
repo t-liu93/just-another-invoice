@@ -156,8 +156,17 @@ class TestConvertQuote:
 
         assert inv["status"] == "DRAFT"
         assert inv["paid_status"] == "UNPAID"
-        assert "invoice_number" in inv
-        assert inv["invoice_number"].startswith("INV-") or inv["invoice_number"]
+        # Converted invoice is an unnumbered DRAFT; the number is allocated only
+        # when it is issued (DRAFT -> SENT), not at conversion time.
+        assert inv["invoice_number"] is None
+        assert inv["sequence_number"] is None
+
+        issue_resp = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/status", json={"status": "SENT"}
+        )
+        assert issue_resp.status_code == 200, issue_resp.text
+        issued = issue_resp.json()
+        assert issued["invoice_number"].startswith("INV-")
 
     async def test_convert_from_expired_soft_expiry(self, db_client: AsyncClient) -> None:
         """EXPIRED quotes must be convertible (soft-expiry rule)."""
@@ -358,7 +367,11 @@ class TestConvertQuote:
         assert resp.status_code == 401
 
     async def test_convert_new_invoice_has_new_number(self, db_client: AsyncClient) -> None:
-        """Each Convert allocates a fresh invoice number, independent of quote number."""
+        """Issuing a converted invoice allocates a fresh invoice number.
+
+        The number is independent of the quote number and is allocated only at
+        the DRAFT -> SENT issue transition, not at conversion.
+        """
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
@@ -370,7 +383,16 @@ class TestConvertQuote:
         resp = await db_client.post(f"/api/v1/quotes/{q['id']}/convert")
         assert resp.status_code == 201
         inv = resp.json()
-        assert inv["invoice_number"] != q["quote_number"]
+        # Converted invoice is unnumbered until issued.
+        assert inv["invoice_number"] is None
+
+        issue_resp = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/status", json={"status": "SENT"}
+        )
+        assert issue_resp.status_code == 200, issue_resp.text
+        issued = issue_resp.json()
+        assert issued["invoice_number"] is not None
+        assert issued["invoice_number"] != q["quote_number"]
 
     async def test_convert_snapshot_not_affected_by_vat_rate_change(
         self, db_client: AsyncClient
