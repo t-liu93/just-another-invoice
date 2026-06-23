@@ -373,6 +373,59 @@ class TestPaymentGuards:
         assert resp2.status_code == 201, resp2.text
         assert resp2.json()["paid_status"] == "PARTIALLY_PAID"
 
+    async def test_get_payments_aggregate_on_unnumbered_draft_200(
+        self, db_client: AsyncClient
+    ) -> None:
+        """GET /invoices/{id}/payments on an unnumbered DRAFT → 200 (no 500).
+
+        The invoice editor opens the aggregate (read) endpoint every time it is
+        loaded, including for an unnumbered draft (numbering is deferred to the
+        DRAFT -> SENT issue transition).  The aggregate must tolerate the null
+        invoice_number: 200 with invoice_number=None, empty items, due_amount =
+        total_incl_vat, paid_status=UNPAID, status=DRAFT.  This is the core
+        regression of the "defer numbering to issue" walkthrough fix.
+
+        Also verifies the happy path after issuing: the aggregate then carries
+        the real number, and recorded payments show up in items.
+        """
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+
+        inv = await _create_invoice(db_client, customer_id, rate_21)  # total 121.000
+        # Still DRAFT → carries no invoice_number.
+        assert inv["invoice_number"] is None
+
+        # Core regression: the aggregate read endpoint must not 500 on a draft.
+        get_resp = await db_client.get(f"/api/v1/invoices/{inv['id']}/payments")
+        assert get_resp.status_code == 200, get_resp.text
+        data = get_resp.json()
+        assert data["invoice_number"] is None
+        assert data["items"] == []
+        assert data["paid_status"] == "UNPAID"
+        assert data["status"] == "DRAFT"
+        assert data["due_amount"] == data["total_incl_vat"] == "121.000"
+
+        # After issuing (DRAFT -> SENT) the aggregate carries the real number,
+        # and a recorded payment shows up in items.
+        issued = await _send_invoice(db_client, inv["id"])
+        assert issued["invoice_number"] is not None
+
+        rec = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-12", "amount": "50.000"},
+        )
+        assert rec.status_code == 201, rec.text
+
+        get_resp2 = await db_client.get(f"/api/v1/invoices/{inv['id']}/payments")
+        assert get_resp2.status_code == 200, get_resp2.text
+        data2 = get_resp2.json()
+        assert data2["invoice_number"] == issued["invoice_number"]
+        assert len(data2["items"]) == 1
+        assert data2["items"][0]["invoice_number"] == issued["invoice_number"]
+        assert data2["paid_status"] == "PARTIALLY_PAID"
+
     async def test_cancelled_invoice_422(self, db_client: AsyncClient) -> None:
         """Recording payment on a CANCELLED invoice → 422 (D7)."""
         await _full_auth(db_client)

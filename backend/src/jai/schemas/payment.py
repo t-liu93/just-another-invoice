@@ -73,10 +73,15 @@ class InvoicePaymentsResponse(BaseModel):
 
     Returned by POST/GET /api/v1/invoices/{id}/payments.
     ``items`` is ordered by (payment_date ASC, created_at ASC).
+
+    ``invoice_number`` is optional: the aggregate (read) endpoint is also called
+    for an unnumbered DRAFT (numbering is deferred to the DRAFT -> SENT issue
+    transition), in which case it is ``None`` and ``items`` is empty.  A single
+    payment, by contrast, only ever exists on an issued (numbered) invoice.
     """
 
     invoice_id: uuid.UUID
-    invoice_number: str
+    invoice_number: str | None = None
     total_incl_vat: Decimal
     base_total_incl_vat: Decimal
     paid_total: Decimal

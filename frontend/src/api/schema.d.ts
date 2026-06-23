@@ -4274,6 +4274,11 @@ export interface components {
          *
          *     Returned by POST/GET /api/v1/invoices/{id}/payments.
          *     ``items`` is ordered by (payment_date ASC, created_at ASC).
+         *
+         *     ``invoice_number`` is optional: the aggregate (read) endpoint is also called
+         *     for an unnumbered DRAFT (numbering is deferred to the DRAFT -> SENT issue
+         *     transition), in which case it is ``None`` and ``items`` is empty.  A single
+         *     payment, by contrast, only ever exists on an issued (numbered) invoice.
          */
         InvoicePaymentsResponse: {
             /**
@@ -4282,7 +4287,7 @@ export interface components {
              */
             invoice_id: string;
             /** Invoice Number */
-            invoice_number: string;
+            invoice_number?: string | null;
             /** Total Incl Vat */
             total_incl_vat: string;
             /** Base Total Incl Vat */

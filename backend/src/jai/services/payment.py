@@ -201,9 +201,14 @@ def _build_response(
     payments: list[Payment],
     state: PaymentState,
 ) -> InvoicePaymentsResponse:
-    # Payments only ever exist on an issued (numbered) invoice; an unnumbered
-    # draft is rejected before any payment is recorded (issue-gated guard, D8).
-    assert inv.invoice_number is not None
+    # The aggregate (read) endpoint is also called for an unnumbered DRAFT
+    # (numbering is deferred to the DRAFT -> SENT issue transition, D8): such a
+    # draft carries no invoice_number and never has any payments (recording one
+    # is rejected by the issue-gated guard).  ``items`` is therefore built only
+    # when the invoice is numbered; an unnumbered draft yields an empty list.
+    items: list[PaymentRead] = []
+    if inv.invoice_number is not None:
+        items = [_payment_to_read(p, inv.invoice_number) for p in payments]
     return InvoicePaymentsResponse(
         invoice_id=inv.id,
         invoice_number=inv.invoice_number,
@@ -215,7 +220,7 @@ def _build_response(
         base_due_amount=state.base_due_amount,
         paid_status=state.paid_status,
         status=state.new_status,
-        items=[_payment_to_read(p, inv.invoice_number) for p in payments],
+        items=items,
     )
 
 
