@@ -2,7 +2,7 @@
 <html lang="{{ locale }}">
 <head>
 <meta charset="utf-8">
-<title>{{ labels.invoice }} {{ invoice.invoice_number }}</title>
+<title>{{ labels.invoice }} {{ invoice.invoice_number or labels.draft }}</title>
 <style>
 {{ css | safe }}
 </style>
@@ -46,7 +46,7 @@
             <tbody>
             <tr>
                 <td class="label">{{ labels.invoice_number }}</td>
-                <td class="value">{{ invoice.invoice_number }}</td>
+                <td class="value">{{ invoice.invoice_number or labels.draft }}</td>
             </tr>
             {% if invoice.reference_number %}
             <tr>

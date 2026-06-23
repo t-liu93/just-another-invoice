@@ -155,6 +155,8 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "bank_details": "Bank Details",
         "terms": "Terms & Conditions",
         "warranty": "Warranty",
+        # Unnumbered draft placeholder (shown instead of a number on DRAFT invoices)
+        "draft": "Concept",
         # Quote-specific labels (M9 step 3)
         "quote": "Quote",
         "quote_number": "Quote #",
@@ -197,6 +199,8 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "bank_details": "银行信息",
         "terms": "条款与条件",
         "warranty": "质保说明",
+        # Unnumbered draft placeholder (shown instead of a number on DRAFT invoices)
+        "draft": "草稿",
         # Quote-specific labels (M9 step 3)
         "quote": "报价",
         "quote_number": "报价号",
@@ -446,7 +450,8 @@ async def render_invoice_pdf(
     3. Resolve document locale via ``resolve_document_locale`` (D2 chain).
     4. Inline logo as data URI from binary_asset.content (never a URL).
     5. Call build_invoice_html → html_to_pdf.
-    6. Return (pdf_bytes, "<invoice_number>.pdf").
+    6. Return (pdf_bytes, "<invoice_number>.pdf"); an unnumbered draft
+       (invoice_number is None) falls back to "concept.pdf".
 
     Parameters
     ----------
@@ -554,7 +559,8 @@ async def render_invoice_pdf(
     )
     pdf_bytes = html_to_pdf(html)
 
-    filename = f"{invoice.invoice_number}.pdf"
+    # Unnumbered drafts (invoice_number is None) get an ASCII-safe fallback name.
+    filename = f"{invoice.invoice_number}.pdf" if invoice.invoice_number else "concept.pdf"
     return pdf_bytes, filename
 
 
