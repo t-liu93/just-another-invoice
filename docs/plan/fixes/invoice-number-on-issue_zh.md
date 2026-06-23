@@ -93,7 +93,7 @@
 
 ## 验收结论（收尾时填）
 - **完成日期**：2026-06-23。
-- **实现（提交 / 模式）**：编排器模式，每步一个提交——步骤 1 `9863f74`（号码列改可空 + 迁移 0024 + schema 改可选 + codegen）/ 步骤 2 `a459f6e`（把分配延迟到 `DRAFT → SENT`）/ 步骤 3 `72706eb`（草稿 PDF = Concept / 草稿）/ 步骤 4 `af8820f`（邮件 / 收款开具门控守卫 + 前端 null 渲染）/ 步骤 5 = 本提交（API 级端到端回归 + 收尾）。
+- **实现（提交 / 模式）**：编排器模式，每步一个提交——步骤 1 `9863f74`（号码列改可空 + 迁移 0024 + schema 改可选 + codegen）/ 步骤 2 `a459f6e`（把分配延迟到 `DRAFT → SENT`）/ 步骤 3 `72706eb`（草稿 PDF = Concept / 草稿）/ 步骤 4 `af8820f`（邮件 / 收款开具门控守卫 + 前端 null 渲染）/ 步骤 5 `26c39f1`（API 级端到端回归 + 收尾）。**走查后修复** `0520c48` —— `fix(payment): tolerate unnumbered draft in invoice payments aggregate (no 500)`（人工走查时发现的回归；新增一条 integration 回归测试）。
 - **自动化**（`ruff` + `mypy --strict` + `pytest` + codegen 无漂移 + `npm run build`）：全绿。`ruff check .` 干净；`mypy --strict src` 干净（100 个源文件）；默认 `pytest -q` = 978 passed, 807 deselected；集成 `pytest -m integration -q` = 807 passed, 978 deselected；新增的 `test_invoice_number_on_issue_e2e.py` 添加 5 个端到端回归测试（均为 integration）。步骤 5 无契约变更（未触碰任何 Pydantic response 模型）⇒ `git diff -- frontend/src/api/schema.d.ts` 为空、零漂移；`frontend` `npm run build` 绿。
-- **验收（自测点是否通过）**：自动化已覆盖——「删草稿 → 下一张开具的发票无缺口」回归、未编号草稿在 GET / list 中的 null 渲染、报价转发票同样延迟编号、以及邮件 / 收款的开具门控守卫，全部经真实 HTTP 端点验证。UI 端的 Concept / 草稿 展示（列表 / 编辑器 / 预览 PDF）留待作者对照 🟢 部署自测点人工走查。
+- **验收（自测点是否通过）**：**2026-06-23 已完成人工走查——🟢 部署自测点全部通过**（列表 / 编辑器 / 预览 PDF 的 Concept / 草稿 展示;删草稿不跳号;报价转发票延迟编号;邮件 / 收款开具门控）。各点均有经真实 HTTP 端点的自动化测试兜底。走查中浮现一个回归，已在 `0520c48` 修复:发票付款聚合端点（`GET /invoices/{id}/payments`，每次打开发票详情都会调、草稿也调）对未编号草稿返回 HTTP 500——现已容忍草稿（`invoice_number` 为 null、`items` 为空）。另有一个表象——在 `localhost:8000` 普通刷新会加载到另一个应用 / 跳回登录——诊断为同一 dev origin 上**另一个项目残留的 Service Worker**（**非 jai 的 bug**:jai 不注册 SW、且 `index.html` 以 `no-cache` 提供）；注销该 SW / 清除浏览器站点数据即解决。
 - **已知遗留 / 顺延**：无。
