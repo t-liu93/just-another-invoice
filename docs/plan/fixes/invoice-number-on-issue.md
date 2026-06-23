@@ -92,8 +92,8 @@ A draft that was never issued has no legal existence and **should not consume a 
 - Run the BTW report over a period that contains a draft → the draft is **not** counted (unchanged behavior).
 
 ## Acceptance Conclusion (fill at closure)
-- Completion date:
-- Implementation (commits / mode):
-- Automation (`ruff` + `mypy --strict` + `pytest` + codegen no-drift + `npm run build`):
-- Acceptance (self-test points passed?):
-- Known carryover / deferred:
+- **Completion date**: 2026-06-23.
+- **Implementation (commits / mode)**: orchestrator mode, one commit per step — Step 1 `9863f74` (nullable number columns + migration 0024 + schema optional + codegen) / Step 2 `a459f6e` (defer allocation to `DRAFT → SENT`) / Step 3 `72706eb` (draft PDF = Concept / 草稿) / Step 4 `af8820f` (email / payment issue-gated guards + frontend null rendering) / Step 5 = this commit (API-level end-to-end regression + closure).
+- **Automation** (`ruff` + `mypy --strict` + `pytest` + codegen no-drift + `npm run build`): all green. `ruff check .` clean; `mypy --strict src` clean (100 source files); default `pytest -q` = 978 passed, 807 deselected; integration `pytest -m integration -q` = 807 passed, 978 deselected; the new `test_invoice_number_on_issue_e2e.py` adds 5 e2e regression tests (all integration). No contract change in Step 5 (no Pydantic response model touched) ⇒ `git diff -- frontend/src/api/schema.d.ts` empty, zero drift; `frontend` `npm run build` green.
+- **Acceptance (self-test points passed?)**: automated coverage in place — the "delete a draft → next issued invoice has no gap" regression, the unnumbered-draft null rendering in GET / list, the quote→invoice conversion deferring numbering, and the email / payment issue-gated guards are all exercised through real HTTP endpoints. The UI-side Concept / 草稿 display (list / editor / preview PDF) is left for the author's manual walkthrough against the 🟢 Deployment Self-Test Points.
+- **Known carryover / deferred**: none.
