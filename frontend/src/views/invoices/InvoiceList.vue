@@ -357,7 +357,7 @@ const columns = computed(() => [
             circle: true,
             type: 'error',
             title: t('invoices.delete'),
-            onClick: () => handleDelete(row.invoice_number, row.id),
+            onClick: () => handleDelete(row.invoice_number ?? '', row.id),
           },
           () => h(NIcon, null, { default: () => h(TrashOutline) }),
         )] : []),

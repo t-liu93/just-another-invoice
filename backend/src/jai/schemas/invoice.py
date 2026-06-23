@@ -299,8 +299,8 @@ class InvoiceRead(BaseModel):
     company_id: uuid.UUID
     customer_id: uuid.UUID
 
-    invoice_number: str
-    sequence_number: int
+    invoice_number: str | None = None
+    sequence_number: int | None = None
     customer_sequence_number: int | None = None
     unique_hash: str | None = None
     reference_number: str | None = None
@@ -365,7 +365,7 @@ class InvoiceListItem(BaseModel):
     company_id: uuid.UUID
     customer_id: uuid.UUID
     customer_name: str
-    invoice_number: str
+    invoice_number: str | None = None
     reference_number: str | None = None
     invoice_date: date
     due_date: date | None = None

@@ -201,6 +201,9 @@ def _build_response(
     payments: list[Payment],
     state: PaymentState,
 ) -> InvoicePaymentsResponse:
+    # Payments only ever exist on an issued (numbered) invoice; an unnumbered
+    # draft is rejected before any payment is recorded (issue-gated guard, D8).
+    assert inv.invoice_number is not None
     return InvoicePaymentsResponse(
         invoice_id=inv.id,
         invoice_number=inv.invoice_number,
@@ -368,6 +371,8 @@ async def get_payment(
     inv_stmt = select(Invoice.invoice_number).where(Invoice.id == p.invoice_id)
     inv_result = await session.execute(inv_stmt)
     invoice_number = inv_result.scalar_one()
+    # A payment only exists on an issued (numbered) invoice (issue-gated, D8).
+    assert invoice_number is not None
 
     return _payment_to_read(p, invoice_number)
 

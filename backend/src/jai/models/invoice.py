@@ -78,8 +78,13 @@ class Invoice(Base):
     )
 
     # -- Numbering (red-line 4) -----------------------------------------------
-    invoice_number: Mapped[str] = mapped_column(Text, nullable=False)
-    sequence_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Number/sequence are allocated at the DRAFT -> SENT (issue) transition,
+    # not at create. A DRAFT therefore carries no number: deleting it leaves no
+    # gap in the legal invoice sequence. NULLs are distinct in PG, so many
+    # unnumbered drafts coexist while ``uq_invoice_company_number`` still
+    # enforces uniqueness once a number exists.
+    invoice_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sequence_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     customer_sequence_number: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True
     )

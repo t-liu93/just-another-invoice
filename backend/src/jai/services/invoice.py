@@ -455,7 +455,7 @@ async def _build_and_persist_invoice(
         inv = Invoice()
         inv.company_id = company_id
         inv.invoice_number = invoice_number
-        inv.sequence_number = sequence_number  # type: ignore[assignment]
+        inv.sequence_number = sequence_number
         inv.customer_sequence_number = customer_sequence_number
         inv.status = InvoiceStatus.DRAFT
         inv.paid_status = InvoicePaidStatus.UNPAID

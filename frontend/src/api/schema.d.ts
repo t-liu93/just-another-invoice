@@ -4165,7 +4165,7 @@ export interface components {
             /** Customer Name */
             customer_name: string;
             /** Invoice Number */
-            invoice_number: string;
+            invoice_number?: string | null;
             /** Reference Number */
             reference_number?: string | null;
             /**
@@ -4324,9 +4324,9 @@ export interface components {
              */
             customer_id: string;
             /** Invoice Number */
-            invoice_number: string;
+            invoice_number?: string | null;
             /** Sequence Number */
-            sequence_number: number;
+            sequence_number?: number | null;
             /** Customer Sequence Number */
             customer_sequence_number?: number | null;
             /** Unique Hash */
