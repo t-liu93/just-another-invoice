@@ -343,6 +343,18 @@ async def send_invoice_email_endpoint(
             detail="Invoice not found.",
         )
 
+    # -- Issue-gated guard (D8) -----------------------------------------------
+    # An unnumbered DRAFT carries no legal invoice number; it must be issued
+    # (marked as Sent) before it can be emailed to the customer.
+    if invoice.invoice_number is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cannot email an unissued draft invoice; "
+                "issue it (mark as Sent) first."
+            ),
+        )
+
     # -- Load company ----------------------------------------------------------
     company_result = await session.execute(
         select(Company).where(Company.id == company_id)

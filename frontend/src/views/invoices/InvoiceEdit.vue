@@ -489,7 +489,7 @@ async function handleDownloadPdf(locale?: 'en' | 'zh') {
     const url = locale
       ? `/api/v1/invoices/${id}/pdf?locale=${locale}`
       : `/api/v1/invoices/${id}/pdf`
-    await downloadBlob(url, `${existingInvoice.value.invoice_number}.pdf`)
+    await downloadBlob(url, `${existingInvoice.value.invoice_number ?? 'concept'}.pdf`)
   } catch (e: unknown) {
     message.error(e instanceof Error ? e.message : t('pdf.downloadFailed'))
   } finally {
@@ -516,7 +516,7 @@ function openPreview(locale?: 'en' | 'zh') {
   previewSrc.value = locale
     ? `/api/v1/invoices/${id}/pdf?locale=${locale}`
     : `/api/v1/invoices/${id}/pdf`
-  previewFallback.value = `${existingInvoice.value.invoice_number}.pdf`
+  previewFallback.value = `${existingInvoice.value.invoice_number ?? 'concept'}.pdf`
   previewShow.value = true
 }
 
@@ -553,7 +553,7 @@ function handleSent(_log: EmailLogRead) {
             <div class="page-header">
               <h2>
                 {{ isEdit
-                  ? (existingInvoice ? existingInvoice.invoice_number : t('invoices.edit'))
+                  ? (existingInvoice ? (existingInvoice.invoice_number ?? t('invoices.concept')) : t('invoices.edit'))
                   : t('invoices.new') }}
               </h2>
               <n-space v-if="existingInvoice" align="center">

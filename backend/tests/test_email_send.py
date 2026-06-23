@@ -678,6 +678,20 @@ async def _create_invoice(
     return resp.json()["id"]
 
 
+async def _issue_invoice(client: AsyncClient, invoice_id: str) -> None:
+    """Issue a draft invoice (DRAFT -> SENT) so it receives a legal number.
+
+    Required before an invoice can be emailed (issue-gated guard, D8): an
+    unnumbered draft is rejected with a 400.
+    """
+    resp = await client.post(
+        f"/api/v1/invoices/{invoice_id}/status",
+        json={"status": "SENT"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["invoice_number"] is not None
+
+
 async def _create_quote(
     client: AsyncClient,
     customer_id: str,
@@ -726,6 +740,7 @@ class TestEmailSendIntegration:
         invoice_id = await _create_invoice(
             db_client, customer_id, vat["treatment_id"], vat["rate_id"]
         )
+        await _issue_invoice(db_client, invoice_id)
 
         # Mock SMTP so no real email is sent but the service sees a configured state.
         with (
@@ -799,6 +814,7 @@ class TestEmailSendIntegration:
         invoice_id = await _create_invoice(
             db_client, customer_id, vat["treatment_id"], vat["rate_id"]
         )
+        await _issue_invoice(db_client, invoice_id)
 
         async def _fail(*a: Any, **kw: Any) -> None:
             raise ConnectionError("Connection refused to SMTP")
@@ -833,6 +849,7 @@ class TestEmailSendIntegration:
         invoice_id = await _create_invoice(
             db_client, customer_id, vat["treatment_id"], vat["rate_id"]
         )
+        await _issue_invoice(db_client, invoice_id)
 
         with patch("jai.services.email._get_smtp_config", return_value=None):
             resp = await db_client.post(
@@ -903,6 +920,7 @@ class TestEmailSendIntegration:
         invoice_id = await _create_invoice(
             db_client, customer_id, vat["treatment_id"], vat["rate_id"]
         )
+        await _issue_invoice(db_client, invoice_id)
 
         with (
             patch("jai.services.email._get_smtp_config", return_value=_smtp()),
@@ -915,3 +933,50 @@ class TestEmailSendIntegration:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["locale"] == "zh"
+
+    @pytest.mark.asyncio
+    async def test_send_unissued_draft_invoice_returns_400(
+        self, db_client: AsyncClient
+    ) -> None:
+        """POST /invoices/{id}/send on an unnumbered DRAFT → 400 (issue-gated, D8).
+
+        The draft is rejected before any PDF render / SMTP attempt, and no
+        EmailLog row is written.  After issuing it (DRAFT -> SENT) the send
+        succeeds (happy-path regression).
+        """
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+        vat = await _setup_vat(db_client)
+        customer_id = await _create_customer(db_client)
+        invoice_id = await _create_invoice(
+            db_client, customer_id, vat["treatment_id"], vat["rate_id"]
+        )
+
+        # Draft (no number) → blocked, even with SMTP configured + mocked.
+        with (
+            patch("jai.services.email._get_smtp_config", return_value=_smtp()),
+            patch("jai.services.email._send_mail", new_callable=AsyncMock),
+        ):
+            resp = await db_client.post(
+                f"/api/v1/invoices/{invoice_id}/send",
+                json={"to": "customer@example.com"},
+            )
+        assert resp.status_code == 400, resp.text
+        assert "issue" in resp.json()["detail"].lower()
+
+        # No log row written for the rejected draft.
+        list_resp = await db_client.get(f"/api/v1/invoices/{invoice_id}/emails")
+        assert list_resp.json()["total"] == 0
+
+        # Issue it → send now works.
+        await _issue_invoice(db_client, invoice_id)
+        with (
+            patch("jai.services.email._get_smtp_config", return_value=_smtp()),
+            patch("jai.services.email._send_mail", new_callable=AsyncMock),
+        ):
+            resp2 = await db_client.post(
+                f"/api/v1/invoices/{invoice_id}/send",
+                json={"to": "customer@example.com"},
+            )
+        assert resp2.status_code == 200, resp2.text
+        assert resp2.json()["status"] == "SENT"

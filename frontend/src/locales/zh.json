@@ -560,6 +560,7 @@
     "sortByCreatedAt": "创建日期",
     "sortByNumber": "发票号",
     "invoiceNumber": "发票号",
+    "concept": "草稿",
     "invoiceDate": "日期",
     "dueDate": "到期日",
     "status": "状态",

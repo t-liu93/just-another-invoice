@@ -560,6 +560,7 @@
     "sortByCreatedAt": "Created date",
     "sortByNumber": "Number",
     "invoiceNumber": "Number",
+    "concept": "Concept",
     "invoiceDate": "Date",
     "dueDate": "Due date",
     "status": "Status",

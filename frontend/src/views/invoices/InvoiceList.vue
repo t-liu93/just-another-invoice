@@ -242,6 +242,9 @@ const columns = computed(() => [
     title: t('invoices.invoiceNumber'),
     key: 'invoice_number',
     width: 140,
+    render(row: InvoiceListItem) {
+      return row.invoice_number ?? t('invoices.concept')
+    },
   },
   {
     title: t('invoices.customer'),
@@ -357,7 +360,7 @@ const columns = computed(() => [
             circle: true,
             type: 'error',
             title: t('invoices.delete'),
-            onClick: () => handleDelete(row.invoice_number ?? '', row.id),
+            onClick: () => handleDelete(row.invoice_number ?? t('invoices.concept'), row.id),
           },
           () => h(NIcon, null, { default: () => h(TrashOutline) }),
         )] : []),

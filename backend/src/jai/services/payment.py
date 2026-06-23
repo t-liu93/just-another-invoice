@@ -242,6 +242,16 @@ async def record_payment(
     """
     inv = await _load_invoice(session, invoice_id, company_id)
 
+    # D8 (issue-gated guard): an unnumbered DRAFT has no legal invoice number;
+    # it must be issued (marked as Sent) before any payment can be recorded.
+    # This is the more specific "must be issued first" gate and runs ahead of
+    # the generic status guard below.
+    if inv.invoice_number is None:
+        raise ValueError(
+            "Cannot record a payment on an unissued draft invoice; "
+            "issue it (mark as Sent) first."
+        )
+
     # D7: Pre-condition guard – invoice must have been sent
     if inv.status not in (InvoiceStatus.SENT, InvoiceStatus.COMPLETED):
         raise ValueError(

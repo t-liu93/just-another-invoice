@@ -136,7 +136,7 @@ const columns = computed(() => [
           style: 'cursor:pointer; color: var(--n-primary-color)',
           onClick: () => router.push(`/invoices/${row.invoice_id}/edit`),
         },
-        () => row.invoice_number,
+        () => row.invoice_number ?? t('invoices.concept'),
       )
     },
   },

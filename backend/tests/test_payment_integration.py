@@ -341,20 +341,37 @@ class TestPaymentGuards:
         assert resp2.status_code == 422
 
     async def test_draft_invoice_422(self, db_client: AsyncClient) -> None:
-        """Recording payment on a DRAFT invoice → 422 (D7)."""
+        """Recording payment on an unnumbered DRAFT invoice → 422 (D8 issue-gated).
+
+        The draft has no legal number; the issue-gated guard rejects it with a
+        clear "issue it first" message.  After issuing it (DRAFT -> SENT) the
+        payment succeeds (happy-path regression).
+        """
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
         rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
 
         inv = await _create_invoice(db_client, customer_id, rate_21)
-        # Invoice is still DRAFT (not sent)
+        # Invoice is still DRAFT (not sent) → carries no invoice_number.
+        assert inv["invoice_number"] is None
 
         resp = await db_client.post(
             f"/api/v1/invoices/{inv['id']}/payments",
             json={"payment_date": "2026-06-12", "amount": "50.000"},
         )
         assert resp.status_code == 422
+        assert "issue" in resp.json()["detail"].lower()
+
+        # Issue it → now numbered → payment works.
+        issued = await _send_invoice(db_client, inv["id"])
+        assert issued["invoice_number"] is not None
+        resp2 = await db_client.post(
+            f"/api/v1/invoices/{inv['id']}/payments",
+            json={"payment_date": "2026-06-12", "amount": "50.000"},
+        )
+        assert resp2.status_code == 201, resp2.text
+        assert resp2.json()["paid_status"] == "PARTIALLY_PAID"
 
     async def test_cancelled_invoice_422(self, db_client: AsyncClient) -> None:
         """Recording payment on a CANCELLED invoice → 422 (D7)."""
