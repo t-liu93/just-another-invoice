@@ -258,6 +258,8 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 ## 4.y 路线图之外（vNext）· PDF 文档/抬头模板自定义（仅备忘，不在 M0–M11）
 
 > **状态**：作者 2026-06-14 M9 walkthrough 提出、明确**顺延**。M9 的 OUT「自定义 / 多套 PDF 模板 → 顺延（一套模板族 + CSS 接口）」在此细化。**现在不预留 schema**，将来都是 additive。
+>
+> **已提前落地一部分（2026-06-29）**：最小子集——公司 `legal_name` 字段 + 发票/报价/收据 PDF 每页页脚自动渲染一句「trade name of」声明——页脚开头由原本的商号替换为 `{trade} is a trade name of {legal}`（随 locale EN/ZH，仅在填了 `legal_name` 时出现；空白/纯空格视为未填）——已提前实现（迁移 0025、label `trade_name_disclosure`；orchestrator 单步实现，盲审零 finding）。**完整模板编辑器**（可自由调顺序的 `{{ }}` 占位符块）仍属 vNext，见下文。
 
 - **是什么**：把发票/报价 PDF 模板做成**设置里可编辑**，**仿 M9 的 email 模板**——纯文本 + `{{ }}` 占位符（如 `{{COMPANY_NAME}}` / `{{EMAIL}}` / `{{ADDRESS}}` / `{{LEGAL_NAME}}` …），且这些块的**位置 / 顺序可自由调整**。**主要针对抬头**（公司身份块），例如可选加一句「Trade name of <legal name>」，有时加、有时不加。
 - **已有可复用**：typed 设置 + 三层 locale 解析链 + 设置面板（齿轮可展开面板）+ 占位符引擎，都是 M9 email 模板那套现成基建（doc_type × locale）。
