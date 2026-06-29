@@ -26,7 +26,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-jai}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jai}
       POSTGRES_DB: ${POSTGRES_DB:-jai}
-      APP_VERSION: ${APP_VERSION:-0.2.0}
+      APP_VERSION: ${APP_VERSION:-0.2.1}
       # Cookies are HTTPS-only by default (production runs behind a TLS reverse
       # proxy).  Set COOKIE_SECURE=false in .env if you expose the app over
       # plain HTTP.
