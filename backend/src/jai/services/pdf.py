@@ -157,6 +157,8 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "warranty": "Warranty",
         # Unnumbered draft placeholder (shown instead of a number on DRAFT invoices)
         "draft": "Concept",
+        # Trade-name disclosure shown in the per-page footer when legal_name is set
+        "trade_name_disclosure": "{trade} is a trade name of {legal}",
         # Quote-specific labels (M9 step 3)
         "quote": "Quote",
         "quote_number": "Quote #",
@@ -201,6 +203,8 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "warranty": "质保说明",
         # Unnumbered draft placeholder (shown instead of a number on DRAFT invoices)
         "draft": "草稿",
+        # Trade-name disclosure shown in the per-page footer when legal_name is set
+        "trade_name_disclosure": "{trade} 是 {legal} 的商号名称",
         # Quote-specific labels (M9 step 3)
         "quote": "报价",
         "quote_number": "报价号",
@@ -225,6 +229,27 @@ _DEFAULT_LOCALE = "en"
 def _get_labels(locale: str) -> dict[str, str]:
     """Return the label dict for *locale*, falling back to English."""
     return PDF_LABELS.get(locale, PDF_LABELS[_DEFAULT_LOCALE])
+
+
+# ---------------------------------------------------------------------------
+# Trade-name disclosure helper (pure function, red-line 7 compliant)
+# ---------------------------------------------------------------------------
+
+
+def _legal_disclosure(company: Any, labels: dict[str, str]) -> str | None:
+    """Return the footer trade-name disclosure sentence, or None if unset.
+
+    When the company has a ``legal_name``, the per-page footer leads with this
+    sentence (``{trade} is a trade name of {legal}``) instead of the bare trade
+    name.  The sentence is assembled in Python with a controlled format string
+    and passed to the template as a plain ``{{ variable }}`` substitution (not
+    ``| safe``), so Jinja2 autoescape handles any HTML-special characters in
+    company.name / legal_name (red-line 7).
+    """
+    legal_name = getattr(company, "legal_name", None)
+    if not legal_name:
+        return None
+    return labels["trade_name_disclosure"].format(trade=company.name, legal=legal_name)
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +419,7 @@ def build_invoice_html(
     context: dict[str, Any] = {
         "locale": locale if locale in PDF_LABELS else _DEFAULT_LOCALE,
         "labels": labels,
+        "legal_disclosure": _legal_disclosure(company, labels),
         "invoice": invoice,
         "company": company,
         "customer": customer,
@@ -625,6 +651,7 @@ def build_quote_html(
     context: dict[str, Any] = {
         "locale": locale if locale in PDF_LABELS else _DEFAULT_LOCALE,
         "labels": labels,
+        "legal_disclosure": _legal_disclosure(company, labels),
         "quote": quote,
         "company": company,
         "customer": customer,
@@ -723,6 +750,7 @@ def build_payment_receipt_html(
     context: dict[str, Any] = {
         "locale": locale if locale in PDF_LABELS else _DEFAULT_LOCALE,
         "labels": labels,
+        "legal_disclosure": _legal_disclosure(company, labels),
         "payment": payment,
         "invoice": invoice,
         "company": company,

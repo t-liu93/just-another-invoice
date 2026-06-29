@@ -64,7 +64,7 @@
 
 <!-- ── Footer (running element – must appear before body content) ───────── -->
 <div class="doc-footer">
-    {{ company.name }}
+    {{ legal_disclosure or company.name }}
     {% if company.vat_id %} · {{ labels.vat_id }}: {{ company.vat_id }}{% endif %}
     {% if company.coc_number %} · {{ labels.coc }}: {{ company.coc_number }}{% endif %}
     {% if company.email %} · {{ company.email }}{% endif %}
@@ -187,7 +187,6 @@
         </tbody>
     </table>
 </div>
-
 
 </body>
 </html>

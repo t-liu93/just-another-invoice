@@ -37,6 +37,12 @@ class Company(Base):
 
     # -- Identity ---------------------------------------------------------------
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    legal_name: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        # Rendered as a trade-name disclosure line on documents when set.
+        comment="Registered legal name for trade-name disclosure.",
+    )
     vat_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     coc_number: Mapped[str | None] = mapped_column(Text, nullable=True)
 

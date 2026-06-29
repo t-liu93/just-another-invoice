@@ -2365,6 +2365,8 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /** Legal Name */
+            legal_name?: string | null;
             /** Vat Id */
             vat_id?: string | null;
             /** Coc Number */
@@ -2419,6 +2421,8 @@ export interface components {
             country_code?: string | null;
             /** Name */
             name: string;
+            /** Legal Name */
+            legal_name?: string | null;
             /** Vat Id */
             vat_id?: string | null;
             /** Coc Number */

@@ -117,6 +117,8 @@
       "title": "公司档案",
       "name": "公司名称",
       "namePlaceholder": "您的公司名称",
+      "legalName": "法定名称",
+      "legalNamePlaceholder": "注册法定名称（选填）",
       "vatId": "增值税号 (VAT)",
       "cocNumber": "商会注册号 (KvK)",
       "cocNumberPlaceholder": "12345678",

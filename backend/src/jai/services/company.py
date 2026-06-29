@@ -55,6 +55,7 @@ def company_to_read(company: Company) -> CompanyRead:
     return CompanyRead(
         id=company.id,
         name=company.name,
+        legal_name=company.legal_name,
         vat_id=company.vat_id,
         coc_number=company.coc_number,
         email=company.email,
@@ -78,6 +79,7 @@ def company_to_read(company: Company) -> CompanyRead:
 def _apply_write(company: Company, data: CompanyWrite) -> None:
     """Apply all ``CompanyWrite`` fields to a ``Company`` ORM instance."""
     company.name = data.name
+    company.legal_name = data.legal_name
     company.vat_id = data.vat_id
     company.coc_number = data.coc_number
     company.email = data.email
@@ -140,6 +142,7 @@ async def upsert_company(
     # First creation – insert + side-effects.
     company = Company(
         name=data.name,
+        legal_name=data.legal_name,
         vat_id=data.vat_id,
         coc_number=data.coc_number,
         email=data.email,

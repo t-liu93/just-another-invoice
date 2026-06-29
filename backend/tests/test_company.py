@@ -30,6 +30,7 @@ def _make_company_orm(**overrides: object) -> SimpleNamespace:
     defaults: dict[str, object] = {
         "id": uuid.uuid4(),
         "name": "Test Company",
+        "legal_name": None,
         "vat_id": None,
         "coc_number": None,
         "email": None,

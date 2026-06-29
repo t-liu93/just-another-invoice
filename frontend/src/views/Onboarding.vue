@@ -18,6 +18,7 @@ const step = ref<OnboardingStep>('company')
 
 // Company form fields
 const name = ref('')
+const legalName = ref('')
 const vatId = ref('')
 const cocNumber = ref('')
 const email = ref('')
@@ -38,6 +39,7 @@ async function handleSaveCompany() {
   try {
     await companyStore.saveCompany({
       name: name.value,
+      legal_name: legalName.value || null,
       vat_id: vatId.value || null,
       coc_number: cocNumber.value || null,
       email: email.value || null,
@@ -107,6 +109,10 @@ onMounted(() => {
         <n-form label-placement="left" label-width="140" @submit.prevent="handleSaveCompany">
           <n-form-item :label="t('onboarding.companyName')" required>
             <n-input v-model:value="name" :placeholder="t('onboarding.companyNamePlaceholder')" />
+          </n-form-item>
+
+          <n-form-item :label="t('settings.company.legalName')">
+            <n-input v-model:value="legalName" :placeholder="t('settings.company.legalNamePlaceholder')" />
           </n-form-item>
 
           <n-form-item :label="t('onboarding.vatId')">

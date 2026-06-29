@@ -47,6 +47,7 @@ class CompanyWrite(AddressFields):
     """
 
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    legal_name: str | None = None
     vat_id: str | None = None
     coc_number: str | None = None
     email: str | None = None
@@ -59,6 +60,15 @@ class CompanyWrite(AddressFields):
     def validate_base_currency(cls, v: str) -> str:
         return _validate_currency(v)
 
+    @field_validator("legal_name")
+    @classmethod
+    def normalise_legal_name(cls, v: str | None) -> str | None:
+        """Strip surrounding whitespace; return None if blank."""
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
+
 
 class CompanyRead(AddressFields):
     """Response body for ``GET /api/v1/company`` and ``PUT``.
@@ -69,6 +79,7 @@ class CompanyRead(AddressFields):
 
     id: uuid.UUID
     name: str
+    legal_name: str | None = None
     vat_id: str | None = None
     coc_number: str | None = None
     email: str | None = None

@@ -10,6 +10,7 @@ const { t } = useI18n()
 
 // Form fields
 const name = ref('')
+const legalName = ref('')
 const vatId = ref('')
 const cocNumber = ref('')
 const email = ref('')
@@ -73,6 +74,7 @@ onMounted(async () => {
     if (companyStore.company) {
       const c = companyStore.company
       name.value = c.name ?? ''
+      legalName.value = c.legal_name ?? ''
       vatId.value = c.vat_id ?? ''
       cocNumber.value = c.coc_number ?? ''
       email.value = c.email ?? ''
@@ -152,6 +154,7 @@ async function handleSave() {
   try {
     await companyStore.saveCompany({
       name: name.value,
+      legal_name: legalName.value || null,
       vat_id: vatId.value || null,
       coc_number: cocNumber.value || null,
       email: email.value || null,
@@ -403,6 +406,10 @@ async function handleSaveQuoteDefaultValidDays() {
               <n-form label-placement="left" label-width="140" :disabled="!!loadError" @submit.prevent="handleSave">
                 <n-form-item :label="t('settings.company.name')" required>
                   <n-input v-model:value="name" :placeholder="t('settings.company.namePlaceholder')" />
+                </n-form-item>
+
+                <n-form-item :label="t('settings.company.legalName')">
+                  <n-input v-model:value="legalName" :placeholder="t('settings.company.legalNamePlaceholder')" />
                 </n-form-item>
 
                 <n-form-item :label="t('settings.company.vatId')">

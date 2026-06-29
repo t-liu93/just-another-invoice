@@ -117,6 +117,8 @@
       "title": "Company Profile",
       "name": "Company name",
       "namePlaceholder": "Your business name",
+      "legalName": "Legal name",
+      "legalNamePlaceholder": "Registered legal name (optional)",
       "vatId": "VAT number",
       "cocNumber": "Chamber of Commerce (KvK)",
       "cocNumberPlaceholder": "12345678",
