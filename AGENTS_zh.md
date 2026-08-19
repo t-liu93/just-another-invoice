@@ -92,12 +92,13 @@
 
 ### 两种模式
 - **人工模式（默认）**：作者只让你实现某一步并输出实现简报 = 人工模式。**不自动 spawn 子 agent、不自动跑 review/fix 循环、不自动 commit**（commit 仍按「commit 节奏」的关键词授权）。**没有作者明确点名 orchestrator 模式，一律按此。**
-- **Orchestrator 模式（全自动）**：作者新开一个 Opus（Extra High Reasoning）对话，**你就是 orchestrator**，按下方循环自动驱动子 agent 跑完指定步骤 / 里程碑。**作者点名 orchestrator 模式本身 = 对本轮 commit（impl / fixup / per-step autosquash）的明确授权。**
+- **Orchestrator 模式（全自动）**：作者使用当前 agent harness 中能力最强的推理模型与配置新开一个对话，**你就是 orchestrator**，按下方循环自动驱动子 agent 跑完指定步骤 / 里程碑。**作者点名 orchestrator 模式本身 = 对本轮 commit（impl / fixup / per-step autosquash）的明确授权。**
 
-### 三类子 agent（模型默认值，提示词可覆盖）
-- **implementer / fixer**：同一类、逻辑一致；默认 **Sonnet + high reasoning**。
-- **reviewer**：默认 **Opus + extra high reasoning**。
-- 作者在提示词里显式指定别的模型 / reasoning 等级时，**以提示词为准**。
+### 基于角色选择模型（harness 原生，提示词可覆盖）
+- 下列模型名称只是**示例映射，不是跨厂商硬性要求**。每种 agent harness 应从自身实际支持的模型与 reasoning 等级中选择；示例不可用时，使用该 harness 中最接近的等价项。
+- **orchestrator / reviewer**：使用该 harness 中能力最强的推理模型，并采用相当于 extra-high 的 reasoning 等级。例如：Claude Code → **Opus + Extra High Reasoning**；OpenAI 系 harness → **`gpt-5.6-sol` + `xhigh`**。
+- **implementer / fixer**：同一类、逻辑一致；使用该 harness 中均衡型的编码模型，并根据任务复杂度采用 **medium 或 high reasoning**，不要求最高 reasoning 等级。例如：Claude Code → **Sonnet + Medium/High Reasoning**；OpenAI 系 harness → **`gpt-5.6-terra` + `medium`/`high`**。
+- 作者在提示词里显式指定别的模型 / reasoning 等级时，当前 harness 支持则**以提示词为准**；不支持时使用最接近的可用等价项。
 
 ### 逐步循环（orchestrator 模式 · 作者要求“一步一步实现”时）
 **做哪一步由 orchestrator 决定并逐步推进**（步骤 1 → 2 → …，一步一个 iteration）。每个原子步骤跑完整一轮再进下一步：

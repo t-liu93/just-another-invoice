@@ -92,12 +92,13 @@ A self-hosted **invoicing / personal-company management system**, for the author
 
 ### Two modes
 - **Manual mode (default)**: the author just asking you to implement a step and output an implementation brief = manual mode. **No auto-spawning sub-agents, no auto review/fix loop, no auto commit** (commits still per the "commit rhythm" keyword authorization). **Without the author explicitly naming orchestrator mode, always this.**
-- **Orchestrator mode (fully automated)**: the author opens a new Opus (Extra High Reasoning) conversation, **you are the orchestrator**, and you drive sub-agents through the specified steps / milestone per the loop below. **The author naming orchestrator mode is itself the explicit authorization for this round's commits (impl / fixup / per-step autosquash).**
+- **Orchestrator mode (fully automated)**: the author opens a fresh conversation using the active agent harness's highest-capability reasoning model and configuration, **you are the orchestrator**, and you drive sub-agents through the specified steps / milestone per the loop below. **The author naming orchestrator mode is itself the explicit authorization for this round's commits (impl / fixup / per-step autosquash).**
 
-### Three kinds of sub-agent (model defaults; prompt can override)
-- **implementer / fixer**: same kind, consistent logic; default **Sonnet + high reasoning**.
-- **reviewer**: default **Opus + extra high reasoning**.
-- When the author explicitly specifies a different model / reasoning level in the prompt, **the prompt wins**.
+### Role-based model selection (harness-native; prompt can override)
+- The model names below are **illustrative mappings, not cross-provider requirements**. Each agent harness selects from the models and reasoning levels it actually supports; if an example is unavailable, use the closest harness-native equivalent.
+- **orchestrator / reviewer**: use the harness's highest-capability reasoning model with its extra-high-equivalent reasoning level. Examples: Claude Code → **Opus + Extra High Reasoning**; OpenAI harnesses → **`gpt-5.6-sol` + `xhigh`**.
+- **implementer / fixer**: same kind, consistent logic; use the harness's balanced coding model with **medium or high reasoning**, chosen according to task complexity. The highest reasoning level is not required. Examples: Claude Code → **Sonnet + Medium/High Reasoning**; OpenAI harnesses → **`gpt-5.6-terra` + `medium`/`high`**.
+- When the author explicitly specifies a different model / reasoning level in the prompt, **the prompt wins** when supported; otherwise use the closest available equivalent.
 
 ### Per-step loop (orchestrator mode · when the author asks to "implement step by step")
 **Which step is decided by the orchestrator, advancing step by step** (step 1 → 2 → …, one step per iteration). Each atomic step runs a full round before moving to the next:
