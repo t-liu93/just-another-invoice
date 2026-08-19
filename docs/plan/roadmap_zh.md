@@ -2,7 +2,7 @@
 
 > 🌐 [English](roadmap.md) · **中文**
 
-> **这是什么**：把已拍板的 v1 范围（P0–P7）整理成一份**可施工的总览**——按「原子化、前后端可并行、每个里程碑完成即可部署自测」切成 **M0–M11**。
+> **这是什么**：把已拍板的 v1 范围（P0–P7）整理成一份**可施工的总览**——按「原子化、前后端可并行、每个里程碑完成即可部署自测」切成 **M0–M12**。
 >
 > **这不是什么**：不是逐行施工图。本文停在「里程碑 + 方法论 + 约束」这一层；每个里程碑的**原子步骤清单**在动手时才落到 `docs/plan/milestones/M<x>.md`（JIT 细化，模板见 `milestones/_TEMPLATE.md`）。
 >
@@ -109,10 +109,10 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 
 ---
 
-## 4. 里程碑地图 M0–M11（含后插的 M2.5 · 设置 UX 重构 / M6.5 · 成本核算）
+## 4. 里程碑地图 M0–M12（含后插的 M2.5 · 设置 UX 重构 / M6.5 · 成本核算 / M11 · 里程支出）
 
 > 依赖：**M0 → M1 → M2 →（M2.5）→ {M3, M4}**，然后分两条可并行的线 ——
-> ① **单据线**：M5 → M6 → **M6.5** → M7；② **开支线**：M8（只依赖 M2 本位币 + M4 字典，可选挂 M3 客户，**不依赖发票/报价/收款**）。两线汇合于 **M9 → M10 → M11**。
+> ① **单据线**：M5 → M6 → **M6.5** → M7；② **开支线**：M8（只依赖 M2 本位币 + M4 字典，可选挂 M3 客户，**不依赖发票/报价/收款**）。两线汇合于 M9 → M10，随后进入 **M11（私人交通工具商业里程）→ M12（收尾）**。
 > 可并行：M3‖M4；单据线‖开支线（即 M8 可与 M5/M6/M7 同时进行）。**M2.5 是纯前端 UX 修复，非阻塞**——挂在 M2 之后即可，与 M3/M4 并行做也行，不挡任何功能线。每格结尾的「🟢 部署自测点」是该里程碑的验收信号。
 
 ### M0 · 地基骨架（walking skeleton）｜对应 P0
@@ -230,18 +230,24 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **⚠️ 来自 M4 的待办（必做）**：M4 已建 `vat_treatment.report_box` 列但**留空**。本里程碑要把 `(treatment×rate)→BTW 格子` 的映射口径**对照荷兰税务局（Belastingdienst）官网、与作者逐条共定后**再填表落地——**不得由 agent 自作主张**。详见 `milestones/M4.md` 的「JIT review 已定」与记忆 `vat-model-two-axis`。
 - **🟢 部署自测点**：选一个季度，导出 VAT 汇总与 ICP；Dashboard 显示收入/支出/利润图。
 
-### M11 · 收尾 / GA 前体检｜对应 P7
+### M11 · 里程支出（私人交通工具商用）｜开支线扩展
+- **目标**：私人拥有或私人租用交通工具发生商业行程时，只填行程日期和单程公里数（可选往返），后端按生效日费率生成正确 Expense。
+- **关键内容**：Expense 页面增加 Purchase/Mileage tabs；公司级可编辑交通工具类型字典；通用按生效日费率 + 可选类型专属覆盖；2024/2025 €0.23、2026 €0.25 的可编辑种子；可选起止地址/目的/备注；后端 Decimal 距离×费率权威计算；Mileage 分类 + Expense 投影进入现有 P/L/Dashboard/Expense Report，VAT=€0；追溯费率修正必须先预览、再确认并留审计。已有 Expense 与 Travel 分类完全不动。详见 `milestones/M11_zh.md`（D1–D18，2026-08-19 冻结）。
+- **边界 / follow-on**：M11 只为私人交通工具生成申报；公司车辆走实际成本、留到后续，行程模型留 additive 扩展点。Google Places/Routes 地址联想与路线距离是后续可选 follow-on——M11 不发外部地图请求，手填公里数始终权威。
+- **🟢 部署自测点**：配置通用/类型专属费率；创建一条 2026 年汽车行程，单程 12.5 km + 往返，确认 25 km → €6.25；核对 Purchase/Mileage tabs 与现有报表；预览并确认一次追溯费率修正、查看审计；BTW 合计不变。
+
+### M12 · 收尾 / GA 前体检｜对应 P7
 - **目标**：可长期自托管。
 - **关键内容**：**备份脚本**（pg_dump + 卷快照）；i18n **EN/ZH 补全**；安全/性能打磨；文档（部署 README）。
-- **迁移基线化 —— 取消（2026-06-19 决定）**：原计划是在 1.0 上线*之前*把累积的 Alembic 迁移压成单一 baseline，其唯一前提是「彼时无生产数据（dev 库可随意重建）」。由于 **`v0.1.0` 已上线自用（2026-06-17）**，该窗口已关闭——生产库已有真实数据、`alembic_version` 停在当前 head，此时再 collapse 只会徒增对不上的风险、毫无收益。因此**全部累积迁移原样保留**（当前 24 个、线性单 head；全新空库首启时只是把整条链重放一遍，功能完全等价、启动开销可忽略）。今后**只做 additive 迁移**，与原文「上线后永不再压」的本意一致。
+- **迁移基线化 —— 取消（2026-06-19 决定）**：原计划是在 1.0 上线*之前*把累积的 Alembic 迁移压成单一 baseline，其唯一前提是「彼时无生产数据（dev 库可随意重建）」。由于 **`v0.1.0` 已上线自用（2026-06-17）**，该窗口已关闭——生产库已有真实数据、`alembic_version` 停在当前 head，此时再 collapse 只会徒增对不上的风险、毫无收益。因此**累积的线性迁移链原样保留**；全新空库首启时只是把整条链重放一遍（功能完全等价、启动开销可忽略）。今后**只做 additive 迁移**，与原文「上线后永不再压」的本意一致。
 - **发布打标签——`latest` 处理（2026-06-17 随 `v0.1.0` 落地）**：`release.yml` 现用 `flavor: latest=auto`，只有非预发布的 semver tag（如 `v0.1.0`）才移动 `:latest`；预发布（`v0.1.0-betaN`）不再碰它。（在正式 `0.1.0` 之前，beta 刻意移动 `:latest`，好让跑 `:latest` 的生产能用上;这个例外在 `0.1.0` 发布的那一刻结束。）
 - **🟢 部署自测点**：跑一次备份/恢复演练；切换 EN/ZH UI 完整。
 
 ---
 
-## 4.x 路线图之外（vNext）· 外部银行流水接入（仅备忘，不在 M0–M11）
+## 4.x 路线图之外（vNext）· 外部银行流水接入（仅备忘，不在 M0–M12）
 
-> **状态**：明确**不做**于当前 11 个里程碑；这里只留一笔备忘，方便日后重拾项目时心里有数。**现在不预留任何 DB schema**——将来要加列/加表都是 additive 迁移，旧数据不受影响，成本可接受，不必提前留位。
+> **状态**：明确**不做**于当前至 M12 的路线图；这里只留一笔备忘，方便日后重拾项目时心里有数。**现在不预留任何 DB schema**——将来要加列/加表都是 additive 迁移，旧数据不受影响，成本可接受，不必提前留位。
 
 - **是什么**：接一个**外部交易供应商**，通过 API 自动拉取合作银行的交易流水（transaction），省去手工录入。**provider 无关**：Plaid（YNAB 背后用的就是它）、GoCardless Bank Account Data（前身 Nordigen，EU 开放银行、AIS 免费）、Tink / TrueLayer… 都可，选型到时再定。
 - **两个用途**：
@@ -255,7 +261,7 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 
 ---
 
-## 4.y 路线图之外（vNext）· PDF 文档/抬头模板自定义（仅备忘，不在 M0–M11）
+## 4.y 路线图之外（vNext）· PDF 文档/抬头模板自定义（仅备忘，不在 M0–M12）
 
 > **状态**：作者 2026-06-14 M9 walkthrough 提出、明确**顺延**。M9 的 OUT「自定义 / 多套 PDF 模板 → 顺延（一套模板族 + CSS 接口）」在此细化。**现在不预留 schema**，将来都是 additive。
 >
@@ -266,7 +272,7 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **大头是安全（红线 7）**：用户输入进 PDF = XSS/SSRF 面，需沿用 / 加强清洗——参考 2026-06-14 修过的 `{{ css | safe }}` 字体转义与 SVG `<style>` 内联清洗两处坑；正文走「纯文本 + 显式占位符 + 转义」而非任意 HTML/CSS。外加模板编辑器 UI + 预览 + 无值回退内置默认。
 - **粒度**：按单据类型（invoice / quote）× 语言（EN / ZH）分别配，沿用 email 模板结构。
 
-## 4.z 路线图之外（vNext）· 客户地址自由文本块（仅备忘，不在 M0–M11）
+## 4.z 路线图之外（vNext）· 客户地址自由文本块（仅备忘，不在 M0–M12）
 
 > **状态**：作者 2026-06-14 M9 walkthrough 提出、明确**顺延**。
 
@@ -314,7 +320,7 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 docs/
   insight/btw-aangifte-2026-guide.md # 荷兰 VAT/BTW 申报口径（权威，税局官方说明的结构化指南）
   plan/
-    roadmap.md                       # 本文：总览 + 方法论 + 约束 + M0–M11
+    roadmap.md                       # 本文：总览 + 方法论 + 约束 + M0–M12
     milestones/
       _TEMPLATE.md                   # 里程碑细化模板
       M0.md, M1.md, ...              # 动手前 JIT 产出（原子步骤清单）
@@ -346,7 +352,8 @@ docs/
 | M8 | 开支（含 AI 填单 + AI 供货价单识别，可与单据线并行） | 🟢 完成（2026-06-14；orchestrator 5 步逐步盲审收敛 [expense+分存 / storage 收据 / 周期开支 / AI 票据填单 / 前端收尾]；末轮 walkthrough refinements 单列一轮压进同一收尾 commit [可抵扣随分类联动 / 收据 bind-mount uid1000 / AI 探针 64×64 / 注入当前日期 / 摘要写 note 跟随界面语言 / 选率自动算 VAT 后端端点 / 提示词「默认常驻+自定义追加」]；ruff/mypy/单测 599/集成/build/无漂移全绿；自测点 1–5 人工通过、7 集成覆盖、8 通过，6 周期性开支作者暂不用未走（不影响验收）、9 远端 CI 待确认。AI 走 OpenAI 兼容 Chat Completions（`httpx` 自构造、非 SDK；base_url/model/key/提示词 用户自填 + 多模态测试；PDF 用 pypdfium2 栅格化成图统一走 image_url）。**follow-on 未做**：AI 供货价单 → M4 目录） |
 | M8.5 | 开支记账字段补全（付款来源 / 业务% / 折旧年，对齐 NL 记账 Excel） | 🟢 完成（2026-06-14；orchestrator 2 步逐步盲审收敛，两步**零 finding / 零返工**；3 个**纯存储** additive 字段 [`paid_by` / `business_percentage` / `depreciation_years`]，`expense` + `recurring_expense` parity，迁移 0021 NOT NULL+server_default 自动回填；**不新增算钱**——当年摊销 / 可退 VAT 按年 / 季度 / BTW 全顺延 M10；ruff/mypy/单测 626[+27]/集成切片 79[+19]/build/无 codegen 漂移全绿；作者人工 walkthrough：后端/迁移/契约/周期 parity 通过，旧数据迁移回填因已删旧数据+未上线略过实测、walkthrough 发现的**前端展示问题统一留 GA 前前端翻新处理**；D1–D9 与作者逐列对照 Excel 共定） |
 | M9 | PDF（邮件底座在 M1） | 🟢 完成（2026-06-14；orchestrator 8 步逐步盲审收敛，步骤 1/4/5 各 1 轮返工[Content-Disposition RFC6266 filename / 收据标签键 / 集成缺建公司]、步骤 2/3/6/7 零 finding，每步一 commit；WeasyPrint+Jinja，发票/报价/收据 PDF 按 locale 下载[解析链 override>customer>company>en]、公司级可编辑邮件模板+占位符引擎、email_log 发送[附件+抄送, SENT/FAILED 脱敏]、迁移 0022 customer.locale / 0023 email_log、前端下载+发送对话框+Email log；ruff/mypy/默认 760/集成 785/build/i18n EN-ZH 对称 1001/docker build+镜像内中文 PDF 渲染 全绿。**作者人工 walkthrough 通过**，walkthrough 提出并已修[均 Opus 盲审无 finding、各自 commit]：① PDF 应用内预览[`0f75310`，同 commit 含发票/报价版式：删 Description 列+Item 加粗描述下挂+全 2 位小数 money2/pct+`css\|safe` 字体修复] ② SVG logo `<style>` 类内联清洗[`4cfd369`，class-styled logo 不再纯黑，**需重新上传 logo**] ③ 多页每页页脚[`b9090ae`]；改后默认 802/PDF 集成 138 全绿。**顺延**：完整 PDF 抬头模板自定义→§4.y、客户地址自由文本块→§4.z、公开链接/unique_hash、已读回执、收据邮件/多笔汇总收据、PDF 缓存/队列、NL 语言 PDF、VAT 报表→M10、渐变 SVG logo 不支持） |
-| M10 | 报表 / 仪表盘（含 VAT 申报） | 🟢 完成（2026-06-15；orchestrator 5 步逐步盲审收敛 [P/L → ⭐BTW 申报汇总 → ICP → 开支报表 → Dashboard]，每步一 commit `89ab353`→`273ed75`；ruff/mypy/单测 966+集成 788/codegen 无漂移/build/docker build 全绿。**税法决策 2026-06-15 与作者对照官方指南 `docs/insight/btw-aangifte-2026-guide.md`（Opus 通读 41 页）逐条共定冻结**：NL ruleset 按 `company.country_code` 选+其它国 fallback+banner、hoog/laag/zero 税率档位落盘默认 21/9/0、5b 全额抵+私用走 1d（年末按 business% 算）、5a/净应缴为辅助合计（官方只命名 5b、不标 5c）、EU 内采购=4b（非 art.23 进口）、非欧盟进口/境内反向征收/OSS/herziening/KOR 均 N/A v1、报表带免责声明。**作者导入 2026 Q1–Q2 数据人工 walkthrough 通过**，walkthrough 发现并已修 [均 Opus 盲审无 finding、各自 commit]：① Expense 日期选择器 off-by-one [`1a5a94a`] ② 对外单据抬头泄漏客户花名→派生 billing_name [`853f07c`] ③ P/L 月/季粒度换成 MTD/QTD/YTD 周期预设+高亮由区间派生 [`df2ba13`]。详见 `milestones/M10.md` 验收结论。**顺延**：多币种 ICP/3b 列分叉留 FX、Dashboard 死常量/未用键留 M11） |
-| M11 | 收尾 / GA 前体检 | ⬜ |
+| M10 | 报表 / 仪表盘（含 VAT 申报） | 🟢 完成（2026-06-15；orchestrator 5 步逐步盲审收敛 [P/L → ⭐BTW 申报汇总 → ICP → 开支报表 → Dashboard]，每步一 commit `89ab353`→`273ed75`；ruff/mypy/单测 966+集成 788/codegen 无漂移/build/docker build 全绿。**税法决策 2026-06-15 与作者对照官方指南 `docs/insight/btw-aangifte-2026-guide.md`（Opus 通读 41 页）逐条共定冻结**：NL ruleset 按 `company.country_code` 选+其它国 fallback+banner、hoog/laag/zero 税率档位落盘默认 21/9/0、5b 全额抵+私用走 1d（年末按 business% 算）、5a/净应缴为辅助合计（官方只命名 5b、不标 5c）、EU 内采购=4b（非 art.23 进口）、非欧盟进口/境内反向征收/OSS/herziening/KOR 均 N/A v1、报表带免责声明。**作者导入 2026 Q1–Q2 数据人工 walkthrough 通过**，walkthrough 发现并已修 [均 Opus 盲审无 finding、各自 commit]：① Expense 日期选择器 off-by-one [`1a5a94a`] ② 对外单据抬头泄漏客户花名→派生 billing_name [`853f07c`] ③ P/L 月/季粒度换成 MTD/QTD/YTD 周期预设+高亮由区间派生 [`df2ba13`]。详见 `milestones/M10.md` 验收结论。**顺延**：多币种 ICP/3b 列分叉留 FX、Dashboard 死常量/未用键留 M12） |
+| M11 | 里程支出（私人交通工具商用） | 🟡 进行中（2026-08-19 规划冻结；尚未实现；见 `milestones/M11_zh.md`） |
+| M12 | 收尾 / GA 前体检 | ⬜ |
 
 > 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）

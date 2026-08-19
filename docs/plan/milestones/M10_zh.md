@@ -35,7 +35,7 @@
   - **多国申报 ruleset（NL 以外）** → vNext。v1 只实现 NL ruleset，其它国家 fallback NL + banner（D-COUNTRY）。
   - **公司车私用 forfait（catalogusprijs 的固定 %）自动算** → 不做（官方 PDF 未给公式）；1d 只按 `business_percentage` 自动算，公司车定额私用作者手工调（D-1D）。
   - **现金口径 / 汇兑损益报表**（收款日汇率）→ 不做（v1 单一本位币 EUR，发票/开支 `exchange_rate=1`，base_* 即 EUR；多币种现金口径属 FX 后续）。
-  - **报表导出 PDF/CSV 文件** → 本里程碑只做**屏幕展示 + 可复制数字**；导出格式作为收尾或 M11 打磨（除非作者要求）。
+  - **报表导出 PDF/CSV 文件** → 本里程碑只做**屏幕展示 + 可复制数字**；导出格式作为收尾或 M12 打磨（除非作者要求）。
 
 - **对应文档**：`docs/insight/btw-aangifte-2026-guide.md`（BTW 申报口径权威）；roadmap M10、§2 红线 1/6/12；`M4.md`（report_box 留空的约定）、`M5.md`（发票 VAT 快照列）、`M8.5.md`（business%/折旧顺延本里程碑）。
 
@@ -224,5 +224,5 @@
   3. P/L 顶栏「月/季粒度」单选在单一周期区间时仍强制高亮，且缺 MTD/QTD/YTD——改为 本月/本季/本年 周期预设，高亮由当前区间派生（自定义区间不高亮），明细表固定按月（`df2ba13`）。
 - **已知遗留 / 顺延项**：
   - 多币种下 ICP（用 `base_taxable_amount`）与 BTW 3b（用 `taxable_amount`）会分叉；v1 `exchange_rate=1` 恒等，留 FX 落地后处理。
-  - Dashboard 死常量 `_MONTH_LABELS`、未用 i18n 键 `dashboard.loadError` 留 GA 前清理（M11）。
+  - Dashboard 死常量 `_MONTH_LABELS`、未用 i18n 键 `dashboard.loadError` 留 GA 前清理（M12）。
   - 第 5 章口径以 **D-BOX5** 为准（官方只命名 5b；5a/净应缴为辅助合计，不标 5c）——上文「部署自测点」段仍保留早期「5c」措辞为历史痕迹，实现以 D-BOX5 为准。

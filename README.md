@@ -85,7 +85,7 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-Milestones M0–M10 are complete (auth, settings, customers, catalog, invoices, quotes, costing, payments, expenses, PDF/email, reporting + Dutch BTW return). M11 (self-hosting polish: backups, i18n completion, docs) is pending. See [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
+Milestones M0–M10 are complete (auth, settings, customers, catalog, invoices, quotes, costing, payments, expenses, PDF/email, reporting + Dutch BTW return). M11 (private-transport business mileage expenses) is planned and pending implementation; M12 is the subsequent self-hosting wrap-up (backups, i18n completion, docs). See [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
 
 ## Documentation
 

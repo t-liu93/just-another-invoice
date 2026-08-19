@@ -21,7 +21,7 @@
   - **storage 抽象（M8 已立）**：`services/storage.py` 的 `Storage`/`LocalStorage`。**M9 PDF 即时渲染、不落盘**（见〔已冻结决策〕D5），故 storage 仍只服务 M8 收据；M9 不写 storage，但其抽象保持可复用（将来 PDF 缓存接此口）。
   - `invoice.unique_hash` / `quote` 同名列：M5/M6 已留注释「Reserved for M9 public link」——**v1 不启用公开链接**，本里程碑只保留字段、不写入、不暴露。
   - **下游 M10**：VAT 申报 / 报表是另一条线，M9 不碰。
-  - **下游 M11**：收尾会校验 PDF 的 EN/ZH 完整性 + 备份。
+  - **下游 M12**：收尾会校验 PDF 的 EN/ZH 完整性 + 备份（M11 现为后插的里程支出里程碑）。
 
 ---
 
@@ -195,7 +195,7 @@
 - **盲审要点**：前端不本地拼最终金额/不本地渲染 PDF（附件来自后端）；语言默认= 后端解析链；下载用 blob + 后端给的 filename；对话框可改主题/正文但默认来自后端模板。
 
 ### 步骤 8 · 收尾：i18n EN/ZH + UX + 部署自测点 + 里程碑报告
-- PDF 标签表 EN/ZH 全；内置邮件默认模板 EN/ZH 全；前端新增文案 EN/ZH 全（红线：M11 会复查完整性，这里先补齐）。
+- PDF 标签表 EN/ZH 全；内置邮件默认模板 EN/ZH 全；前端新增文案 EN/ZH 全（红线：M12 会复查完整性，这里先补齐）。
 - UX 打磨（下载/发送 loading 与错误提示；注意母版 prod 坑 `vue-loading-prop-vif-prod-bug`：动态 `:loading` 别放 v-if 片段里）。
 - 走〔🟢 部署自测点〕全量；出 `review-notes/M9-report.md`（里程碑级实现报告 + 完整人工 walkthrough）。
 

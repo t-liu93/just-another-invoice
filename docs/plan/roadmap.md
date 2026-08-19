@@ -2,7 +2,7 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) — sliced into **M0–M11** following the principles of atomicity, frontend/backend parallelism, and deployable verification at the end of every milestone.
+> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) — sliced into **M0–M12** following the principles of atomicity, frontend/backend parallelism, and deployable verification at the end of every milestone.
 >
 > **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
 >
@@ -109,10 +109,10 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4. Milestone Map M0–M11 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting)
+## 4. Milestone Map M0–M12 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11 · Mileage expenses)
 
 > Dependencies: **M0 → M1 → M2 → (M2.5) → {M3, M4}**, then two parallelisable tracks:
-> ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at **M9 → M10 → M11**.
+> ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at M9 → M10, then continue through **M11 (private-transport business mileage) → M12 (wrap-up)**.
 > Parallelisable: M3‖M4; document track‖expense track (M8 can run alongside M5/M6/M7). **M2.5 is a pure frontend UX fix, non-blocking** — it slots after M2 and can run in parallel with M3/M4; it blocks nothing. The "🟢 deployment smoke test" at the end of each entry is that milestone's acceptance signal.
 
 ### M0 · Foundation skeleton (walking skeleton) | corresponds to P0
@@ -230,18 +230,24 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **⚠️ Outstanding item from M4 (mandatory)**: M4 created the `vat_treatment.report_box` column but **left it empty**. This milestone must **jointly confirm with the author** the `(treatment × rate) → BTW box` mapping against the official Belastingdienst website before populating it — **agents must not act unilaterally**. See `milestones/M4.md` "JIT review confirmed" and memory `vat-model-two-axis`.
 - **🟢 Deployment smoke test**: Select a quarter, export VAT summary and ICP; Dashboard displays revenue/expense/profit charts.
 
-### M11 · Wrap-up / pre-GA health check | corresponds to P7
+### M11 · Mileage expenses (private transport used for business) | expense-track extension
+- **Goal**: Record privately owned or privately rented transport used for business by entering the trip date and one-way kilometres (optionally return), with the backend creating the correct Expense from an effective-dated rate.
+- **Key content**: Expense page gains Purchase/Mileage tabs; company-editable transport-type dictionary; general effective-dated mileage rates with optional per-type overrides; 2024/2025 €0.23 and 2026 €0.25 editable seeds; optional origin/destination/purpose/note; backend-only Decimal distance×rate calculation; Mileage category + Expense projection into existing P/L/Dashboard/Expense Report with €0 VAT; explicit preview/confirm/audit for retrospective rate corrections. Existing expenses and Travel category remain untouched. See `milestones/M11.md` (D1–D18 frozen 2026-08-19).
+- **Boundary / follow-on**: M11 only creates claims for private transport. Company vehicles use actual-cost accounting and are deferred; the trip model leaves an additive extension point. Google Places/Routes address autocomplete and route distance are a later optional follow-on—M11 performs no external map calls and manual kilometres remain authoritative.
+- **🟢 Deployment smoke test**: Configure general/type-specific rates; create a 12.5 km one-way return Car trip dated in 2026 and see 25 km → €6.25; verify Purchase/Mileage tabs and existing reports; preview then confirm one retrospective rate correction and inspect its audit record; BTW totals remain unchanged.
+
+### M12 · Wrap-up / pre-GA health check | corresponds to P7
 - **Goal**: Ready for long-term self-hosting.
 - **Key content**: **Backup scripts** (pg_dump + volume snapshot); i18n **EN/ZH completion**; security/performance polish; documentation (deployment README).
-- **Migration baselining — DROPPED (decided 2026-06-19)**: The original plan was to collapse the accumulated Alembic migrations into a single baseline *before* the 1.0 launch, whose sole precondition was "no production data yet (dev DB can be freely rebuilt)". Since **`v0.1.0` already went live for self-use (2026-06-17)**, that window is closed — the production DB carries real data and its `alembic_version` sits at the current head, so collapsing would only risk a mismatch for no gain. We therefore **keep all accumulated migrations as-is** (currently 24, linear single head; a fresh DB simply replays the full chain on first boot — functionally identical, negligible startup cost). From here on, **additive migrations only**, exactly as the original "never collapse after launch" rule already intended.
+- **Migration baselining — DROPPED (decided 2026-06-19)**: The original plan was to collapse the accumulated Alembic migrations into a single baseline *before* the 1.0 launch, whose sole precondition was "no production data yet (dev DB can be freely rebuilt)". Since **`v0.1.0` already went live for self-use (2026-06-17)**, that window is closed — the production DB carries real data and its `alembic_version` sits at the current head, so collapsing would only risk a mismatch for no gain. We therefore **keep the accumulated linear migration chain as-is**; a fresh DB simply replays it on first boot (functionally identical, negligible startup cost). From here on, **additive migrations only**, exactly as the original "never collapse after launch" rule already intended.
 - **Release tagging — `latest` handling (done 2026-06-17, with `v0.1.0`)**: `release.yml` now uses `flavor: latest=auto`, so only non-prerelease semver tags (e.g. `v0.1.0`) move `:latest`; prereleases (`v0.1.0-betaN`) never touch it. (Before the stable `0.1.0`, betas intentionally moved `:latest` so production running the `:latest` image could pick them up; that exception ended the moment `0.1.0` shipped.)
 - **🟢 Deployment smoke test**: Run a full backup/restore drill; switch between EN/ZH UI completely.
 
 ---
 
-## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M11)
+## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M12)
 
-> **Status**: Explicitly **not doing** in the current 11 milestones; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
+> **Status**: Explicitly **not doing** in the current roadmap through M12; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
 
 - **What it is**: Connect an **external transaction provider** and automatically pull transaction feeds from partner banks via API, eliminating manual entry. **Provider-agnostic**: Plaid (used behind YNAB), GoCardless Bank Account Data (formerly Nordigen, EU open banking, AIS free tier), Tink / TrueLayer, etc. — selection deferred.
 - **Two use cases**:
@@ -255,7 +261,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M11)
+## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M12)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**. Elaborates on M9's OUT item "custom / multiple PDF template sets → deferred (one template family + CSS interface)". **No schema reserved now** — everything will be additive.
 >
@@ -266,7 +272,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **The big concern is security (guardrail 7)**: User input entering PDF = XSS/SSRF surface; reuse / strengthen sanitisation — reference the two bugs fixed 2026-06-14: `{{ css | safe }}` font escaping and SVG `<style>` inline class sanitisation; body uses "plain text + explicit placeholders + escaping" rather than arbitrary HTML/CSS. Plus template editor UI + preview + built-in defaults when values are absent.
 - **Granularity**: Configured per document type (invoice / quote) × language (EN / ZH), following the email template structure.
 
-## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M11)
+## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M12)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**.
 
@@ -314,7 +320,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 docs/
   insight/btw-aangifte-2026-guide.md # Dutch VAT/BTW filing conventions (authoritative, structured guide to official Tax Authority instructions)
   plan/
-    roadmap.md                       # This document: overview + methodology + constraints + M0–M11
+    roadmap.md                       # This document: overview + methodology + constraints + M0–M12
     milestones/
       _TEMPLATE.md                   # Milestone refinement template
       M0.md, M1.md, ...              # Produced JIT before starting work (atomic step lists)
@@ -346,7 +352,8 @@ docs/
 | M8 | Expenses (incl. AI receipt fill + AI supplier price list recognition, parallelisable with document track) | 🟢 Done (2026-06-14; orchestrator 5 steps blind-reviewed converged [expense+split storage / storage receipts / recurring expenses / AI receipt fill / frontend wrap-up]; final walkthrough refinements collapsed into one wrap-up commit [deductible follows category / receipt bind-mount uid1000 / AI probe 64×64 / inject current date / summary written to note follows UI language / auto-compute VAT backend endpoint / prompt "permanent default + custom append"]; ruff/mypy/unit tests 599/integration/build/no drift all green; smoke tests 1–5 manual pass, 7 integration covered, 8 passed, 6 recurring expense author not using yet (does not affect acceptance), 9 remote CI pending confirmation. AI uses OpenAI-compatible Chat Completions (`httpx` hand-built, no SDK; base_url/model/key/prompt user-configured + multimodal test; PDF rasterised via pypdfium2 to image for unified image_url). **Follow-on not done**: AI supplier price list → M4 catalogue) |
 | M8.5 | Expense bookkeeping fields (payment source / business% / depreciation years, aligned with NL bookkeeping Excel) | 🟢 Done (2026-06-14; orchestrator 2 steps blind-reviewed converged, both steps **zero findings / zero rework**; 3 **record-only** additive fields [`paid_by` / `business_percentage` / `depreciation_years`], `expense` + `recurring_expense` parity, migration 0021 NOT NULL+server_default auto-backfill; **no new money logic** — current-year amortisation / deductible VAT by year / quarterly / BTW all deferred to M10; ruff/mypy/unit tests 626[+27]/integration slice 79[+19]/build/no codegen drift all green; author manual walkthrough: backend/migration/contract/recurring parity passed, old data migration backfill skipped due to deleted data+not yet live, **frontend display issues found in walkthrough unified under pre-GA frontend refresh**; D1–D9 jointly confirmed against author's Excel column by column) |
 | M9 | PDF (email foundation in M1) | 🟢 Done (2026-06-14; orchestrator 8 steps blind-reviewed converged; steps 1/4/5 each 1 rework round [Content-Disposition RFC6266 filename / receipt label key / integration missing company setup], steps 2/3/6/7 zero findings, one commit per step; WeasyPrint+Jinja, invoice/quote/receipt PDF by locale download [resolution chain override>customer>company>en], company-editable email templates+placeholder engine, email_log sending [attachment+cc, SENT/FAILED redacted], migrations 0022 customer.locale / 0023 email_log, frontend download+send dialog+Email log; ruff/mypy/default 760/integration 785/build/i18n EN-ZH symmetric 1001/docker build+in-container Chinese PDF rendering all green. **Author manual walkthrough passed**; walkthrough raised and fixed [each Opus blind-reviewed zero findings, separate commits]: ① PDF in-app preview [`0f75310`, same commit includes invoice/quote layout: remove Description column+Item bold with description below+all 2-decimal money2/pct+`css\|safe` font fix] ② SVG logo `<style>` inline class sanitisation [`4cfd369`, class-styled logos no longer all-black, **logo must be re-uploaded**] ③ multi-page per-page footer [`b9090ae`]; after fixes default 802/PDF integration 138 all green. **Deferred**: full PDF letterhead template customisation→§4.y, customer address free-text block→§4.z, public link/unique_hash, read receipts, receipt email/multi-payment summary receipt, PDF cache/queue, NL language PDF, VAT reports→M10, gradient SVG logo not supported) |
-| M10 | Reports / dashboard (incl. VAT filing) | 🟢 Done (2026-06-15; orchestrator 5 steps blind-reviewed converged [P/L → ⭐BTW filing summary → ICP → expense report → Dashboard], one commit per step `89ab353`→`273ed75`; ruff/mypy/unit tests 966+integration 788/codegen no drift/build/docker build all green. **Tax law decisions 2026-06-15 jointly confirmed with author against official guide `docs/insight/btw-aangifte-2026-guide.md` (Opus read all 41 pages) and frozen**: NL ruleset selected by `company.country_code` + other-country fallback+banner, hoog/laag/zero rate bands persisted as defaults 21/9/0, 5b full deduction+private use via 1d (year-end computed by business%), 5a/net payable as auxiliary totals (official only names 5b, not 5c), EU intra-community purchases=4b (not art.23 import), non-EU import/domestic reverse charge/OSS/herziening/KOR all N/A v1, reports carry disclaimer. **Author imported 2026 Q1–Q2 data and manual walkthrough passed**; walkthrough raised and fixed [each Opus blind-reviewed zero findings, separate commits]: ① Expense date picker off-by-one [`1a5a94a`] ② outbound document letterhead leaking customer alias → derived billing_name [`853f07c`] ③ P/L month/quarter granularity replaced with MTD/QTD/YTD period presets + highlight derived from interval [`df2ba13`]. See `milestones/M10.md` acceptance conclusion. **Deferred**: multi-currency ICP/3b column split deferred to FX, Dashboard dead constants/unused keys deferred to M11) |
-| M11 | Wrap-up / pre-GA health check | ⬜ |
+| M10 | Reports / dashboard (incl. VAT filing) | 🟢 Done (2026-06-15; orchestrator 5 steps blind-reviewed converged [P/L → ⭐BTW filing summary → ICP → expense report → Dashboard], one commit per step `89ab353`→`273ed75`; ruff/mypy/unit tests 966+integration 788/codegen no drift/build/docker build all green. **Tax law decisions 2026-06-15 jointly confirmed with author against official guide `docs/insight/btw-aangifte-2026-guide.md` (Opus read all 41 pages) and frozen**: NL ruleset selected by `company.country_code` + other-country fallback+banner, hoog/laag/zero rate bands persisted as defaults 21/9/0, 5b full deduction+private use via 1d (year-end computed by business%), 5a/net payable as auxiliary totals (official only names 5b, not 5c), EU intra-community purchases=4b (not art.23 import), non-EU import/domestic reverse charge/OSS/herziening/KOR all N/A v1, reports carry disclaimer. **Author imported 2026 Q1–Q2 data and manual walkthrough passed**; walkthrough raised and fixed [each Opus blind-reviewed zero findings, separate commits]: ① Expense date picker off-by-one [`1a5a94a`] ② outbound document letterhead leaking customer alias → derived billing_name [`853f07c`] ③ P/L month/quarter granularity replaced with MTD/QTD/YTD period presets + highlight derived from interval [`df2ba13`]. See `milestones/M10.md` acceptance conclusion. **Deferred**: multi-currency ICP/3b column split deferred to FX, Dashboard dead constants/unused keys deferred to M12) |
+| M11 | Mileage expenses (private transport used for business) | 🟡 In progress (planning frozen 2026-08-19; implementation not started; see `milestones/M11.md`) |
+| M12 | Wrap-up / pre-GA health check | ⬜ |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed)
