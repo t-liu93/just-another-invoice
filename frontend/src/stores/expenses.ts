@@ -4,6 +4,7 @@ import { del, get, post, put, http, ApiError } from '../api/http'
 import type { components } from '../api/schema'
 
 type ExpenseRead = components['schemas']['ExpenseRead']
+type ExpenseKind = components['schemas']['ExpenseKind']
 type ExpenseInput = components['schemas']['ExpenseInput']
 type ExpenseListItem = components['schemas']['ExpenseListItem']
 type ExpenseListResponse = components['schemas']['ExpenseListResponse']
@@ -38,7 +39,7 @@ export const useExpensesStore = defineStore('expenses', () => {
   const offset = ref(0)
   const sortBy = ref<'expense_date' | 'created_at'>('expense_date')
 
-  async function fetchExpenses() {
+  async function fetchExpenses(kind?: ExpenseKind) {
     loading.value = true
     error.value = null
     try {
@@ -49,6 +50,7 @@ export const useExpensesStore = defineStore('expenses', () => {
       if (isDraftFilter.value !== null) params.set('is_draft', String(isDraftFilter.value))
       if (dateFrom.value) params.set('date_from', dateFrom.value)
       if (dateTo.value) params.set('date_to', dateTo.value)
+      if (kind) params.set('kind', kind)
       params.set('limit', String(limit.value))
       params.set('offset', String(offset.value))
       params.set('sort_by', sortBy.value)

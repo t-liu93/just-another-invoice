@@ -19,6 +19,7 @@ import {
   SparklesOutline,
   DocumentOutline,
   CreateOutline,
+  CarOutline,
 } from '@vicons/ionicons5'
 import { useSettingsPanel, type SettingsCategory } from '../../composables/useSettingsPanel'
 import PreferenceSettings from './PreferenceSettings.vue'
@@ -28,6 +29,7 @@ import DictionarySettings from './DictionarySettings.vue'
 import AiSettingsForm from './AiSettingsForm.vue'
 import DocumentDefaultsSettings from './DocumentDefaultsSettings.vue'
 import EmailTemplatesSettings from './EmailTemplatesSettings.vue'
+import MileageSettings from './MileageSettings.vue'
 
 const { t } = useI18n()
 const { isOpen, activeCategory, close } = useSettingsPanel()
@@ -56,6 +58,11 @@ const menuOptions = computed<MenuOption[]>(() => [
     label: t('settings.panel.categoryDictionary'),
     key: 'dictionary',
     icon: renderIcon(BookOutline),
+  },
+  {
+    label: t('settings.panel.categoryMileage'),
+    key: 'mileage',
+    icon: renderIcon(CarOutline),
   },
   {
     label: t('settings.panel.categoryAi'),
@@ -109,6 +116,7 @@ function onMenuUpdate(key: string) {
         <SmtpSettingsForm v-else-if="activeCategory === 'smtp'" />
         <ThemeSettings v-else-if="activeCategory === 'theme'" />
         <DictionarySettings v-else-if="activeCategory === 'dictionary'" />
+        <MileageSettings v-else-if="activeCategory === 'mileage'" />
         <AiSettingsForm v-else-if="activeCategory === 'ai'" />
         <DocumentDefaultsSettings v-else-if="activeCategory === 'document-defaults'" />
         <EmailTemplatesSettings v-else-if="activeCategory === 'email-templates'" />

@@ -12,6 +12,18 @@ export function localDateStr(d: Date): string {
 }
 
 /**
+ * Convert a plain calendar date to a local-midnight timestamp for date-picker
+ * controls.  Parsing `YYYY-MM-DD` with `new Date(value)` treats it as UTC,
+ * which can otherwise shift the selected local day.
+ */
+export function localDateTimestamp(value: string | null | undefined): number | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  return Number.isNaN(date.getTime()) ? null : date.getTime()
+}
+
+/**
  * Format a date value for display as an ISO calendar date (YYYY-MM-DD).
  *
  * Single, deterministic display format across the whole UI — never

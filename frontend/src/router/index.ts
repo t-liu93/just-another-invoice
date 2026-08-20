@@ -179,6 +179,18 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
+        path: 'expenses/mileage/new',
+        name: 'mileage-expense-new',
+        component: () => import('../views/expenses/MileageExpenseEdit.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'expenses/mileage/:id/edit',
+        name: 'mileage-expense-edit',
+        component: () => import('../views/expenses/MileageExpenseEdit.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
         path: 'expenses/:id/edit',
         name: 'expense-edit',
         component: () => import('../views/expenses/ExpenseEdit.vue'),
