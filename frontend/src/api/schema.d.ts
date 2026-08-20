@@ -1825,6 +1825,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mileage-expenses/rate-recalculation/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Mileage Rate Recalculation */
+        post: operations["preview_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-expenses/rate-recalculation/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Mileage Rate Recalculation */
+        post: operations["apply_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mileage-expenses/{trip_id}": {
         parameters: {
             query?: never;
@@ -1855,40 +1889,6 @@ export interface paths {
         get: operations["list_mileage_rate_adjustments_api_v1_mileage_expenses__trip_id__rate_adjustments_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/mileage-expenses/rate-recalculation/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview Mileage Rate Recalculation */
-        post: operations["preview_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/mileage-expenses/rate-recalculation/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Apply Mileage Rate Recalculation */
-        post: operations["apply_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_apply_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11320,6 +11320,71 @@ export interface operations {
             };
         };
     };
+    preview_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_preview_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRecalculationPreviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageRecalculationApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRecalculationApplyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_mileage_expense_api_v1_mileage_expenses__trip_id__get: {
         parameters: {
             query?: never;
@@ -11433,71 +11498,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MileageRateAdjustmentListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preview_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_preview_post: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MileageRecalculationPreviewRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    apply_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_apply_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MileageRecalculationApplyRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MileageRecalculationApplyRead"];
                 };
             };
             /** @description Validation Error */

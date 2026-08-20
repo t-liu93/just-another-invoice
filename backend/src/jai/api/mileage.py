@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,8 +33,12 @@ from jai.schemas.mileage import (
 )
 from jai.services.mileage import (
     MileageConfigurationError,
+    MileageRecalculationPreviewStaleError,
     get_mileage_defaults,
     update_mileage_defaults,
+)
+from jai.services.mileage import (
+    apply_mileage_rate_recalculation as apply_mileage_rate_recalculation_service,
 )
 from jai.services.mileage import (
     calculate_mileage_expense as calculate_mileage_expense_service,
@@ -71,10 +74,16 @@ from jai.services.mileage import (
     list_mileage_expenses as list_mileage_expenses_service,
 )
 from jai.services.mileage import (
+    list_mileage_rate_adjustments as list_mileage_rate_adjustments_service,
+)
+from jai.services.mileage import (
     list_mileage_rates as list_mileage_rates_service,
 )
 from jai.services.mileage import (
     list_mileage_transport_types as list_mileage_transport_types_service,
+)
+from jai.services.mileage import (
+    preview_mileage_rate_recalculation as preview_mileage_rate_recalculation_service,
 )
 from jai.services.mileage import (
     update_mileage_expense as update_mileage_expense_service,
@@ -87,16 +96,6 @@ from jai.services.mileage import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["mileage"])
-
-
-def _not_implemented() -> NoReturn:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=(
-            "This M11 mileage endpoint is contract-locked but not implemented "
-            "until its scheduled step."
-        ),
-    )
 
 
 @router.get("/settings/mileage-defaults", response_model=MileageDefaultsRead)
@@ -346,6 +345,45 @@ async def list_mileage_expenses(
     )
 
 
+# These static paths must precede ``/{trip_id}``: Starlette matches routes in
+# registration order, and otherwise ``rate-recalculation`` is parsed as a UUID.
+@router.post(
+    "/mileage-expenses/rate-recalculation/preview", response_model=MileageRecalculationPreviewRead
+)
+async def preview_mileage_rate_recalculation(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> MileageRecalculationPreviewRead:
+    _owner_only(user)
+    try:
+        return await preview_mileage_rate_recalculation_service(
+            session, _require_company_id(user), limit=limit, offset=offset
+        )
+    except MileageConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post(
+    "/mileage-expenses/rate-recalculation/apply", response_model=MileageRecalculationApplyRead
+)
+async def apply_mileage_rate_recalculation(
+    body: MileageRecalculationApplyRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> MileageRecalculationApplyRead:
+    _owner_only(user)
+    try:
+        return await apply_mileage_rate_recalculation_service(
+            session, _require_company_id(user), body.preview_token, actor_id=user.id
+        )
+    except MileageRecalculationPreviewStaleError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except MileageConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.get("/mileage-expenses/{trip_id}", response_model=MileageExpenseRead)
 async def get_mileage_expense(
     trip_id: uuid.UUID,
@@ -403,29 +441,14 @@ async def delete_mileage_expense(
     "/mileage-expenses/{trip_id}/rate-adjustments", response_model=MileageRateAdjustmentListResponse
 )
 async def list_mileage_rate_adjustments(
-    trip_id: uuid.UUID, user: User = Depends(current_mfa_user)
+    trip_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageRateAdjustmentListResponse:
     _owner_only(user)
-    _not_implemented()
-
-
-@router.post(
-    "/mileage-expenses/rate-recalculation/preview", response_model=MileageRecalculationPreviewRead
-)
-async def preview_mileage_rate_recalculation(
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    user: User = Depends(current_mfa_user),
-) -> MileageRecalculationPreviewRead:
-    _owner_only(user)
-    _not_implemented()
-
-
-@router.post(
-    "/mileage-expenses/rate-recalculation/apply", response_model=MileageRecalculationApplyRead
-)
-async def apply_mileage_rate_recalculation(
-    body: MileageRecalculationApplyRequest, user: User = Depends(current_mfa_user)
-) -> MileageRecalculationApplyRead:
-    _owner_only(user)
-    _not_implemented()
+    try:
+        return await list_mileage_rate_adjustments_service(
+            session, trip_id, _require_company_id(user)
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

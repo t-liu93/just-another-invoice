@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import hmac
+import json
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, DecimalException
+from hashlib import sha256
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jai.auth.secret import get_auth_secret
 from jai.models._enums import (
     ExpenseKind,
     MileageTripOwnership,
@@ -34,9 +38,14 @@ from jai.schemas.mileage import (
     MileageExpenseListResponse,
     MileageExpenseRead,
     MileageExpenseWrite,
+    MileageRateAdjustmentListResponse,
+    MileageRateAdjustmentRead,
     MileageRateListResponse,
     MileageRateRead,
     MileageRateWrite,
+    MileageRecalculationApplyRead,
+    MileageRecalculationPreviewItem,
+    MileageRecalculationPreviewRead,
     MileageTransportTypeListResponse,
     MileageTransportTypeRead,
     MileageTransportTypeWrite,
@@ -53,6 +62,32 @@ _MILEAGE_CATEGORY = "Mileage"
 _MILEAGE_TREATMENT_CODE = "NL_PRIVATE_TRANSPORT_MILEAGE"
 
 
+def _mileage_company_lock_key(company_id: uuid.UUID) -> int:
+    """Return the stable signed-bigint advisory-lock key for one company.
+
+    All mileage schedule and trip writers use this one transaction-scoped
+    PostgreSQL lock. A UUID's low 64 bits are deterministic and accepted by
+    ``pg_advisory_xact_lock(bigint)`` as a signed bigint. A collision merely
+    serialises two otherwise unrelated companies; it cannot weaken safety.
+    """
+    return int.from_bytes(company_id.bytes[-8:], byteorder="big", signed=True)
+
+
+async def _lock_mileage_company(session: AsyncSession, company_id: uuid.UUID) -> None:
+    """Serialise one company's mileage schedule/trip CUD transaction.
+
+    This is deliberately acquired before *any* related lookup, calculation,
+    or old-snapshot read. It covers rate INSERT phantoms as well as existing
+    rows, and gives every writer the same one-lock ordering, so a recalculation
+    cannot race a normal trip/rate/type write or deadlock on mixed row order.
+    PostgreSQL releases the lock automatically on commit or rollback.
+    """
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_key)"),
+        {"lock_key": _mileage_company_lock_key(company_id)},
+    )
+
+
 class MileageConfigurationError(ValueError):
     """A missing or invalid editable mileage dictionary configuration."""
 
@@ -63,6 +98,10 @@ class MileageResourceNotFoundError(LookupError, ValueError):
 
 class MileageExpenseUpdateError(ValueError):
     """Raised when callers try to edit a generated Mileage expense generically."""
+
+
+class MileageRecalculationPreviewStaleError(ValueError):
+    """The supplied recalculation preview no longer represents live data."""
 
 
 @dataclass(frozen=True)
@@ -108,6 +147,17 @@ class _ResolvedRateSnapshot:
             self.effective_from,
             self.rate_per_km,
         )
+
+
+@dataclass(frozen=True)
+class _RateRecalculationMismatch:
+    """One saved trip whose immutable rate snapshot no longer resolves live."""
+
+    trip: MileageTrip
+    old_rate: _ResolvedRateSnapshot
+    new_rate: _ResolvedRateSnapshot
+    old_amount: Decimal
+    new_amount: Decimal
 
 
 def _positive_finite(value: Decimal, label: str) -> None:
@@ -216,6 +266,7 @@ async def update_mileage_defaults(
     defaults: MileageDefaultsUpdate,
 ) -> MileageDefaultsRead:
     """Validate then persist defaults at the COMPANY settings level."""
+    await _lock_mileage_company(session, company_id)
     validated = await validate_mileage_defaults(session, company_id, defaults)
     await set_setting(
         session,
@@ -229,6 +280,7 @@ async def update_mileage_defaults(
 
 async def seed_for_company(session: AsyncSession, company_id: uuid.UUID) -> None:
     """Seed editable M11 dictionaries and defaults idempotently for a company."""
+    await _lock_mileage_company(session, company_id)
     category_result = await session.execute(
         select(ExpenseCategory).where(
             ExpenseCategory.company_id == company_id, ExpenseCategory.name == _MILEAGE_CATEGORY
@@ -442,6 +494,7 @@ async def _check_transport_type_name_unique(
 async def create_mileage_transport_type(
     session: AsyncSession, company_id: uuid.UUID, body: MileageTransportTypeWrite
 ) -> MileageTransportTypeRead:
+    await _lock_mileage_company(session, company_id)
     name = body.name.strip()
     await _check_transport_type_name_unique(session, company_id, name)
     item = MileageTransportType(company_id=company_id, name=name, active=body.active)
@@ -463,6 +516,7 @@ async def update_mileage_transport_type(
     company_id: uuid.UUID,
     body: MileageTransportTypeWrite,
 ) -> MileageTransportTypeRead:
+    await _lock_mileage_company(session, company_id)
     item = await _load_transport_type(session, transport_type_id, company_id)
     if not body.active and await _configured_default_type_id(session, company_id) == item.id:
         raise MileageConfigurationError(
@@ -487,6 +541,7 @@ async def update_mileage_transport_type(
 async def delete_mileage_transport_type(
     session: AsyncSession, transport_type_id: uuid.UUID, company_id: uuid.UUID
 ) -> None:
+    await _lock_mileage_company(session, company_id)
     item = await _load_transport_type(session, transport_type_id, company_id)
     if await _configured_default_type_id(session, company_id) == item.id:
         raise MileageConfigurationError(
@@ -550,6 +605,7 @@ async def get_mileage_rate(
 async def create_mileage_rate(
     session: AsyncSession, company_id: uuid.UUID, body: MileageRateWrite
 ) -> MileageRateRead:
+    await _lock_mileage_company(session, company_id)
     await _validate_rate_transport_type(session, company_id, body.transport_type_id)
     await _check_rate_unique(session, company_id, body.transport_type_id, body.effective_from)
     item = MileageRate(
@@ -576,6 +632,7 @@ async def update_mileage_rate(
     company_id: uuid.UUID,
     body: MileageRateWrite,
 ) -> MileageRateRead:
+    await _lock_mileage_company(session, company_id)
     item = await _load_rate(session, rate_id, company_id)
     await _validate_rate_transport_type(session, company_id, body.transport_type_id)
     await _check_rate_unique(
@@ -598,6 +655,7 @@ async def update_mileage_rate(
 async def delete_mileage_rate(
     session: AsyncSession, rate_id: uuid.UUID, company_id: uuid.UUID
 ) -> None:
+    await _lock_mileage_company(session, company_id)
     await session.delete(await _load_rate(session, rate_id, company_id))
     await session.commit()
 
@@ -947,6 +1005,312 @@ async def _load_projection_expense(
     return expense
 
 
+async def _load_locked_projection_expense(
+    session: AsyncSession, trip: MileageTrip, company_id: uuid.UUID
+) -> Expense:
+    """Load the sole financial projection while holding it for recalculation."""
+    if trip.expense_id is None:
+        raise MileageConfigurationError("Mileage trip has no Expense projection.")
+    result = await session.execute(
+        select(Expense)
+        .where(
+            Expense.id == trip.expense_id,
+            Expense.company_id == company_id,
+            Expense.kind == ExpenseKind.MILEAGE,
+        )
+        .with_for_update()
+    )
+    expense = result.scalar_one_or_none()
+    if expense is None:
+        raise MileageConfigurationError("Mileage trip Expense projection is unavailable.")
+    return expense
+
+
+def _recalculation_snapshot_payload(
+    company_id: uuid.UUID, mismatches: list[_RateRecalculationMismatch]
+) -> bytes:
+    """Canonical non-secret state used to sign an opaque preview token.
+
+    The payload deliberately never leaves the server.  Including both old
+    persisted facts and newly resolved facts makes a rule/trip edit invalidate
+    the preview without storing a short-lived server-side token record.
+    """
+
+    def rate_payload(snapshot: _ResolvedRateSnapshot) -> dict[str, str | None]:
+        return {
+            "effective_from": snapshot.effective_from.isoformat(),
+            "rate_per_km": str(snapshot.rate_per_km),
+            "rule_id": str(snapshot.rule_id) if snapshot.rule_id is not None else None,
+            "transport_type_id": (
+                str(snapshot.transport_type_id)
+                if snapshot.transport_type_id is not None
+                else None
+            ),
+            "transport_type_name": snapshot.transport_type_name,
+        }
+
+    payload = {
+        "company_id": str(company_id),
+        "mismatches": [
+            {
+                "expense_id": str(mismatch.trip.expense_id),
+                "new_amount": str(mismatch.new_amount),
+                "new_rate": rate_payload(mismatch.new_rate),
+                "old_amount": str(mismatch.old_amount),
+                "old_rate": rate_payload(mismatch.old_rate),
+                "total_distance_km": str(mismatch.trip.total_distance_km),
+                "trip_id": str(mismatch.trip.id),
+                "trip_date": mismatch.trip.trip_date.isoformat(),
+                "transport_type_id": (
+                    str(mismatch.trip.transport_type_id)
+                    if mismatch.trip.transport_type_id is not None
+                    else None
+                ),
+            }
+            for mismatch in mismatches
+        ],
+        "version": 1,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _recalculation_preview_token(
+    company_id: uuid.UUID, mismatches: list[_RateRecalculationMismatch]
+) -> str:
+    """Return a deterministic, non-reversible, tamper-evident token."""
+    digest = hmac.new(
+        get_auth_secret().encode(), _recalculation_snapshot_payload(company_id, mismatches), sha256
+    ).hexdigest()
+    return f"mrc1_{digest}"
+
+
+async def _scan_rate_recalculation_mismatches(
+    session: AsyncSession, company_id: uuid.UUID, *, lock: bool = False
+) -> list[_RateRecalculationMismatch]:
+    """Resolve every saved private mileage trip against the live schedules.
+
+    Only rows which still own a Mileage Expense projection are candidates.  A
+    type-specific rule is resolved before the general schedule exactly as on
+    normal trip creation, so overrides shield those trips from general changes.
+    """
+    trip_statement = (
+        select(MileageTrip)
+        .join(Expense, MileageTrip.expense_id == Expense.id)
+        .where(
+            MileageTrip.company_id == company_id,
+            MileageTrip.ownership == MileageTripOwnership.PRIVATE,
+            Expense.company_id == company_id,
+            Expense.kind == ExpenseKind.MILEAGE,
+        )
+        .order_by(MileageTrip.trip_date, MileageTrip.created_at, MileageTrip.id)
+    )
+    if lock:
+        trip_statement = trip_statement.with_for_update(of=MileageTrip)
+    trips = list((await session.execute(trip_statement)).scalars())
+
+    rates_statement = select(MileageRate).where(MileageRate.company_id == company_id)
+    if lock:
+        rates_statement = rates_statement.with_for_update()
+    rates = list((await session.execute(rates_statement)).scalars())
+    type_names = {
+        item.id: item.name
+        for item in (
+            await session.execute(
+                select(MileageTransportType).where(MileageTransportType.company_id == company_id)
+            )
+        ).scalars()
+    }
+    candidates = [
+        RateCandidate(
+            id=rate.id,
+            transport_type_id=rate.transport_type_id,
+            effective_from=rate.effective_from,
+            rate_per_km=Decimal(str(rate.rate_per_km)),
+        )
+        for rate in rates
+    ]
+    rate_by_id = {rate.id: rate for rate in rates}
+    mismatches: list[_RateRecalculationMismatch] = []
+    for trip in trips:
+        try:
+            selected = resolve_effective_rate(candidates, trip.trip_date, trip.transport_type_id)
+        except LookupError as exc:
+            raise MileageConfigurationError(str(exc)) from exc
+        selected_rate = rate_by_id[selected.id]
+        new_rate = _ResolvedRateSnapshot(
+            rule_id=selected_rate.id,
+            transport_type_id=selected_rate.transport_type_id,
+            transport_type_name=(
+                type_names.get(selected_rate.transport_type_id)
+                if selected_rate.transport_type_id is not None
+                else None
+            ),
+            effective_from=selected_rate.effective_from,
+            rate_per_km=Decimal(str(selected_rate.rate_per_km)),
+        )
+        old_rate = _trip_rate_snapshot(trip)
+        old_amount = Decimal(str(trip.calculated_amount))
+        new_amount = calculate_mileage_amount(
+            Decimal(str(trip.total_distance_km)), new_rate.rate_per_km
+        )
+        if old_rate.semantics != new_rate.semantics or old_amount != new_amount:
+            mismatches.append(
+                _RateRecalculationMismatch(
+                    trip=trip,
+                    old_rate=old_rate,
+                    new_rate=new_rate,
+                    old_amount=old_amount,
+                    new_amount=new_amount,
+                )
+            )
+    return mismatches
+
+
+def _recalculation_totals(
+    mismatches: list[_RateRecalculationMismatch],
+) -> tuple[Decimal, Decimal, Decimal]:
+    old_total = sum((item.old_amount for item in mismatches), Decimal("0"))
+    new_total = sum((item.new_amount for item in mismatches), Decimal("0"))
+    return old_total, new_total, new_total - old_total
+
+
+async def preview_mileage_rate_recalculation(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    limit: int,
+    offset: int,
+) -> MileageRecalculationPreviewRead:
+    """Return a paginated, signed view of saved trips needing correction."""
+    mismatches = await _scan_rate_recalculation_mismatches(session, company_id)
+    old_total, new_total, delta = _recalculation_totals(mismatches)
+    page = mismatches[offset : offset + limit]
+    preview_items: list[MileageRecalculationPreviewItem] = []
+    for item in page:
+        # A preview only ever points to a currently-live resolved rule.
+        assert item.new_rate.rule_id is not None
+        preview_items.append(
+            MileageRecalculationPreviewItem(
+                trip_id=item.trip.id,
+                trip_date=item.trip.trip_date,
+                old_rate_rule_id=item.old_rate.rule_id,
+                new_rate_rule_id=item.new_rate.rule_id,
+                old_amount=item.old_amount,
+                new_amount=item.new_amount,
+                delta=item.new_amount - item.old_amount,
+            )
+        )
+    return MileageRecalculationPreviewRead(
+        preview_token=_recalculation_preview_token(company_id, mismatches),
+        affected_count=len(mismatches),
+        old_total=old_total,
+        new_total=new_total,
+        delta=delta,
+        items=preview_items,
+        total=len(mismatches),
+        limit=limit,
+        offset=offset,
+    )
+
+
+async def apply_mileage_rate_recalculation(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    preview_token: str,
+    *,
+    actor_id: uuid.UUID | None,
+) -> MileageRecalculationApplyRead:
+    """Lock, recheck, and atomically apply the exact previewed correction."""
+    try:
+        # Row locks alone cannot protect an unseen rate INSERT, so acquire the
+        # company protocol lock before scanning and regenerating the token.
+        await _lock_mileage_company(session, company_id)
+        mismatches = await _scan_rate_recalculation_mismatches(session, company_id, lock=True)
+        live_token = _recalculation_preview_token(company_id, mismatches)
+        if not hmac.compare_digest(preview_token, live_token):
+            raise MileageRecalculationPreviewStaleError(
+                "Mileage rate recalculation preview is stale; request a fresh preview."
+            )
+        old_total, new_total, delta = _recalculation_totals(mismatches)
+        for mismatch in mismatches:
+            trip = mismatch.trip
+            expense = await _load_locked_projection_expense(session, trip, company_id)
+            trip.rate_rule_id = mismatch.new_rate.rule_id
+            trip.rate_transport_type_id = mismatch.new_rate.transport_type_id
+            trip.rate_transport_type_name = mismatch.new_rate.transport_type_name
+            trip.rate_effective_from = mismatch.new_rate.effective_from
+            trip.rate_per_km = mismatch.new_rate.rate_per_km
+            trip.calculated_amount = mismatch.new_amount
+            expense.net_amount = mismatch.new_amount
+            expense.gross_amount = mismatch.new_amount
+            expense.base_net_amount = mismatch.new_amount
+            expense.base_gross_amount = mismatch.new_amount
+            session.add(
+                MileageRateAdjustment(
+                    company_id=company_id,
+                    trip_id=trip.id,
+                    old_rate_rule_id=mismatch.old_rate.rule_id,
+                    new_rate_rule_id=mismatch.new_rate.rule_id,
+                    old_rate_transport_type_id=mismatch.old_rate.transport_type_id,
+                    new_rate_transport_type_id=mismatch.new_rate.transport_type_id,
+                    old_rate_transport_type_name=mismatch.old_rate.transport_type_name,
+                    new_rate_transport_type_name=mismatch.new_rate.transport_type_name,
+                    old_rate_effective_from=mismatch.old_rate.effective_from,
+                    new_rate_effective_from=mismatch.new_rate.effective_from,
+                    old_rate_per_km=mismatch.old_rate.rate_per_km,
+                    new_rate_per_km=mismatch.new_rate.rate_per_km,
+                    old_amount=mismatch.old_amount,
+                    new_amount=mismatch.new_amount,
+                    actor_id=actor_id,
+                )
+            )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    return MileageRecalculationApplyRead(
+        affected_count=len(mismatches), old_total=old_total, new_total=new_total, delta=delta
+    )
+
+
+async def list_mileage_rate_adjustments(
+    session: AsyncSession, trip_id: uuid.UUID, company_id: uuid.UUID
+) -> MileageRateAdjustmentListResponse:
+    """Return immutable correction history, oldest first, for one company trip."""
+    await _load_trip(session, trip_id, company_id)
+    result = await session.execute(
+        select(MileageRateAdjustment)
+        .where(
+            MileageRateAdjustment.company_id == company_id,
+            MileageRateAdjustment.trip_id == trip_id,
+        )
+        .order_by(MileageRateAdjustment.created_at, MileageRateAdjustment.id)
+    )
+    return MileageRateAdjustmentListResponse(
+        items=[
+            MileageRateAdjustmentRead(
+                id=item.id,
+                trip_id=item.trip_id,
+                old_rate_rule_id=item.old_rate_rule_id,
+                new_rate_rule_id=item.new_rate_rule_id,
+                old_rate_transport_type_id=item.old_rate_transport_type_id,
+                new_rate_transport_type_id=item.new_rate_transport_type_id,
+                old_rate_transport_type_name=item.old_rate_transport_type_name,
+                new_rate_transport_type_name=item.new_rate_transport_type_name,
+                old_rate_effective_from=item.old_rate_effective_from,
+                new_rate_effective_from=item.new_rate_effective_from,
+                old_rate_per_km=Decimal(str(item.old_rate_per_km)),
+                new_rate_per_km=Decimal(str(item.new_rate_per_km)),
+                old_amount=Decimal(str(item.old_amount)),
+                new_amount=Decimal(str(item.new_amount)),
+                actor_id=item.actor_id,
+                created_at=item.created_at,
+            )
+            for item in result.scalars()
+        ]
+    )
+
+
 async def create_mileage_expense(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -954,6 +1318,7 @@ async def create_mileage_expense(
     creator_id: uuid.UUID | None,
 ) -> MileageExpenseRead:
     try:
+        await _lock_mileage_company(session, company_id)
         pricing = await _resolve_mileage_pricing(
             session, company_id, body, require_category_and_vat=True
         )
@@ -999,6 +1364,10 @@ async def update_mileage_expense(
     body: MileageExpenseWrite,
     actor_id: uuid.UUID | None,
 ) -> MileageExpenseRead:
+    # Take the company protocol lock before loading the old trip snapshot.
+    # Otherwise a waiting PUT could overwrite a completed recalculation with
+    # stale facts and produce a discontinuous adjustment history.
+    await _lock_mileage_company(session, company_id)
     trip = await _load_trip(session, trip_id, company_id)
     expense = await _load_projection_expense(session, trip, company_id)
     old_amount = Decimal(str(trip.calculated_amount))
@@ -1106,6 +1475,7 @@ async def list_mileage_expenses(
 async def delete_mileage_expense(
     session: AsyncSession, trip_id: uuid.UUID, company_id: uuid.UUID
 ) -> None:
+    await _lock_mileage_company(session, company_id)
     trip = await _load_trip(session, trip_id, company_id)
     expense = await _load_projection_expense(session, trip, company_id)
     # Delete the Expense root.  The FK's ON DELETE CASCADE removes the trip

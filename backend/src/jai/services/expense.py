@@ -51,6 +51,7 @@ from jai.schemas.expense import (
     ExpenseListResponse,
     ExpenseRead,
 )
+from jai.services.mileage import _lock_mileage_company
 from jai.services.money import quantize_to_minor_unit
 from jai.services.storage import (
     MIME_TO_EXT,
@@ -476,6 +477,10 @@ async def delete_expense(
     DB ON DELETE CASCADE then removes the ``expense_attachment`` metadata rows
     (red-line 3).
     """
+    # Expense DELETE is also the supported root-delete path for Mileage. Take
+    # the same company protocol before discovering the kind, so its DB cascade
+    # cannot race a rate-recalculation transaction.
+    await _lock_mileage_company(session, company_id)
     exp = await _load_expense(session, expense_id, company_id)
 
     # -- Collect attachment storage keys for disk cleanup (D12) ----------------
