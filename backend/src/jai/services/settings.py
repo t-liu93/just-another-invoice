@@ -234,8 +234,8 @@ async def set_setting(
     key:
         Setting key.
     value:
-        A Pydantic ``BaseModel`` instance; ``model_dump()`` is stored as
-        JSONB.
+        A Pydantic ``BaseModel`` instance; its JSON-mode ``model_dump()`` is
+        stored as JSONB so UUIDs and other typed values remain serializable.
     level:
         Setting hierarchy level.
     scope_id:
@@ -247,7 +247,7 @@ async def set_setting(
         If ``level``/``scope_id`` combination is invalid.
     """
     _validate_level_scope(level, scope_id)
-    raw = value.model_dump()
+    raw = value.model_dump(mode="json")
     stmt = pg_insert(Setting).values(
         level=level,
         scope_id=scope_id,

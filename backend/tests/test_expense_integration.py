@@ -26,6 +26,10 @@ import uuid
 import pyotp
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from jai.models._enums import ExpenseKind
+from jai.models.expense import Expense
 
 # ---------------------------------------------------------------------------
 # Shared test helpers (self-contained, no cross-file imports)
@@ -141,6 +145,83 @@ async def _create_expense(
 
 @pytest.mark.integration
 class TestExpenseCreate:
+    async def test_expense_kind_is_purchase_on_create_read_and_cannot_be_injected(
+        self, db_client: AsyncClient
+    ) -> None:
+        """The generic Expense contract owns company and always creates PURCHASE rows."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        category = await _create_expense_category(db_client)
+        treatment = seeds["purch_treatments"]["NL_DOMESTIC_PURCH"]
+        rate = seeds["rates"]["NL standard (21%)"]
+        injected_company_id = str(uuid.uuid4())
+
+        response = await db_client.post(
+            "/api/v1/expenses",
+            json={
+                "expense_date": "2026-06-13",
+                "category_id": category["id"],
+                "vat_treatment_id": treatment["id"],
+                "vat_rate_id": rate["id"],
+                "net_amount": "100.00",
+                "vat_amount": "21.00",
+                "company_id": injected_company_id,
+                "kind": "MILEAGE",
+            },
+        )
+        assert response.status_code == 201, response.text
+        created = response.json()
+        assert created["kind"] == "PURCHASE"
+        assert "company_id" not in created
+
+        read_response = await db_client.get(f"/api/v1/expenses/{created['id']}")
+        assert read_response.status_code == 200
+        assert read_response.json()["kind"] == "PURCHASE"
+
+    async def test_expense_kind_filter_applies_to_items_and_total(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """The new kind filter keeps both list rows and pagination count in sync."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        category = await _create_expense_category(db_client)
+        treatment = seeds["purch_treatments"]["NL_DOMESTIC_PURCH"]
+        rate = seeds["rates"]["NL standard (21%)"]
+        purchase = await _create_expense(
+            db_client,
+            category_id=category["id"],
+            vat_treatment_id=treatment["id"],
+            vat_rate_id=rate["id"],
+            supplier_name="Purchase row",
+        )
+        mileage = await _create_expense(
+            db_client,
+            category_id=category["id"],
+            vat_treatment_id=treatment["id"],
+            vat_rate_id=rate["id"],
+            supplier_name="Mileage projection",
+        )
+        async with db_session_maker() as session:
+            mileage_expense = await session.get(Expense, uuid.UUID(mileage["id"]))
+            assert mileage_expense is not None
+            mileage_expense.kind = ExpenseKind.MILEAGE
+            await session.commit()
+
+        purchase_response = await db_client.get("/api/v1/expenses?kind=PURCHASE")
+        assert purchase_response.status_code == 200
+        purchase_list = purchase_response.json()
+        assert purchase_list["total"] == 1
+        assert [item["id"] for item in purchase_list["items"]] == [purchase["id"]]
+        assert [item["kind"] for item in purchase_list["items"]] == ["PURCHASE"]
+
+        mileage_response = await db_client.get("/api/v1/expenses?kind=MILEAGE")
+        assert mileage_response.status_code == 200
+        mileage_list = mileage_response.json()
+        assert mileage_list["total"] == 1
+        assert [item["id"] for item in mileage_list["items"]] == [mileage["id"]]
+        assert [item["kind"] for item in mileage_list["items"]] == ["MILEAGE"]
 
     async def test_gross_equals_net_plus_vat_quantised(self, db_client: AsyncClient) -> None:
         """gross = quantize_to_minor_unit(net + vat); all at 2 dp (D11)."""

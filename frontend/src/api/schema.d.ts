@@ -1698,6 +1698,203 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/mileage-defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mileage Defaults Endpoint */
+        get: operations["get_mileage_defaults_endpoint_api_v1_settings_mileage_defaults_get"];
+        /** Update Mileage Defaults Endpoint */
+        put: operations["update_mileage_defaults_endpoint_api_v1_settings_mileage_defaults_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-transport-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mileage Transport Types */
+        get: operations["list_mileage_transport_types_api_v1_mileage_transport_types_get"];
+        put?: never;
+        /** Create Mileage Transport Type */
+        post: operations["create_mileage_transport_type_api_v1_mileage_transport_types_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-transport-types/{transport_type_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mileage Transport Type */
+        get: operations["get_mileage_transport_type_api_v1_mileage_transport_types__transport_type_id__get"];
+        /** Update Mileage Transport Type */
+        put: operations["update_mileage_transport_type_api_v1_mileage_transport_types__transport_type_id__put"];
+        post?: never;
+        /** Delete Mileage Transport Type */
+        delete: operations["delete_mileage_transport_type_api_v1_mileage_transport_types__transport_type_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mileage Rates */
+        get: operations["list_mileage_rates_api_v1_mileage_rates_get"];
+        put?: never;
+        /** Create Mileage Rate */
+        post: operations["create_mileage_rate_api_v1_mileage_rates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-rates/{rate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mileage Rate */
+        get: operations["get_mileage_rate_api_v1_mileage_rates__rate_id__get"];
+        /** Update Mileage Rate */
+        put: operations["update_mileage_rate_api_v1_mileage_rates__rate_id__put"];
+        post?: never;
+        /** Delete Mileage Rate */
+        delete: operations["delete_mileage_rate_api_v1_mileage_rates__rate_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-expenses/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Calculate Mileage Expense */
+        post: operations["calculate_mileage_expense_api_v1_mileage_expenses_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mileage Expenses */
+        get: operations["list_mileage_expenses_api_v1_mileage_expenses_get"];
+        put?: never;
+        /** Create Mileage Expense */
+        post: operations["create_mileage_expense_api_v1_mileage_expenses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-expenses/{trip_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mileage Expense */
+        get: operations["get_mileage_expense_api_v1_mileage_expenses__trip_id__get"];
+        /** Update Mileage Expense */
+        put: operations["update_mileage_expense_api_v1_mileage_expenses__trip_id__put"];
+        post?: never;
+        /** Delete Mileage Expense */
+        delete: operations["delete_mileage_expense_api_v1_mileage_expenses__trip_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-expenses/{trip_id}/rate-adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mileage Rate Adjustments */
+        get: operations["list_mileage_rate_adjustments_api_v1_mileage_expenses__trip_id__rate_adjustments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-expenses/rate-recalculation/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Mileage Rate Recalculation */
+        post: operations["preview_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mileage-expenses/rate-recalculation/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Mileage Rate Recalculation */
+        post: operations["apply_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recurring-expenses": {
         parameters: {
             query?: never;
@@ -3611,6 +3808,12 @@ export interface components {
             depreciation_years?: number;
         };
         /**
+         * ExpenseKind
+         * @description Whether an expense is a normal purchase or a mileage projection.
+         * @enum {string}
+         */
+        ExpenseKind: "PURCHASE" | "MILEAGE";
+        /**
          * ExpenseListItem
          * @description Minimal overview row for GET /api/v1/expenses.
          */
@@ -3620,6 +3823,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            kind: components["schemas"]["ExpenseKind"];
             /**
              * Expense Date
              * Format: date
@@ -3670,6 +3874,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            kind: components["schemas"]["ExpenseKind"];
             /**
              * Expense Date
              * Format: date
@@ -4596,6 +4801,405 @@ export interface components {
         MfaVerifyRequest: {
             /** Code */
             code: string;
+        };
+        /** MileageCalculationRead */
+        MileageCalculationRead: {
+            /** One Way Distance Km */
+            one_way_distance_km: string;
+            /** Total Distance Km */
+            total_distance_km: string;
+            /**
+             * Rate Rule Id
+             * Format: uuid
+             */
+            rate_rule_id: string;
+            /**
+             * Rate Effective From
+             * Format: date
+             */
+            rate_effective_from: string;
+            /** Rate Per Km */
+            rate_per_km: string;
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+        };
+        /** MileageCalculationRequest */
+        MileageCalculationRequest: {
+            /**
+             * Trip Date
+             * Format: date
+             */
+            trip_date: string;
+            /** Transport Type Id */
+            transport_type_id?: string | null;
+            /** One Way Distance Km */
+            one_way_distance_km: number | string;
+            /**
+             * Round Trip
+             * @default false
+             */
+            round_trip?: boolean;
+        };
+        /** MileageDefaultsRead */
+        MileageDefaultsRead: {
+            /**
+             * Expense Category Id
+             * Format: uuid
+             */
+            expense_category_id: string;
+            /**
+             * Default Transport Type Id
+             * Format: uuid
+             */
+            default_transport_type_id: string;
+        };
+        /** MileageDefaultsUpdate */
+        MileageDefaultsUpdate: {
+            /**
+             * Expense Category Id
+             * Format: uuid
+             */
+            expense_category_id: string;
+            /**
+             * Default Transport Type Id
+             * Format: uuid
+             */
+            default_transport_type_id: string;
+        };
+        /** MileageExpenseListItem */
+        MileageExpenseListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Trip Date
+             * Format: date
+             */
+            trip_date: string;
+            /** Transport Type Id */
+            transport_type_id?: string | null;
+            /** Transport Type Name */
+            transport_type_name: string;
+            /** One Way Distance Km */
+            one_way_distance_km: string;
+            /** Total Distance Km */
+            total_distance_km: string;
+            /** Round Trip */
+            round_trip: boolean;
+            /** Rate Per Km */
+            rate_per_km: string;
+            /** Amount */
+            amount: string;
+            /** Purpose */
+            purpose?: string | null;
+            /** Origin Address */
+            origin_address?: string | null;
+            /** Destination Address */
+            destination_address?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** MileageExpenseListResponse */
+        MileageExpenseListResponse: {
+            /** Items */
+            items: components["schemas"]["MileageExpenseListItem"][];
+            /** Total */
+            total: number;
+        };
+        /** MileageExpenseRead */
+        MileageExpenseRead: {
+            /**
+             * Trip Date
+             * Format: date
+             */
+            trip_date: string;
+            /** Transport Type Id */
+            transport_type_id?: string | null;
+            /** One Way Distance Km */
+            one_way_distance_km: string;
+            /**
+             * Round Trip
+             * @default false
+             */
+            round_trip?: boolean;
+            /** Origin Address */
+            origin_address?: string | null;
+            /** Destination Address */
+            destination_address?: string | null;
+            /** Purpose */
+            purpose?: string | null;
+            /** Note */
+            note?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Expense Id */
+            expense_id?: string | null;
+            /** Expense Category Id */
+            expense_category_id?: string | null;
+            /** Transport Type Name */
+            transport_type_name: string;
+            /** Total Distance Km */
+            total_distance_km: string;
+            /** Rate Rule Id */
+            rate_rule_id?: string | null;
+            /**
+             * Rate Effective From
+             * Format: date
+             */
+            rate_effective_from: string;
+            /** Rate Per Km */
+            rate_per_km: string;
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** MileageExpenseWrite */
+        MileageExpenseWrite: {
+            /**
+             * Trip Date
+             * Format: date
+             */
+            trip_date: string;
+            /** Transport Type Id */
+            transport_type_id?: string | null;
+            /** One Way Distance Km */
+            one_way_distance_km: number | string;
+            /**
+             * Round Trip
+             * @default false
+             */
+            round_trip?: boolean;
+            /** Origin Address */
+            origin_address?: string | null;
+            /** Destination Address */
+            destination_address?: string | null;
+            /** Purpose */
+            purpose?: string | null;
+            /** Note */
+            note?: string | null;
+        };
+        /** MileageRateAdjustmentListResponse */
+        MileageRateAdjustmentListResponse: {
+            /** Items */
+            items: components["schemas"]["MileageRateAdjustmentRead"][];
+        };
+        /** MileageRateAdjustmentRead */
+        MileageRateAdjustmentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Trip Id
+             * Format: uuid
+             */
+            trip_id: string;
+            /** Old Rate Rule Id */
+            old_rate_rule_id?: string | null;
+            /** New Rate Rule Id */
+            new_rate_rule_id?: string | null;
+            /** Old Rate Transport Type Id */
+            old_rate_transport_type_id?: string | null;
+            /** New Rate Transport Type Id */
+            new_rate_transport_type_id?: string | null;
+            /** Old Rate Transport Type Name */
+            old_rate_transport_type_name?: string | null;
+            /** New Rate Transport Type Name */
+            new_rate_transport_type_name?: string | null;
+            /**
+             * Old Rate Effective From
+             * Format: date
+             */
+            old_rate_effective_from: string;
+            /**
+             * New Rate Effective From
+             * Format: date
+             */
+            new_rate_effective_from: string;
+            /** Old Rate Per Km */
+            old_rate_per_km: string;
+            /** New Rate Per Km */
+            new_rate_per_km: string;
+            /** Old Amount */
+            old_amount: string;
+            /** New Amount */
+            new_amount: string;
+            /** Actor Id */
+            actor_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** MileageRateListResponse */
+        MileageRateListResponse: {
+            /** Items */
+            items: components["schemas"]["MileageRateRead"][];
+        };
+        /** MileageRateRead */
+        MileageRateRead: {
+            /** Transport Type Id */
+            transport_type_id?: string | null;
+            /**
+             * Effective From
+             * Format: date
+             */
+            effective_from: string;
+            /** Rate Per Km */
+            rate_per_km: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** MileageRateWrite */
+        MileageRateWrite: {
+            /** Transport Type Id */
+            transport_type_id?: string | null;
+            /**
+             * Effective From
+             * Format: date
+             */
+            effective_from: string;
+            /** Rate Per Km */
+            rate_per_km: number | string;
+        };
+        /** MileageRecalculationApplyRead */
+        MileageRecalculationApplyRead: {
+            /** Affected Count */
+            affected_count: number;
+            /** Old Total */
+            old_total: string;
+            /** New Total */
+            new_total: string;
+            /** Delta */
+            delta: string;
+        };
+        /** MileageRecalculationApplyRequest */
+        MileageRecalculationApplyRequest: {
+            /** Preview Token */
+            preview_token: string;
+        };
+        /** MileageRecalculationPreviewItem */
+        MileageRecalculationPreviewItem: {
+            /**
+             * Trip Id
+             * Format: uuid
+             */
+            trip_id: string;
+            /**
+             * Trip Date
+             * Format: date
+             */
+            trip_date: string;
+            /** Old Rate Rule Id */
+            old_rate_rule_id?: string | null;
+            /**
+             * New Rate Rule Id
+             * Format: uuid
+             */
+            new_rate_rule_id: string;
+            /** Old Amount */
+            old_amount: string;
+            /** New Amount */
+            new_amount: string;
+            /** Delta */
+            delta: string;
+        };
+        /** MileageRecalculationPreviewRead */
+        MileageRecalculationPreviewRead: {
+            /** Preview Token */
+            preview_token: string;
+            /** Affected Count */
+            affected_count: number;
+            /** Old Total */
+            old_total: string;
+            /** New Total */
+            new_total: string;
+            /** Delta */
+            delta: string;
+            /** Items */
+            items: components["schemas"]["MileageRecalculationPreviewItem"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** MileageTransportTypeListResponse */
+        MileageTransportTypeListResponse: {
+            /** Items */
+            items: components["schemas"]["MileageTransportTypeRead"][];
+        };
+        /** MileageTransportTypeRead */
+        MileageTransportTypeRead: {
+            /** Name */
+            name: string;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** MileageTransportTypeWrite */
+        MileageTransportTypeWrite: {
+            /** Name */
+            name: string;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
         };
         /**
          * NoteTemplateRead
@@ -10035,6 +10639,7 @@ export interface operations {
                 vat_treatment_id?: string | null;
                 deductible?: boolean | null;
                 is_draft?: boolean | null;
+                kind?: components["schemas"]["ExpenseKind"] | null;
                 /** @description Inclusive lower bound on expense_date. */
                 date_from?: string | null;
                 /** @description Inclusive upper bound on expense_date. */
@@ -10251,6 +10856,649 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mileage_defaults_endpoint_api_v1_settings_mileage_defaults_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageDefaultsRead"];
+                };
+            };
+        };
+    };
+    update_mileage_defaults_endpoint_api_v1_settings_mileage_defaults_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageDefaultsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageDefaultsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mileage_transport_types_api_v1_mileage_transport_types_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageTransportTypeListResponse"];
+                };
+            };
+        };
+    };
+    create_mileage_transport_type_api_v1_mileage_transport_types_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageTransportTypeWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageTransportTypeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mileage_transport_type_api_v1_mileage_transport_types__transport_type_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transport_type_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageTransportTypeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mileage_transport_type_api_v1_mileage_transport_types__transport_type_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transport_type_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageTransportTypeWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageTransportTypeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mileage_transport_type_api_v1_mileage_transport_types__transport_type_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transport_type_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mileage_rates_api_v1_mileage_rates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRateListResponse"];
+                };
+            };
+        };
+    };
+    create_mileage_rate_api_v1_mileage_rates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageRateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mileage_rate_api_v1_mileage_rates__rate_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mileage_rate_api_v1_mileage_rates__rate_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageRateWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mileage_rate_api_v1_mileage_rates__rate_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_mileage_expense_api_v1_mileage_expenses_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageCalculationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageCalculationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mileage_expenses_api_v1_mileage_expenses_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                transport_type_id?: string | null;
+                date_from?: string | null;
+                date_to?: string | null;
+                limit?: number;
+                offset?: number;
+                sort_by?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageExpenseListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mileage_expense_api_v1_mileage_expenses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageExpenseWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mileage_expense_api_v1_mileage_expenses__trip_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trip_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mileage_expense_api_v1_mileage_expenses__trip_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trip_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageExpenseWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mileage_expense_api_v1_mileage_expenses__trip_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trip_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mileage_rate_adjustments_api_v1_mileage_expenses__trip_id__rate_adjustments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trip_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRateAdjustmentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_preview_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRecalculationPreviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_mileage_rate_recalculation_api_v1_mileage_expenses_rate_recalculation_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MileageRecalculationApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MileageRecalculationApplyRead"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -131,6 +131,19 @@ class PaidBy(enum.StrEnum):
     BUSINESS = "BUSINESS"
 
 
+class ExpenseKind(enum.StrEnum):
+    """Whether an expense is a normal purchase or a mileage projection."""
+
+    PURCHASE = "PURCHASE"
+    MILEAGE = "MILEAGE"
+
+
+class MileageTripOwnership(enum.StrEnum):
+    """Transport ownership boundary for a mileage trip."""
+
+    PRIVATE = "PRIVATE"
+
+
 class EmailRelatedType(enum.StrEnum):
     """Which document type an email_log row relates to (M9 step 6).
 

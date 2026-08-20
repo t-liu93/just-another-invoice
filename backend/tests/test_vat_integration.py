@@ -639,16 +639,26 @@ class TestVatSeeds:
         assert by_label["Zero (0%)"] == 0.0
 
     async def test_seed_treatments_on_company_creation(self, db_client: AsyncClient) -> None:
-        """After creating a company, 8 default treatments must be present."""
+        """After creating a company, the full default treatment set must be present."""
         await _full_auth(db_client)
         await _setup_company(db_client)
 
         resp = await db_client.get("/api/v1/vat-treatments")
         assert resp.status_code == 200
         items = resp.json()["items"]
-        assert len(items) == 8
 
         by_code = {t["code"]: t for t in items}
+        assert set(by_code) == {
+            "NL_DOMESTIC",
+            "EU_B2B_REVERSE",
+            "EU_B2C",
+            "EXPORT_NON_EU",
+            "NL_DOMESTIC_PURCH",
+            "EU_B2B_REVERSE_PURCH",
+            "EU_B2C_PURCH",
+            "IMPORT_NON_EU",
+            "NL_PRIVATE_TRANSPORT_MILEAGE",
+        }
 
         # Sales side checks.
         assert by_code["NL_DOMESTIC"]["side"] == "SALES"
@@ -676,6 +686,13 @@ class TestVatSeeds:
         assert by_code["EU_B2B_REVERSE_PURCH"]["effect"] == "ZERO_REVERSE"
         assert by_code["EU_B2B_REVERSE_PURCH"]["requires_icp"] is True
         assert by_code["EU_B2B_REVERSE_PURCH"]["deductible"] is True
+
+        mileage = by_code["NL_PRIVATE_TRANSPORT_MILEAGE"]
+        assert mileage["side"] == "PURCHASE"
+        assert mileage["effect"] == "EXEMPT"
+        assert mileage["report_box"] is None
+        assert mileage["deductible"] is False
+        assert mileage["active"] is True
 
         # report_box must be NULL for all seeds (M4; M10 fills it).
         for treatment in items:

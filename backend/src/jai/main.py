@@ -27,6 +27,7 @@ from jai.api.estimates import router as estimates_router
 from jai.api.expenses import router as expenses_router
 from jai.api.health import router as health_router
 from jai.api.invoices import router as invoices_router
+from jai.api.mileage import router as mileage_router
 from jai.api.payments import router as payments_router
 from jai.api.pdf import router as pdf_router
 from jai.api.products import router as products_router
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(estimates_router)
     app.include_router(payments_router)
     app.include_router(expenses_router)
+    app.include_router(mileage_router)
     app.include_router(recurring_expenses_router)
     app.include_router(attachments_router)
     app.include_router(content_router)

@@ -35,7 +35,7 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import PaidBy, VatTreatmentSide
+from jai.models._enums import ExpenseKind, PaidBy, VatTreatmentSide
 from jai.models.company import Company
 from jai.models.dictionary import ExpenseCategory
 from jai.models.expense import Expense
@@ -266,6 +266,7 @@ def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
     """Convert an ORM Expense to ExpenseRead schema."""
     return ExpenseRead(
         id=exp.id,
+        kind=ExpenseKind(exp.kind),
         expense_date=exp.expense_date,
         category_id=exp.category_id,
         category_name=exp.category_name,
@@ -390,6 +391,7 @@ async def create_expense(
     - D9: deductible defaults via category.default_deductible → True.
     """
     exp = Expense()
+    exp.kind = ExpenseKind.PURCHASE
     exp.is_draft = False
     exp.creator_id = creator_id
     await _apply_body(session, exp, body, company_id)
@@ -500,6 +502,7 @@ async def list_expenses(
     vat_treatment_id: uuid.UUID | None = None,
     deductible: bool | None = None,
     is_draft: bool | None = None,
+    kind: ExpenseKind | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     limit: int = 50,
@@ -552,6 +555,8 @@ async def list_expenses(
         base = base.where(Expense.deductible == deductible)
     if is_draft is not None:
         base = base.where(Expense.is_draft == is_draft)
+    if kind is not None:
+        base = base.where(Expense.kind == kind)
     if date_from is not None:
         base = base.where(Expense.expense_date >= date_from)
     if date_to is not None:
@@ -592,6 +597,7 @@ async def list_expenses(
     items: list[ExpenseListItem] = [
         ExpenseListItem(
             id=exp.id,
+            kind=ExpenseKind(exp.kind),
             expense_date=exp.expense_date,
             category_name=exp.category_name,
             supplier_name=exp.supplier_name,

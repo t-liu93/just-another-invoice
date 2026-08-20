@@ -55,6 +55,9 @@ SETTING_KEY_DOCUMENT_DEFAULTS: str = "document.default_locale"
 #: Stores which numeric rate values map to hoog/laag/zero tiers for 1a/1b/1e.
 SETTING_KEY_VAT_RATE_TIERS: str = "reporting.vat_rate_tiers"
 
+#: Company-level default category and transport type for M11 mileage expenses.
+SETTING_KEY_MILEAGE_DEFAULTS: str = "expense.mileage.defaults"
+
 
 # ---------------------------------------------------------------------------
 # Onboarding state (GLOBAL level)

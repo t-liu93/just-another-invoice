@@ -22,7 +22,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator  # noqa: F401
 
-from jai.models._enums import PaidBy
+from jai.models._enums import ExpenseKind, PaidBy
 
 # ---------------------------------------------------------------------------
 # Input
@@ -86,6 +86,7 @@ class ExpenseRead(BaseModel):
     """Full expense record as returned by read endpoints."""
 
     id: uuid.UUID
+    kind: ExpenseKind
     expense_date: date
 
     # Category (FK SET NULL + snapshot)
@@ -152,6 +153,7 @@ class ExpenseListItem(BaseModel):
     """Minimal overview row for GET /api/v1/expenses."""
 
     id: uuid.UUID
+    kind: ExpenseKind
     expense_date: date
     category_name: str | None = None
     supplier_name: str | None = None

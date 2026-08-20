@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session
+from jai.models._enums import ExpenseKind
 from jai.models.user import User
 from jai.schemas.expense import (
     ExpenseAIPrefill,
@@ -56,14 +57,13 @@ class _AiExtractRequest(BaseModel):
     attachment_id: uuid.UUID
     language: str | None = None  # UI locale ("en"/"zh"); explanatory fields follow it
 
+
 router = APIRouter(prefix="/api/v1", tags=["expenses"])
 
 
 def _owner_only(user: User) -> None:
     if user.role != "owner":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Owner access required."
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner access required.")
 
 
 def _require_company_id(user: User) -> uuid.UUID:
@@ -96,9 +96,7 @@ async def create_expense_endpoint(
     try:
         return await create_expense(session, company_id, body, creator_id=user.id)
     except LookupError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
@@ -137,9 +135,7 @@ async def calculate_expense_endpoint(
     try:
         return await calculate_expense_preview(session, company_id, body)
     except LookupError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
@@ -183,9 +179,7 @@ async def ai_extract_endpoint(
             language=body.language,
         )
     except LookupError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         err_str = str(exc)
         # MIME not supported → 422
@@ -194,9 +188,7 @@ async def ai_extract_endpoint(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err_str
             ) from exc
         # AI disabled / no key / no model → 409 Conflict
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=err_str
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err_str) from exc
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -215,6 +207,7 @@ async def list_expenses_endpoint(
     vat_treatment_id: uuid.UUID | None = Query(default=None),
     deductible: bool | None = Query(default=None),
     is_draft: bool | None = Query(default=None),
+    kind: ExpenseKind | None = Query(default=None),
     date_from: date | None = Query(
         default=None, description="Inclusive lower bound on expense_date."
     ),
@@ -238,6 +231,7 @@ async def list_expenses_endpoint(
         vat_treatment_id=vat_treatment_id,
         deductible=deductible,
         is_draft=is_draft,
+        kind=kind,
         date_from=date_from,
         date_to=date_to,
         limit=limit,
@@ -263,9 +257,7 @@ async def get_expense_endpoint(
     try:
         return await get_expense(session, expense_id, company_id)
     except LookupError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -291,12 +283,11 @@ async def update_expense_endpoint(
     try:
         return await update_expense(session, expense_id, company_id, body)
     except LookupError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
         ) from exc
 
 
@@ -318,6 +309,4 @@ async def delete_expense_endpoint(
     try:
         await delete_expense(session, expense_id, company_id, storage=storage)
     except LookupError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

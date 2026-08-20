@@ -37,6 +37,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from jai.db import Base
+from jai.models._enums import ExpenseKind
 
 # ---------------------------------------------------------------------------
 # Money column type alias – matches invoice.py / payment.py convention
@@ -52,9 +53,7 @@ class Expense(Base):
 
     __tablename__ = "expense"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # -- Tenant scoping (red-line 2) ------------------------------------------
     company_id: Mapped[uuid.UUID] = mapped_column(
@@ -62,6 +61,13 @@ class Expense(Base):
         ForeignKey("company.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
+    )
+
+    kind: Mapped[ExpenseKind] = mapped_column(
+        String(8),
+        nullable=False,
+        server_default=text("'PURCHASE'"),
+        comment="PURCHASE for existing expenses; MILEAGE for generated trip projections.",
     )
 
     # -- Date -----------------------------------------------------------------

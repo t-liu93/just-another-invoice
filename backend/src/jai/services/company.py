@@ -30,6 +30,7 @@ from jai.models.user import User
 from jai.schemas.company import CompanyRead, CompanyWrite
 from jai.schemas.setting import SETTING_KEY_ONBOARDING_COMPLETED, OnboardingState
 from jai.services.dictionary import seed_for_company as _seed_dictionaries
+from jai.services.mileage import seed_for_company as _seed_mileage
 from jai.services.settings import set_setting
 from jai.services.vat import seed_for_company as _seed_vat
 
@@ -176,5 +177,7 @@ async def upsert_company(
     await _seed_vat(session, company.id)
     # Seed payment methods, expense categories, and units.
     await _seed_dictionaries(session, company.id)
+    # Seed M11's editable mileage category, transport/rate dictionaries, and defaults.
+    await _seed_mileage(session, company.id)
 
     return company_to_read(company)

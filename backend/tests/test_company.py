@@ -232,7 +232,10 @@ class TestUpsertCompany:
         owner = _make_owner()
         data = CompanyWrite(name="Acme", base_currency="EUR")
 
-        with patch("jai.services.company.set_setting", new_callable=AsyncMock) as mock_set:
+        with (
+            patch("jai.services.company.set_setting", new_callable=AsyncMock) as mock_set,
+            patch("jai.services.company._seed_mileage", new_callable=AsyncMock),
+        ):
             result = await upsert_company(session, data, owner)
 
         assert result.name == "Acme"
@@ -266,7 +269,10 @@ class TestUpsertCompany:
         owner = _make_owner()
         data = CompanyWrite(name="Acme", base_currency="EUR")
 
-        with patch("jai.services.company.set_setting", new_callable=AsyncMock):
+        with (
+            patch("jai.services.company.set_setting", new_callable=AsyncMock),
+            patch("jai.services.company._seed_mileage", new_callable=AsyncMock),
+        ):
             result = await upsert_company(session, data, owner)
 
         # owner.company_id should have been set.

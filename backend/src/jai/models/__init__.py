@@ -15,6 +15,12 @@ from jai.models.estimate import Estimate, EstimateGroup, EstimateLine  # noqa: F
 from jai.models.expense import Expense  # noqa: F401
 from jai.models.expense_attachment import ExpenseAttachment  # noqa: F401
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax  # noqa: F401
+from jai.models.mileage import (  # noqa: F401
+    MileageRate,
+    MileageRateAdjustment,
+    MileageTransportType,
+    MileageTrip,
+)
 from jai.models.number_sequence import NumberSequence  # noqa: F401
 from jai.models.payment import Payment  # noqa: F401
 from jai.models.product import Product, ProductCategory  # noqa: F401
