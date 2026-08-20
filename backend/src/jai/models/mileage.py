@@ -86,6 +86,13 @@ class MileageTrip(Base):
     rate_rule_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("mileage_rate.id", ondelete="SET NULL"), nullable=True
     )
+    # Rule scope is an immutable fact independent of the selected trip type.
+    # A rule may later be edited from type-specific to general (or to another
+    # type), so audit history must never recover this from the live rule.
+    rate_transport_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    rate_transport_type_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     rate_effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     rate_per_km: Mapped[object] = mapped_column(_DECIMAL, nullable=False)
     trip_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)

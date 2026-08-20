@@ -1,4 +1,4 @@
-"""M11 mileage routes: contract-first stubs plus Step-1 defaults settings."""
+"""M11 mileage routes: defaults, dictionaries, calculation, and trip CRUD."""
 
 from __future__ import annotations
 
@@ -32,7 +32,59 @@ from jai.schemas.mileage import (
     MileageTransportTypeRead,
     MileageTransportTypeWrite,
 )
-from jai.services.mileage import get_mileage_defaults, update_mileage_defaults
+from jai.services.mileage import (
+    MileageConfigurationError,
+    get_mileage_defaults,
+    update_mileage_defaults,
+)
+from jai.services.mileage import (
+    calculate_mileage_expense as calculate_mileage_expense_service,
+)
+from jai.services.mileage import (
+    create_mileage_expense as create_mileage_expense_service,
+)
+from jai.services.mileage import (
+    create_mileage_rate as create_mileage_rate_service,
+)
+from jai.services.mileage import (
+    create_mileage_transport_type as create_mileage_transport_type_service,
+)
+from jai.services.mileage import (
+    delete_mileage_expense as delete_mileage_expense_service,
+)
+from jai.services.mileage import (
+    delete_mileage_rate as delete_mileage_rate_service,
+)
+from jai.services.mileage import (
+    delete_mileage_transport_type as delete_mileage_transport_type_service,
+)
+from jai.services.mileage import (
+    get_mileage_expense as get_mileage_expense_service,
+)
+from jai.services.mileage import (
+    get_mileage_rate as get_mileage_rate_service,
+)
+from jai.services.mileage import (
+    get_mileage_transport_type as get_mileage_transport_type_service,
+)
+from jai.services.mileage import (
+    list_mileage_expenses as list_mileage_expenses_service,
+)
+from jai.services.mileage import (
+    list_mileage_rates as list_mileage_rates_service,
+)
+from jai.services.mileage import (
+    list_mileage_transport_types as list_mileage_transport_types_service,
+)
+from jai.services.mileage import (
+    update_mileage_expense as update_mileage_expense_service,
+)
+from jai.services.mileage import (
+    update_mileage_rate as update_mileage_rate_service,
+)
+from jai.services.mileage import (
+    update_mileage_transport_type as update_mileage_transport_type_service,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["mileage"])
 
@@ -71,6 +123,10 @@ async def update_mileage_defaults_endpoint(
         result = await update_mileage_defaults(session, _require_company_id(user), body)
         await session.commit()
         return result
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MileageConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
@@ -80,9 +136,10 @@ async def update_mileage_defaults_endpoint(
 @router.get("/mileage-transport-types", response_model=MileageTransportTypeListResponse)
 async def list_mileage_transport_types(
     user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageTransportTypeListResponse:
     _owner_only(user)
-    _not_implemented()
+    return await list_mileage_transport_types_service(session, _require_company_id(user))
 
 
 @router.post(
@@ -91,18 +148,30 @@ async def list_mileage_transport_types(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_mileage_transport_type(
-    body: MileageTransportTypeWrite, user: User = Depends(current_mfa_user)
+    body: MileageTransportTypeWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageTransportTypeRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await create_mileage_transport_type_service(session, _require_company_id(user), body)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.get("/mileage-transport-types/{transport_type_id}", response_model=MileageTransportTypeRead)
 async def get_mileage_transport_type(
-    transport_type_id: uuid.UUID, user: User = Depends(current_mfa_user)
+    transport_type_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageTransportTypeRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await get_mileage_transport_type_service(
+            session, transport_type_id, _require_company_id(user)
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.put("/mileage-transport-types/{transport_type_id}", response_model=MileageTransportTypeRead)
@@ -110,75 +179,145 @@ async def update_mileage_transport_type(
     transport_type_id: uuid.UUID,
     body: MileageTransportTypeWrite,
     user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageTransportTypeRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await update_mileage_transport_type_service(
+            session, transport_type_id, _require_company_id(user), body
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.delete(
     "/mileage-transport-types/{transport_type_id}", status_code=status.HTTP_204_NO_CONTENT
 )
 async def delete_mileage_transport_type(
-    transport_type_id: uuid.UUID, user: User = Depends(current_mfa_user)
+    transport_type_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> Response:
     _owner_only(user)
-    _not_implemented()
+    try:
+        await delete_mileage_transport_type_service(
+            session, transport_type_id, _require_company_id(user)
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/mileage-rates", response_model=MileageRateListResponse)
-async def list_mileage_rates(user: User = Depends(current_mfa_user)) -> MileageRateListResponse:
+async def list_mileage_rates(
+    user: User = Depends(current_mfa_user), session: AsyncSession = Depends(get_session)
+) -> MileageRateListResponse:
     _owner_only(user)
-    _not_implemented()
+    return await list_mileage_rates_service(session, _require_company_id(user))
 
 
 @router.post("/mileage-rates", response_model=MileageRateRead, status_code=status.HTTP_201_CREATED)
 async def create_mileage_rate(
-    body: MileageRateWrite, user: User = Depends(current_mfa_user)
+    body: MileageRateWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageRateRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await create_mileage_rate_service(session, _require_company_id(user), body)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.get("/mileage-rates/{rate_id}", response_model=MileageRateRead)
 async def get_mileage_rate(
-    rate_id: uuid.UUID, user: User = Depends(current_mfa_user)
+    rate_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageRateRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await get_mileage_rate_service(session, rate_id, _require_company_id(user))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.put("/mileage-rates/{rate_id}", response_model=MileageRateRead)
 async def update_mileage_rate(
-    rate_id: uuid.UUID, body: MileageRateWrite, user: User = Depends(current_mfa_user)
+    rate_id: uuid.UUID,
+    body: MileageRateWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageRateRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await update_mileage_rate_service(session, rate_id, _require_company_id(user), body)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.delete("/mileage-rates/{rate_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_mileage_rate(
-    rate_id: uuid.UUID, user: User = Depends(current_mfa_user)
+    rate_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> Response:
     _owner_only(user)
-    _not_implemented()
+    try:
+        await delete_mileage_rate_service(session, rate_id, _require_company_id(user))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/mileage-expenses/calculate", response_model=MileageCalculationRead)
 async def calculate_mileage_expense(
-    body: MileageCalculationRequest, user: User = Depends(current_mfa_user)
+    body: MileageCalculationRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageCalculationRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await calculate_mileage_expense_service(session, _require_company_id(user), body)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MileageConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 @router.post(
     "/mileage-expenses", response_model=MileageExpenseRead, status_code=status.HTTP_201_CREATED
 )
 async def create_mileage_expense(
-    body: MileageExpenseWrite, user: User = Depends(current_mfa_user)
+    body: MileageExpenseWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageExpenseRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await create_mileage_expense_service(
+            session, _require_company_id(user), body, creator_id=user.id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MileageConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 @router.get("/mileage-expenses", response_model=MileageExpenseListResponse)
@@ -191,33 +330,73 @@ async def list_mileage_expenses(
     offset: int = Query(default=0, ge=0),
     sort_by: str = Query(default="trip_date", pattern="^(trip_date|created_at)$"),
     user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageExpenseListResponse:
     _owner_only(user)
-    _not_implemented()
+    return await list_mileage_expenses_service(
+        session,
+        _require_company_id(user),
+        q=q,
+        transport_type_id=transport_type_id,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset,
+        sort_by=sort_by,
+    )
 
 
 @router.get("/mileage-expenses/{trip_id}", response_model=MileageExpenseRead)
 async def get_mileage_expense(
-    trip_id: uuid.UUID, user: User = Depends(current_mfa_user)
+    trip_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageExpenseRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await get_mileage_expense_service(session, trip_id, _require_company_id(user))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MileageConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.put("/mileage-expenses/{trip_id}", response_model=MileageExpenseRead)
 async def update_mileage_expense(
-    trip_id: uuid.UUID, body: MileageExpenseWrite, user: User = Depends(current_mfa_user)
+    trip_id: uuid.UUID,
+    body: MileageExpenseWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> MileageExpenseRead:
     _owner_only(user)
-    _not_implemented()
+    try:
+        return await update_mileage_expense_service(
+            session, trip_id, _require_company_id(user), body, actor_id=user.id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MileageConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 @router.delete("/mileage-expenses/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_mileage_expense(
-    trip_id: uuid.UUID, user: User = Depends(current_mfa_user)
+    trip_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> Response:
     _owner_only(user)
-    _not_implemented()
+    try:
+        await delete_mileage_expense_service(session, trip_id, _require_company_id(user))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MileageConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

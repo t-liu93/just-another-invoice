@@ -48,6 +48,7 @@ from jai.services.expense import (
     list_expenses,
     update_expense,
 )
+from jai.services.mileage import MileageExpenseUpdateError
 from jai.services.storage import get_storage
 
 
@@ -284,6 +285,8 @@ async def update_expense_endpoint(
         return await update_expense(session, expense_id, company_id, body)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MileageExpenseUpdateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

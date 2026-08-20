@@ -442,6 +442,14 @@ async def update_expense(
     ``ExpenseInput`` never carries ``is_draft`` (red-line 1; it is derived here).
     """
     exp = await _load_expense(session, expense_id, company_id)
+    if ExpenseKind(exp.kind) == ExpenseKind.MILEAGE:
+        # Generated mileage projections are changed only through the trip endpoint,
+        # which recomputes all money and snapshot fields atomically.
+        from jai.services.mileage import MileageExpenseUpdateError
+
+        raise MileageExpenseUpdateError(
+            "Mileage expenses can only be updated through the mileage expense endpoint."
+        )
     # PUT always confirms the draft (step-1 contract: PUT sets is_draft → False).
     exp.is_draft = False
     await _apply_body(session, exp, body, company_id)

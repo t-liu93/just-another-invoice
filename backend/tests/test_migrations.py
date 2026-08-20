@@ -375,6 +375,55 @@ class TestMigrations:
 
         asyncio.run(_assert_typed_defaults())
 
+    def test_0027_backfills_selected_live_rate_scope_without_a_live_fk(self) -> None:
+        """The one-time backfill makes pre-snapshot trips independent of later edits."""
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
+        assert _run_alembic("upgrade", "0026", url=self.url).returncode == 0
+        company_id = uuid.uuid4()
+        transport_type_id = uuid.uuid4()
+        rate_id = uuid.uuid4()
+        trip_id = uuid.uuid4()
+        _query(
+            self.url,
+            """
+            INSERT INTO company (id, name, base_currency)
+            VALUES (:company_id, 'Rate scope migration Co', 'EUR');
+            INSERT INTO mileage_transport_type (id, company_id, name, active)
+            VALUES (:transport_type_id, :company_id, 'Migration Scope', true);
+            INSERT INTO mileage_rate
+                (id, company_id, transport_type_id, effective_from, rate_per_km)
+            VALUES (:rate_id, :company_id, :transport_type_id, DATE '2026-01-01', 0.300);
+            INSERT INTO mileage_trip
+                (id, company_id, transport_type_id, transport_type_name, rate_rule_id,
+                 rate_effective_from, rate_per_km, trip_date, one_way_distance_km,
+                 total_distance_km, round_trip, calculated_amount)
+            VALUES (:trip_id, :company_id, :transport_type_id, 'Migration Scope', :rate_id,
+                    DATE '2026-01-01', 0.300, DATE '2026-06-15', 10.000, 10.000,
+                    false, 3.000)
+            """,
+            {
+                "company_id": company_id,
+                "transport_type_id": transport_type_id,
+                "rate_id": rate_id,
+                "trip_id": trip_id,
+            },
+        )
+        result = _run_alembic("upgrade", "0027", url=self.url)
+        assert result.returncode == 0, result.stderr
+        assert _query(
+            self.url,
+            """
+            SELECT rate_transport_type_id, rate_transport_type_name
+            FROM mileage_trip WHERE id = :trip_id
+            """,
+            {"trip_id": trip_id},
+        ) == [
+            {
+                "rate_transport_type_id": transport_type_id,
+                "rate_transport_type_name": "Migration Scope",
+            }
+        ]
+
     @pytest.mark.parametrize(
         ("setup_sql", "expected_error"),
         [
