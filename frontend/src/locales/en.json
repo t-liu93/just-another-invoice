@@ -1115,6 +1115,8 @@
       "typeRates": "Per-type effective rates",
       "addRate": "Add rate",
       "editRate": "Edit rate",
+      "effectiveFrom": "Effective from",
+      "effectiveFromPlaceholder": "Select effective date",
       "rateType": "Transport type",
       "generalRate": "General rate (all types)",
       "rateRequired": "Enter an effective date and a positive rate.",

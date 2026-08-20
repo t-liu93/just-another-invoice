@@ -1115,6 +1115,8 @@
       "typeRates": "按类型生效费率",
       "addRate": "新增费率",
       "editRate": "编辑费率",
+      "effectiveFrom": "生效日期",
+      "effectiveFromPlaceholder": "选择生效日期",
       "rateType": "交通工具类型",
       "generalRate": "通用费率（所有类型）",
       "rateRequired": "请输入生效日期和正数费率。",

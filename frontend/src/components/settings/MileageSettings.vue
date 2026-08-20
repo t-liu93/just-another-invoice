@@ -38,7 +38,7 @@ const savingType = ref(false)
 const typeModalError = ref<string | null>(null)
 const rateModal = ref(false)
 const editingRateId = ref<string | null>(null)
-const rateForm = ref<{ transport_type_id: string | null; effective_from: string; rate_per_km: number | null }>({ transport_type_id: null, effective_from: '', rate_per_km: null })
+const rateForm = ref<{ transport_type_id: string | null; effective_from: string | null; rate_per_km: number | null }>({ transport_type_id: null, effective_from: null, rate_per_km: null })
 const savingRate = ref(false)
 const rateModalError = ref<string | null>(null)
 
@@ -127,7 +127,7 @@ function removeType(row: MileageTransportTypeRead) {
 
 function openRate(row?: MileageRateRead) {
   editingRateId.value = row?.id ?? null
-  rateForm.value = row ? { transport_type_id: row.transport_type_id ?? null, effective_from: row.effective_from, rate_per_km: Number(row.rate_per_km) } : { transport_type_id: null, effective_from: '', rate_per_km: null }
+  rateForm.value = row ? { transport_type_id: row.transport_type_id ?? null, effective_from: row.effective_from, rate_per_km: Number(row.rate_per_km) } : { transport_type_id: null, effective_from: null, rate_per_km: null }
   rateModalError.value = null
   rateModal.value = true
 }
@@ -203,7 +203,7 @@ const typeColumns = computed<DataTableColumns<MileageTransportTypeRead>>(() => [
 ])
 const rateColumns = computed<DataTableColumns<MileageRateRead>>(() => [
   { title: t('mileage.type'), key: 'transport_type_id', render: row => row.transport_type_id ? (types.value.find(type => type.id === row.transport_type_id)?.name ?? t('mileage.inactiveHistorical')) : t('mileage.settings.generalRate') },
-  { title: t('mileage.effectiveFrom'), key: 'effective_from' },
+  { title: t('mileage.settings.effectiveFrom'), key: 'effective_from' },
   { title: t('mileage.rate'), key: 'rate_per_km', render: row => row.rate_per_km },
   { title: t('mileage.actions'), key: 'actions', render: row => h(NSpace, { size: 'small' }, () => [h(NButton, { size: 'small', quaternary: true, onClick: () => openRate(row) }, () => h(NIcon, null, () => h(CreateOutline))), h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => removeRate(row) }, () => h(NIcon, null, () => h(TrashOutline)))]) },
 ])
@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
     </n-spin>
 
     <n-modal v-model:show="typeModal" preset="card" :title="editingTypeId ? t('mileage.settings.editType') : t('mileage.settings.addType')" :style="{ width: '420px' }"><n-alert v-if="typeModalError" type="error" style="margin-bottom: 12px">{{ typeModalError }}</n-alert><n-form><n-form-item :label="t('mileage.type')"><n-input v-model:value="typeForm.name" /></n-form-item><n-form-item :label="t('mileage.active')"><n-switch v-model:value="typeForm.active" /></n-form-item></n-form><template #footer><n-space justify="end"><n-button @click="typeModal = false">{{ t('common.cancel') }}</n-button><n-button v-if="savingType" type="primary" loading>{{ t('common.save') }}</n-button><n-button v-else type="primary" @click="saveType">{{ t('common.save') }}</n-button></n-space></template></n-modal>
-    <n-modal v-model:show="rateModal" preset="card" :title="editingRateId ? t('mileage.settings.editRate') : t('mileage.settings.addRate')" :style="{ width: '420px' }"><n-alert v-if="rateModalError" type="error" style="margin-bottom: 12px">{{ rateModalError }}</n-alert><n-form><n-form-item :label="t('mileage.settings.rateType')"><n-select v-model:value="rateForm.transport_type_id" :options="typeOptions" clearable :placeholder="t('mileage.settings.generalRate')" /></n-form-item><n-form-item :label="t('mileage.effectiveFrom')"><n-date-picker v-model:formatted-value="rateForm.effective_from" value-format="yyyy-MM-dd" type="date" style="width: 100%" /></n-form-item><n-form-item :label="t('mileage.rate')"><n-input-number v-model:value="rateForm.rate_per_km" :min="0" :precision="3" style="width: 100%" /></n-form-item></n-form><template #footer><n-space justify="end"><n-button @click="rateModal = false">{{ t('common.cancel') }}</n-button><n-button v-if="savingRate" type="primary" loading>{{ t('common.save') }}</n-button><n-button v-else type="primary" @click="saveRate">{{ t('common.save') }}</n-button></n-space></template></n-modal>
+    <n-modal v-model:show="rateModal" preset="card" :title="editingRateId ? t('mileage.settings.editRate') : t('mileage.settings.addRate')" :style="{ width: '420px' }"><n-alert v-if="rateModalError" type="error" style="margin-bottom: 12px">{{ rateModalError }}</n-alert><n-form><n-form-item :label="t('mileage.settings.rateType')"><n-select v-model:value="rateForm.transport_type_id" :options="typeOptions" clearable :placeholder="t('mileage.settings.generalRate')" /></n-form-item><n-form-item :label="t('mileage.settings.effectiveFrom')"><n-date-picker v-model:formatted-value="rateForm.effective_from" value-format="yyyy-MM-dd" type="date" :placeholder="t('mileage.settings.effectiveFromPlaceholder')" style="width: 100%" /></n-form-item><n-form-item :label="t('mileage.rate')"><n-input-number v-model:value="rateForm.rate_per_km" :min="0" :precision="3" style="width: 100%" /></n-form-item></n-form><template #footer><n-space justify="end"><n-button @click="rateModal = false">{{ t('common.cancel') }}</n-button><n-button v-if="savingRate" type="primary" loading>{{ t('common.save') }}</n-button><n-button v-else type="primary" @click="saveRate">{{ t('common.save') }}</n-button></n-space></template></n-modal>
   </div>
 </template>
 
