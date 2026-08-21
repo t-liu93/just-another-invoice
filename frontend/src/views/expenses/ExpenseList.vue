@@ -7,7 +7,7 @@ import {
   NPagination, NSelect, NDatePicker, NTag, NText, NPopconfirm, NTabs, NTabPane,
   useMessage,
 } from 'naive-ui'
-import { SearchOutline, AddOutline } from '@vicons/ionicons5'
+import { SearchOutline, AddOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { useExpensesStore } from '../../stores/expenses'
 import type { ExpenseListItem } from '../../stores/expenses'
@@ -106,7 +106,7 @@ function handleSortChange(val: 'expense_date' | 'created_at') {
 
 const activeTab = computed({
   get: () => route.query.tab === 'mileage' ? 'mileage' : 'purchase',
-  set: (tab: string) => void router.replace({ query: { ...route.query, tab: tab === 'mileage' ? 'mileage' : undefined } }),
+  set: (tab: string) => void router.replace({ query: { ...route.query, tab: tab === 'mileage' ? 'mileage' : 'purchase' } }),
 })
 
 function fetchActiveTab() {
@@ -117,6 +117,12 @@ function fetchActiveTab() {
 watch(activeTab, fetchActiveTab)
 
 onMounted(() => {
+  // Keep old links working, but make the selected tab explicit for reloads and
+  // editor/list navigation.  The computed tab does not change while replacing
+  // an absent or invalid value with purchase, so the watcher cannot refetch.
+  if (route.query.tab !== activeTab.value) {
+    void router.replace({ query: { ...route.query, tab: activeTab.value } })
+  }
   fetchActiveTab()
   void loadCategories()
   void loadMileageTypes()
@@ -211,7 +217,7 @@ async function handleConfirm(row: ExpenseListItem) {
     // would send an empty-string UUID → 422.  Direct the user to edit and re-select.
     if (!full.category_id) {
       message.warning(t('expenses.confirmNeedsCategoryEdit'))
-      router.push(`/expenses/${row.id}/edit`)
+      void router.push({ path: `/expenses/${row.id}/edit`, query: { tab: 'purchase' } })
       return
     }
     await store.confirmDraft(row.id, full)
@@ -340,17 +346,20 @@ const columns = computed(() => [
   {
     title: '',
     key: 'actions',
-    width: 210,
+    width: 170,
     align: 'center' as const,
     render(row: ExpenseListItem) {
       const editBtn = h(
         NButton,
         {
           size: 'small',
-          secondary: true,
-          onClick: (e: MouseEvent) => { e.stopPropagation(); router.push(`/expenses/${row.id}/edit`) },
+          quaternary: true,
+          circle: true,
+          title: t('expenses.editAction'),
+          'aria-label': t('expenses.editAction'),
+          onClick: (e: MouseEvent) => { e.stopPropagation(); void router.push({ path: `/expenses/${row.id}/edit`, query: { tab: 'purchase' } }) },
         },
-        () => t('expenses.editAction'),
+        () => h(NIcon, null, { default: () => h(CreateOutline) }),
       )
 
       // Prod-build safe: separate v-if/v-else pattern for dynamic loading buttons
@@ -370,12 +379,25 @@ const columns = computed(() => [
         {
           trigger: () => (
             deletingId.value === row.id
-              ? h(NButton, { size: 'small', type: 'error', loading: true }, () => t('expenses.delete'))
+              ? h(NButton, {
+                  size: 'small',
+                  quaternary: true,
+                  circle: true,
+                  type: 'error',
+                  title: t('expenses.delete'),
+                  'aria-label': t('expenses.delete'),
+                  loading: true,
+                  onClick: (e: MouseEvent) => e.stopPropagation(),
+                }, () => h(NIcon, null, { default: () => h(TrashOutline) }))
               : h(NButton, {
                   size: 'small',
+                  quaternary: true,
+                  circle: true,
                   type: 'error',
+                  title: t('expenses.delete'),
+                  'aria-label': t('expenses.delete'),
                   onClick: (e: MouseEvent) => e.stopPropagation(),
-                }, () => t('expenses.delete'))
+                }, () => h(NIcon, null, { default: () => h(TrashOutline) }))
           ),
           default: () => t('expenses.deleteConfirm'),
         },
@@ -385,7 +407,7 @@ const columns = computed(() => [
       if (confirmBtn) btns.push(confirmBtn)
       btns.push(deleteBtn)
 
-      return h(NSpace, { size: 'small' }, () => btns)
+      return h(NSpace, { size: 4, justify: 'center', wrapItem: false }, () => btns)
     },
   },
 ])
@@ -417,9 +439,17 @@ const mileageColumns = computed(() => [
   { title: t('mileage.amount'), key: 'amount', width: 100, align: 'right' as const, render: (row: MileageExpenseListItem) => row.amount },
   { title: t('mileage.purpose'), key: 'purpose', ellipsis: { tooltip: true }, render: (row: MileageExpenseListItem) => row.purpose ?? '—' },
   { title: t('mileage.route'), key: 'route', ellipsis: { tooltip: true }, render: routeSummary },
-  { title: t('mileage.actions'), key: 'actions', width: 130, render: (row: MileageExpenseListItem) => h(NSpace, { size: 'small' }, () => [
-    h(NButton, { size: 'small', secondary: true, onClick: () => router.push({ path: `/expenses/mileage/${row.id}/edit`, query: { tab: 'mileage' } }) }, () => t('expenses.editAction')),
-    h(NPopconfirm, { onPositiveClick: () => void deleteMileage(row) }, { trigger: () => h(NButton, { size: 'small', type: 'error', loading: mileageDeletingId.value === row.id }, () => t('expenses.delete')), default: () => t('mileage.deleteConfirm') }),
+  { title: t('mileage.actions'), key: 'actions', width: 96, align: 'center' as const, render: (row: MileageExpenseListItem) => h(NSpace, { size: 4, justify: 'center', wrapItem: false }, () => [
+    h(NButton, {
+      size: 'small', quaternary: true, circle: true,
+      title: t('expenses.editAction'), 'aria-label': t('expenses.editAction'),
+      onClick: () => void router.push({ path: `/expenses/mileage/${row.id}/edit`, query: { tab: 'mileage' } }),
+    }, () => h(NIcon, null, { default: () => h(CreateOutline) })),
+    h(NPopconfirm, { onPositiveClick: () => void deleteMileage(row) }, { trigger: () => h(NButton, {
+      size: 'small', quaternary: true, circle: true, type: 'error',
+      title: t('expenses.delete'), 'aria-label': t('expenses.delete'),
+      loading: mileageDeletingId.value === row.id,
+    }, () => h(NIcon, null, { default: () => h(TrashOutline) })), default: () => t('mileage.deleteConfirm') }),
   ]) },
 ])
 
@@ -492,7 +522,7 @@ const mileagePageCount = computed(() => Math.max(1, Math.ceil(mileageStore.total
                 style="width: 140px"
                 @update:value="handleSortChange"
               />
-              <n-button type="primary" @click="router.push('/expenses/new')">
+              <n-button type="primary" @click="router.push({ path: '/expenses/new', query: { tab: 'purchase' } })">
                 <template #icon>
                   <n-icon><AddOutline /></n-icon>
                 </template>
@@ -520,7 +550,7 @@ const mileagePageCount = computed(() => Math.max(1, Math.ceil(mileageStore.total
               :data="store.items"
               :bordered="false"
               :row-key="(row: ExpenseListItem) => row.id"
-              :row-props="(row: ExpenseListItem) => ({ style: 'cursor:pointer', onClick: () => router.push(`/expenses/${row.id}/edit`) })"
+              :row-props="(row: ExpenseListItem) => ({ style: 'cursor:pointer', onClick: () => router.push({ path: `/expenses/${row.id}/edit`, query: { tab: 'purchase' } }) })"
               striped
             />
 

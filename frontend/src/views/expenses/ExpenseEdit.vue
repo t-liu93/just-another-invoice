@@ -219,7 +219,7 @@ async function handleSave() {
     saveSuccess.value = true
     if (!isEdit.value) {
       // Navigate to edit mode after create
-      router.replace(`/expenses/${result.id}/edit`)
+      void router.replace({ path: `/expenses/${result.id}/edit`, query: { tab: 'purchase' } })
     }
   } catch (e: unknown) {
     pageError.value = e instanceof ApiError ? e.message : String(e)
@@ -365,7 +365,7 @@ async function handleAiExtract(attachmentId: string) {
     <div class="expense-edit-container">
           <!-- Header -->
           <div class="page-header">
-            <n-button text @click="router.push('/expenses')">
+            <n-button text @click="router.push({ path: '/expenses', query: { tab: 'purchase' } })">
               <template #icon><n-icon><ArrowBackOutline /></n-icon></template>
               {{ t('expenses.backToList') }}
             </n-button>
@@ -534,7 +534,7 @@ async function handleAiExtract(attachmentId: string) {
                     <!-- Save button: prod-build safe using v-if/v-else -->
                     <n-button v-if="saving" type="primary" loading>{{ t('expenses.save') }}</n-button>
                     <n-button v-else type="primary" attr-type="submit">{{ t('expenses.save') }}</n-button>
-                    <n-button @click="router.push('/expenses')">{{ t('expenses.cancel') }}</n-button>
+                    <n-button @click="router.push({ path: '/expenses', query: { tab: 'purchase' } })">{{ t('expenses.cancel') }}</n-button>
                   </n-space>
                 </n-form>
               </div>

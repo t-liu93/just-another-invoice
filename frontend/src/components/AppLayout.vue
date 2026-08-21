@@ -141,7 +141,7 @@ function handleNav(key: string) {
   else if (key === 'quote-list') void router.push('/quotes')
   else if (key === 'estimate-list') void router.push('/estimates')
   else if (key === 'payment-list') void router.push('/payments')
-  else if (key === 'expense-list') void router.push('/expenses')
+  else if (key === 'expense-list') void router.push({ path: '/expenses', query: { tab: 'purchase' } })
   else if (key === 'recurring-expense-list') void router.push('/recurring-expenses')
   else if (key === 'report-profit-loss') void router.push('/reports/profit-loss')
   else if (key === 'report-vat-return') void router.push('/reports/vat-return')

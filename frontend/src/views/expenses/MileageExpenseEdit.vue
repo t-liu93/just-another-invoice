@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NCard, NCheckbox, NDatePicker, NForm, NFormItem, NIcon, NInput, NInputNumber, NSelect, NSpace, NSpin, NText } from 'naive-ui'
+import { NAlert, NButton, NCard, NCheckbox, NDatePicker, NForm, NFormItem, NIcon, NInput, NInputNumber, NSelect, NSpace, NSpin, NText, useMessage } from 'naive-ui'
 import { ArrowBackOutline } from '@vicons/ionicons5'
 import { ApiError, get } from '../../api/http'
 import { localDateStr } from '../../utils/date'
@@ -15,6 +15,7 @@ type MileageDefaultsRead = components['schemas']['MileageDefaultsRead']
 type CalculationInput = { trip_date: string; transport_type_id: string; one_way_distance_km: number; round_trip: boolean }
 
 const { t } = useI18n()
+const message = useMessage()
 const route = useRoute()
 const router = useRouter()
 const store = useMileageStore()
@@ -25,7 +26,6 @@ const saving = ref(false)
 const loadError = ref<string | null>(null)
 const saveError = ref<string | null>(null)
 const calculationError = ref<string | null>(null)
-const success = ref(false)
 const types = ref<MileageTransportTypeRead[]>([])
 const tripDate = ref(localDateStr(new Date()))
 const transportTypeId = ref<string | null>(null)
@@ -108,7 +108,6 @@ function invalidateCalculation() {
   calculation.value = null
   acceptedCalculationInput.value = null
   calculationError.value = null
-  success.value = false
   queueRecompute()
 }
 function fill(item: components['schemas']['MileageExpenseRead'], calculationIsCurrent = false) {
@@ -154,13 +153,12 @@ async function save() {
   if (!canSave.value) { saveError.value = t('mileage.previewRequired'); return }
   saving.value = true
   saveError.value = null
-  success.value = false
   try {
     const body = { trip_date: tripDate.value, transport_type_id: transportTypeId.value, one_way_distance_km: oneWayDistanceKm.value!, round_trip: roundTrip.value, origin_address: originAddress.value || null, destination_address: destinationAddress.value || null, purpose: purpose.value || null, note: note.value || null }
-    const result = tripId.value ? await store.updateMileage(tripId.value, body) : await store.createMileage(body)
-    fill(result, true)
-    success.value = true
-    if (!tripId.value) await router.replace({ path: `/expenses/mileage/${result.id}/edit`, query: { tab: 'mileage' } })
+    if (tripId.value) await store.updateMileage(tripId.value, body)
+    else await store.createMileage(body)
+    message.success(t('mileage.saveSuccess'))
+    await router.push({ path: '/expenses', query: { tab: 'mileage' } })
   } catch (e: unknown) { saveError.value = errorMessage(e) } finally { saving.value = false }
 }
 </script>
@@ -172,7 +170,6 @@ async function save() {
       <n-alert v-if="loadError" type="error" closable style="margin-bottom: 16px" @close="loadError = null">{{ loadError }}</n-alert>
       <n-alert v-if="calculationError" type="error" closable style="margin-bottom: 16px" @close="calculationError = null">{{ calculationError }}</n-alert>
       <n-alert v-if="saveError" type="error" closable style="margin-bottom: 16px" @close="saveError = null">{{ saveError }}</n-alert>
-      <n-alert v-if="success" type="success" closable style="margin-bottom: 16px">{{ t('mileage.saveSuccess') }}</n-alert>
       <n-alert v-if="historicalTypeNeedsReplacement" type="warning" style="margin-bottom: 16px">{{ t('mileage.historicalTypeReplacement', { type: historicalTypeName ?? t('mileage.inactiveHistorical') }) }}</n-alert>
       <div class="edit-layout">
         <n-form class="form-col" label-placement="left" label-width="145" @submit.prevent="save">
