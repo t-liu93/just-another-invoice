@@ -2,7 +2,7 @@
 
 > 🌐 [English](M11.md) · **中文**
 
-> **状态：🟡 实现完成 / 等待作者 walkthrough · 2026-08-19 与作者共定冻结；实现于 2026-08-20 完成。** 本里程碑为私人拥有或私人租用交通工具增加商业里程工作流，**不**实现公司车辆记账。实现前先读 `docs/plan/roadmap_zh.md` §2 全局约束，以及 M8/M8.5/M10 已冻结的开支与报表决策。
+> **状态：🟢 完成 · 2026-08-19 与作者共定冻结；实现于 2026-08-20 完成；作者 walkthrough 于 2026-08-21 验收。** 本里程碑为私人拥有或私人租用交通工具增加商业里程工作流，**不**实现公司车辆记账。实现前先读 `docs/plan/roadmap_zh.md` §2 全局约束，以及 M8/M8.5/M10 已冻结的开支与报表决策。
 >
 > **税务锚点（规划时的现行口径）**：荷兰税务局说明，私人交通工具用于商业行程时，**2026 年可按 €0.25/km** 从利润中扣除；**2024 与 2025 年为 €0.23/km**。所得税口径下，通勤（`woon-werkverkeer`）属于商业里程。该定额已包含燃油、保险、过路费、停车等成本，不能再通过此里程申报重复扣除。来源：[Belastingdienst · Zakelijk gebruik privévervoermiddel](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/winst/inkomstenbelasting/inkomstenbelasting_voor_ondernemers/zakelijk-gebruik-privevervoermiddel)。
 
@@ -165,10 +165,10 @@
 7. **守卫/fallback**：无有效费率、默认类型停用、跨公司 id、旧 preview token 均明确失败，且不残留半条 trip/Expense。
 8. **质量门**：ruff、mypy strict、默认+集成测试、codegen freshness、frontend build、Docker build 全绿。
 
-## 验收结论（实现收尾）
+## 验收结论
 
-- **完成日期**：实现于 2026-08-20 完成；仍等待作者人工 walkthrough。
-- **实现方式 / 各步 commit**：由 orchestrator 执行步骤 1–5，并经盲审/返工收敛。各步 autosquash 后的实现 commit：步骤 1 `7670827`、步骤 2 `ced6c44`、步骤 3 `8328fb6`、步骤 4 `305d83c`；步骤 5 记录收尾与全量回归结果。
-- **自动化验证**：backend `ruff check .` 与 `mypy --strict src` 通过（104 个 source files）；默认 pytest 通过（1050 passed、830 deselected；6 个既有 warning）；隔离 PostgreSQL 迁移 upgrade/downgrade/head 测试通过（10 passed）；聚焦 M11 的 PostgreSQL CRUD/费率重算集成测试通过（14 passed；1 个既有 FastAPI deprecation warning）；标准测试环境中的完整隔离 PostgreSQL integration suite 通过（830 passed、1050 deselected；62 个既有 FastAPI deprecation warning；228.14s）；frontend production build、受控 OpenAPI→TS freshness、EN/ZH key 对称（1208 个 key）均通过；Docker build 通过。
-- **作者人工 walkthrough**：待执行。请以 dev Compose 按上方八项部署自测点操作；在作者完成前，不得将本里程碑标记为 Done。
+- **完成日期**：2026-08-21。实现于 2026-08-20 完成；作者 walkthrough 于 2026-08-21 验收。
+- **实现方式 / 各步 commit**：由 orchestrator 执行步骤 1–5，并经盲审/返工收敛。各步 autosquash 后的 commit：步骤 1 `7670827`、步骤 2 `ced6c44`、步骤 3 `8328fb6`、步骤 4 `305d83c`、步骤 5 `debbae1`。Walkthrough findings 由 `73869ea`（生效日期文案/DatePicker）和 `1120ecf`（显式 Expense tab URL、图标操作、Mileage 保存返回流程）修复；两项均经功能盲审零 finding。
+- **自动化验证**：backend `ruff check .` 与 `mypy --strict src` 通过（104 个 source files）；默认 pytest 通过（1050 passed、830 deselected；6 个既有 warning）；隔离 PostgreSQL 迁移 upgrade/downgrade/head 测试通过（10 passed）；聚焦 M11 的 PostgreSQL CRUD/费率重算集成测试通过（14 passed；1 个既有 FastAPI deprecation warning）；标准测试环境中的完整隔离 PostgreSQL integration suite 通过（830 passed、1050 deselected；62 个既有 FastAPI deprecation warning；228.14s）；walkthrough 修复后的 frontend production build、受控 OpenAPI→TS freshness、EN/ZH key 对称（1210 个 key）与 Docker build 均通过。
+- **作者人工 walkthrough**：2026-08-21 验收。作者完成了实际业务流程走查并接受本里程碑。刻意慢网速下短暂的 stale-preview/Save-disabled 状态未再手动 throttle；其 latest-request-wins 与 save gate 行为已由实现状态检查和多轮 Clean Agent 审查覆盖，作者接受该证据。Mileage Settings 与 Expense/Mileage UX 的 walkthrough findings 均在验收前修复并通过零 finding 复审。
 - **已知顺延**：Google Places/Routes 集成；公司车辆行程/记账；闭环里程表/GPS；路线模板/周期；导出。
