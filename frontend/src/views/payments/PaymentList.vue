@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   NButton, NSpace, NInput, NDataTable, NAlert, NSpin,
-  NPagination, NSelect, NText, NDatePicker,
+  NPagination, NSelect, NText, NDatePicker, NTag,
 } from 'naive-ui'
 import { SearchOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
@@ -98,7 +98,14 @@ function handlePageChange(page: number) {
 }
 
 function handleRowClick(row: PaymentListItem) {
-  router.push(`/invoices/${row.invoice_id}/edit`)
+  const target = paymentTarget(row)
+  if (target) void router.push(target)
+}
+
+function paymentTarget(row: PaymentListItem): string | null {
+  if (row.invoice_id) return `/invoices/${row.invoice_id}/edit`
+  if (row.quote_id) return `/quotes/${row.quote_id}/edit`
+  return null
 }
 
 const currentPage = computed(() => Math.floor(store.offset / store.limit) + 1)
@@ -127,17 +134,25 @@ const columns = computed(() => [
     },
   },
   {
-    title: t('payments.invoiceNumber'),
-    key: 'invoice_number',
+    title: t('payments.sourceDocument'),
+    key: 'source_document',
     render(row: PaymentListItem) {
-      return h(
-        NText,
-        {
-          style: 'cursor:pointer; color: var(--n-primary-color)',
-          onClick: () => router.push(`/invoices/${row.invoice_id}/edit`),
-        },
-        () => row.invoice_number ?? t('invoices.concept'),
-      )
+      const target = paymentTarget(row)
+      const primaryNumber = row.invoice_id
+        ? (row.invoice_number ?? t('invoices.concept'))
+        : (row.quote_number ?? '—')
+      return h(NSpace, { size: 'small', align: 'center', wrap: true }, () => [
+        h(NTag, { size: 'small', type: row.origin_type === 'QUOTE' ? 'warning' : 'default' }, () =>
+          row.origin_type === 'QUOTE' ? t('payments.quote') : t('payments.invoice')),
+        h(NText, {
+          style: target ? 'cursor:pointer; color: var(--n-primary-color)' : undefined,
+          onClick: target ? () => router.push(target) : undefined,
+        }, () => primaryNumber),
+        row.origin_type === 'QUOTE' && row.invoice_id && row.quote_number
+          ? h(NText, { depth: 3, style: 'font-size: 12px' }, () =>
+              t('payments.fromQuote', { number: row.quote_number }))
+          : null,
+      ])
     },
   },
   {
@@ -181,9 +196,10 @@ const columns = computed(() => [
         {
           size: 'small',
           secondary: true,
-          onClick: () => router.push(`/invoices/${row.invoice_id}/edit`),
+          disabled: !paymentTarget(row),
+          onClick: () => handleRowClick(row),
         },
-        () => t('payments.viewInvoice'),
+        () => row.invoice_id ? t('payments.viewInvoice') : t('payments.viewQuote'),
       )
     },
   },

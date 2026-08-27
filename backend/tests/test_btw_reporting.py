@@ -477,6 +477,7 @@ def _make_invoice(
     lines: list[MagicMock] | None = None,
 ) -> MagicMock:
     inv = MagicMock()
+    inv.id = uuid.uuid4()
     inv.invoice_date = invoice_date
     inv.tax_mode = MagicMock()
     inv.tax_mode.value = tax_mode
@@ -520,6 +521,21 @@ def _make_invoice_line_tax(
     return lt
 
 
+def _make_payment_tax(
+    vat_rate_percent: str,
+    base_taxable_amount: str,
+    base_vat_amount: str,
+) -> MagicMock:
+    tax = MagicMock()
+    tax.vat_treatment_effect = "APPLY_RATE"
+    tax.vat_treatment_requires_icp = False
+    tax.vat_treatment_code = "NL_DOMESTIC"
+    tax.vat_rate_percent = Decimal(vat_rate_percent)
+    tax.base_taxable_amount = Decimal(base_taxable_amount)
+    tax.base_vat_amount = Decimal(base_vat_amount)
+    return tax
+
+
 def _make_expense(
     expense_date: date,
     vat_treatment_effect: str,
@@ -555,15 +571,19 @@ def _build_session(
     expenses_in_period: list[MagicMock],
     year_expenses: list[MagicMock] | None = None,
     customer: MagicMock | None = None,
+    advance_rows: list[tuple[uuid.UUID, MagicMock]] | None = None,
+    offset_rows: list[tuple[uuid.UUID, uuid.UUID, MagicMock]] | None = None,
 ) -> AsyncMock:
     """Build a mock AsyncSession that returns the given data from execute()."""
     session = AsyncMock()
 
     # We need to return different results depending on query order:
     # 1. Invoices query
-    # 2. Customer query (for each ICP invoice) – optional
-    # 3. Expenses in period query
-    # 4. Year expenses query (only in Q4)
+    # 2. Quote-payment VAT rows in this period
+    # 3. Final-invoice advance offsets (when invoices exist)
+    # 4. Customer query (for each ICP invoice) – optional
+    # 5. Expenses in period query
+    # 6. Year expenses query (only in Q4)
 
     invoke_results: list[MagicMock] = []
 
@@ -571,6 +591,15 @@ def _build_session(
     inv_result = MagicMock()
     inv_result.scalars.return_value.all.return_value = invoices
     invoke_results.append(inv_result)
+
+    advance_result = MagicMock()
+    advance_result.all.return_value = advance_rows or []
+    invoke_results.append(advance_result)
+
+    if invoices:
+        offset_result = MagicMock()
+        offset_result.all.return_value = offset_rows or []
+        invoke_results.append(offset_result)
 
     # Results for customer lookups (one per ICP invoice)
     for inv in invoices:
@@ -615,6 +644,178 @@ class TestComputeVatReturn:
         assert report.quarter == 1
         assert report.date_from == date(2026, 1, 1)
         assert report.date_to == date(2026, 3, 31)
+
+    @pytest.mark.asyncio
+    async def test_quote_advance_is_recognised_on_payment_date(self) -> None:
+        payment_id = uuid.uuid4()
+        session = _build_session(
+            invoices=[],
+            expenses_in_period=[],
+            advance_rows=[
+                (payment_id, _make_payment_tax("21", "200.00", "42.00"))
+            ],
+        )
+        report = await compute_vat_return(
+            session,
+            company=_make_company(),
+            year=2026,
+            quarter=1,
+            tiers=DEFAULT_TIERS,
+        )
+        assert report.boxes.box_1a.base == Decimal("200.00")
+        assert report.boxes.box_1a.vat == Decimal("42.00")
+        assert any("advance payment" in warning for warning in report.warnings)
+
+    @pytest.mark.asyncio
+    async def test_final_invoice_subtracts_all_prior_quote_advances(self) -> None:
+        invoice = _make_invoice(
+            invoice_date=date(2026, 7, 1),
+            tax_mode="DOCUMENT",
+            vat_treatment_effect="APPLY_RATE",
+            vat_treatment_code="NL_DOMESTIC",
+            taxes=[_make_invoice_tax("21", "1000.00", "210.00")],
+        )
+        payment_id = uuid.uuid4()
+        session = _build_session(
+            invoices=[invoice],
+            expenses_in_period=[],
+            offset_rows=[
+                (
+                    invoice.id,
+                    payment_id,
+                    _make_payment_tax("21", "500.00", "105.00"),
+                )
+            ],
+        )
+        report = await compute_vat_return(
+            session,
+            company=_make_company(),
+            year=2026,
+            quarter=3,
+            tiers=DEFAULT_TIERS,
+        )
+        assert report.boxes.box_1a.base == Decimal("500.00")
+        assert report.boxes.box_1a.vat == Decimal("105.00")
+        assert any("VAT offsets" in warning for warning in report.warnings)
+
+    @pytest.mark.asyncio
+    async def test_same_quarter_advance_and_invoice_net_to_full_invoice(self) -> None:
+        invoice = _make_invoice(
+            invoice_date=date(2026, 2, 15),
+            tax_mode="DOCUMENT",
+            vat_treatment_effect="APPLY_RATE",
+            vat_treatment_code="NL_DOMESTIC",
+            taxes=[_make_invoice_tax("21", "1000.00", "210.00")],
+        )
+        payment_id = uuid.uuid4()
+        payment_tax = _make_payment_tax("21", "200.00", "42.00")
+        session = _build_session(
+            invoices=[invoice],
+            expenses_in_period=[],
+            advance_rows=[(payment_id, payment_tax)],
+            offset_rows=[(invoice.id, payment_id, payment_tax)],
+        )
+        report = await compute_vat_return(
+            session,
+            company=_make_company(),
+            year=2026,
+            quarter=1,
+            tiers=DEFAULT_TIERS,
+        )
+        assert report.boxes.box_1a.base == Decimal("1000.00")
+        assert report.boxes.box_1a.vat == Decimal("210.00")
+
+    @pytest.mark.asyncio
+    async def test_multi_quarter_advances_and_final_invoice_sum_exactly_once(
+        self,
+    ) -> None:
+        first_id = uuid.uuid4()
+        second_id = uuid.uuid4()
+        first_tax = _make_payment_tax("21", "200.00", "42.00")
+        second_tax = _make_payment_tax("21", "500.00", "105.00")
+
+        q1 = await compute_vat_return(
+            _build_session(
+                invoices=[], expenses_in_period=[], advance_rows=[(first_id, first_tax)]
+            ),
+            company=_make_company(),
+            year=2026,
+            quarter=1,
+            tiers=DEFAULT_TIERS,
+        )
+        q2 = await compute_vat_return(
+            _build_session(
+                invoices=[],
+                expenses_in_period=[],
+                advance_rows=[(second_id, second_tax)],
+            ),
+            company=_make_company(),
+            year=2026,
+            quarter=2,
+            tiers=DEFAULT_TIERS,
+        )
+        invoice = _make_invoice(
+            invoice_date=date(2026, 7, 1),
+            tax_mode="DOCUMENT",
+            vat_treatment_effect="APPLY_RATE",
+            vat_treatment_code="NL_DOMESTIC",
+            taxes=[_make_invoice_tax("21", "1000.00", "210.00")],
+        )
+        q3 = await compute_vat_return(
+            _build_session(
+                invoices=[invoice],
+                expenses_in_period=[],
+                offset_rows=[
+                    (invoice.id, first_id, first_tax),
+                    (invoice.id, second_id, second_tax),
+                ],
+            ),
+            company=_make_company(),
+            year=2026,
+            quarter=3,
+            tiers=DEFAULT_TIERS,
+        )
+
+        assert [q.boxes.box_1a.base for q in (q1, q2, q3)] == [
+            Decimal("200.00"),
+            Decimal("500.00"),
+            Decimal("300.00"),
+        ]
+        assert [q.boxes.box_1a.vat for q in (q1, q2, q3)] == [
+            Decimal("42.00"),
+            Decimal("105.00"),
+            Decimal("63.00"),
+        ]
+        assert sum((q.boxes.box_1a.base for q in (q1, q2, q3)), Decimal("0")) == Decimal(
+            "1000.00"
+        )
+        assert sum((q.boxes.box_1a.vat for q in (q1, q2, q3)), Decimal("0")) == Decimal(
+            "210.00"
+        )
+
+    @pytest.mark.asyncio
+    async def test_mixed_and_zero_rate_advance_uses_existing_box_mapping(self) -> None:
+        payment_id = uuid.uuid4()
+        report = await compute_vat_return(
+            _build_session(
+                invoices=[],
+                expenses_in_period=[],
+                advance_rows=[
+                    (payment_id, _make_payment_tax("21", "100.00", "21.00")),
+                    (payment_id, _make_payment_tax("9", "50.00", "4.50")),
+                    (payment_id, _make_payment_tax("0", "25.00", "0.00")),
+                ],
+            ),
+            company=_make_company(),
+            year=2026,
+            quarter=1,
+            tiers=DEFAULT_TIERS,
+        )
+        assert report.boxes.box_1a.base == Decimal("100.00")
+        assert report.boxes.box_1a.vat == Decimal("21.00")
+        assert report.boxes.box_1b.base == Decimal("50.00")
+        assert report.boxes.box_1b.vat == Decimal("4.50")
+        assert report.boxes.box_1e.base == Decimal("25.00")
 
     @pytest.mark.asyncio
     async def test_document_mode_invoice_hoog_tarief(self) -> None:

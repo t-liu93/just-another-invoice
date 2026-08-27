@@ -173,6 +173,9 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "amount_paid_total": "Amount Paid (Total)",
         "receipt_amount_due": "Amount Due",
         "paid_status": "Paid Status",
+        "payments": "Payments received",
+        "already_paid": "Already paid",
+        "not_vat_invoice": "NOT A VAT INVOICE · 非 VAT 发票",
     },
     "zh": {
         "invoice": "发票",
@@ -219,6 +222,9 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "amount_paid_total": "已收款合计",
         "receipt_amount_due": "未收款",
         "paid_status": "收款状态",
+        "payments": "已收款明细",
+        "already_paid": "已付款",
+        "not_vat_invoice": "非 VAT 发票 · NOT A VAT INVOICE",
     },
 }
 
@@ -374,6 +380,9 @@ def build_invoice_html(
     customer: Any,
     locale: str,
     logo_data_uri: str | None,
+    *,
+    payments: list[Any] | None = None,
+    paid_total: Decimal | None = None,
 ) -> str:
     """Render invoice HTML from ORM objects.
 
@@ -416,6 +425,10 @@ def build_invoice_html(
     css_text = _CSS_PATH.read_text(encoding="utf-8")
 
     # -- Build template context -----------------------------------------------
+    if paid_total is None:
+        paid_total = Decimal(str(invoice.total_incl_vat)) - Decimal(
+            str(invoice.due_amount)
+        )
     context: dict[str, Any] = {
         "locale": locale if locale in PDF_LABELS else _DEFAULT_LOCALE,
         "labels": labels,
@@ -426,6 +439,8 @@ def build_invoice_html(
         "billing_address": billing_address,
         "billing_name": resolve_billing_name(customer),
         "logo_data_uri": logo_data_uri,
+        "payments": payments or [],
+        "paid_total": paid_total,
         "css": css_text,
     }
 
@@ -499,6 +514,7 @@ async def render_invoice_pdf(
     from jai.models.company import Company
     from jai.models.customer import Customer
     from jai.models.invoice import Invoice
+    from jai.models.payment import Payment
 
     # -- Load invoice scoped to company (red-line 2) --------------------------
     stmt = (
@@ -508,6 +524,11 @@ async def render_invoice_pdf(
             selectinload(Invoice.lines),
             selectinload(Invoice.taxes),
         )
+        # Payment writers take ``FOR UPDATE`` on the invoice before changing
+        # both payment rows and the invoice due snapshot.  A shared parent lock
+        # makes this renderer observe one settlement point-in-time instead of
+        # an old due amount combined with a new payment list.
+        .with_for_update(read=True)
     )
     result = await session.execute(stmt)
     invoice = result.scalar_one_or_none()
@@ -543,6 +564,19 @@ async def render_invoice_pdf(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Customer not found.",
         )
+
+    payment_result = await session.execute(
+        select(Payment)
+        .where(
+            Payment.invoice_id == invoice.id,
+            Payment.company_id == company_id,
+        )
+        .order_by(Payment.payment_date, Payment.created_at, Payment.id)
+    )
+    payments = list(payment_result.scalars().all())
+    paid_total = Decimal(str(invoice.total_incl_vat)) - Decimal(
+        str(invoice.due_amount)
+    )
 
     # -- Resolve locale via D2 chain (step 2) ---------------------------------
     # When locale is None (no explicit override), we read the company-level
@@ -582,6 +616,8 @@ async def render_invoice_pdf(
         customer=customer,
         locale=resolved_locale,
         logo_data_uri=logo_data_uri,
+        payments=payments,
+        paid_total=paid_total,
     )
     pdf_bytes = html_to_pdf(html)
 
@@ -672,11 +708,15 @@ def build_quote_html(
 
 def build_payment_receipt_html(
     payment: Any,
-    invoice: Any,
+    invoice: Any | None,
     company: Any,
     customer: Any,
     locale: str,
     logo_data_uri: str | None,
+    *,
+    quote: Any | None = None,
+    paid_total: Decimal | None = None,
+    remaining_amount: Decimal | None = None,
 ) -> str:
     """Render payment receipt HTML from ORM objects.
 
@@ -742,9 +782,24 @@ def build_payment_receipt_html(
     # paid_total = total - due is a simple derived read-only value from the
     # same snapshots; we compute it here in Python (not in the template layer)
     # to keep arithmetic out of Jinja2.
-    total_incl_vat: Any = invoice.total_incl_vat
-    due_amount: Any = invoice.due_amount
-    paid_total = Decimal(str(total_incl_vat)) - Decimal(str(due_amount))
+    document = quote if quote is not None else invoice
+    if document is None:
+        raise ValueError("A payment receipt requires an invoice or quote context.")
+    is_quote_origin = quote is not None
+    if paid_total is None:
+        if invoice is None:
+            paid_total = Decimal(str(payment.amount))
+        else:
+            paid_total = Decimal(str(invoice.total_incl_vat)) - Decimal(
+                str(invoice.due_amount)
+            )
+    if remaining_amount is None:
+        remaining_amount = Decimal(str(document.total_incl_vat)) - paid_total
+    document_number = (
+        quote.quote_number
+        if quote is not None
+        else invoice.invoice_number if invoice is not None else None
+    )
 
     # -- Build template context (amounts from snapshots, not recalculated) ----
     context: dict[str, Any] = {
@@ -753,12 +808,20 @@ def build_payment_receipt_html(
         "legal_disclosure": _legal_disclosure(company, labels),
         "payment": payment,
         "invoice": invoice,
+        "quote": quote,
+        "document": document,
+        "document_number": document_number,
+        "document_number_label": (
+            labels["quote_number"] if quote is not None else labels["invoice_number"]
+        ),
+        "is_quote_origin": is_quote_origin,
         "company": company,
         "customer": customer,
         "billing_address": billing_address,
         "billing_name": resolve_billing_name(customer),
         "logo_data_uri": logo_data_uri,
         "paid_total": paid_total,
+        "remaining_amount": remaining_amount,
         "css": css_text,
     }
 
@@ -804,27 +867,81 @@ async def render_payment_receipt_pdf(
     from jai.models.customer import Customer
     from jai.models.invoice import Invoice
     from jai.models.payment import Payment
+    from jai.models.quote import Quote
 
-    # -- Load payment scoped to company (red-line 2) --------------------------
-    payment_stmt = select(Payment).where(
+    # The seed is deliberately projection-only: it chooses the immutable
+    # payment origin, but is never used to render.  After taking the matching
+    # parent lock below we reload the payment and all settlement data, so a
+    # concurrent deletion/conversion cannot make a receipt from two snapshots.
+    payment_seed_stmt = select(Payment.quote_id, Payment.invoice_id).where(
         Payment.id == payment_id, Payment.company_id == company_id
     )
-    payment_result = await session.execute(payment_stmt)
+    payment_seed_result = await session.execute(payment_seed_stmt)
+    payment_seed = payment_seed_result.one_or_none()
+    if payment_seed is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found.",
+        )
+
+    invoice: Invoice | None = None
+    quote: Quote | None = None
+    if payment_seed.quote_id is not None:
+        quote_result = await session.execute(
+            select(Quote).where(
+                Quote.id == payment_seed.quote_id,
+                Quote.company_id == company_id,
+            ).with_for_update(read=True)
+        )
+        quote = quote_result.scalar_one_or_none()
+        if quote is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Quote not found.",
+            )
+    elif payment_seed.invoice_id is not None:
+        invoice_result = await session.execute(
+            select(Invoice).where(
+                Invoice.id == payment_seed.invoice_id,
+                Invoice.company_id == company_id,
+            ).with_for_update(read=True)
+        )
+        invoice = invoice_result.scalar_one_or_none()
+        if invoice is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invoice not found.",
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment document not found.",
+        )
+
+    # Reload the current receipt payment only after its parent is locked.  The
+    # write protocol locks quote -> invoice for quote-origin payments and
+    # invoice for ordinary ones, so this preserves that order and also makes a
+    # just-deleted payment a clean 404 rather than a stale receipt.
+    payment_result = await session.execute(
+        select(Payment)
+        .where(Payment.id == payment_id, Payment.company_id == company_id)
+        .with_for_update(read=True)
+    )
     payment = payment_result.scalar_one_or_none()
     if payment is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payment not found.",
         )
-
-    # -- Load related invoice -------------------------------------------------
-    invoice_stmt = select(Invoice).where(Invoice.id == payment.invoice_id)
-    invoice_result = await session.execute(invoice_stmt)
-    invoice = invoice_result.scalar_one_or_none()
-    if invoice is None:
+    if quote is not None and payment.quote_id != quote.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invoice not found.",
+            detail="Payment document not found.",
+        )
+    if invoice is not None and payment.invoice_id != invoice.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment document not found.",
         )
 
     # -- Load company ---------------------------------------------------------
@@ -840,9 +957,17 @@ async def render_payment_receipt_pdf(
     # -- Load customer (with addresses) ---------------------------------------
     from sqlalchemy.orm import selectinload as _sil
 
+    if quote is not None:
+        document_customer_id = quote.customer_id
+    else:
+        assert invoice is not None
+        document_customer_id = invoice.customer_id
     customer_stmt = (
         select(Customer)
-        .where(Customer.id == invoice.customer_id)
+        .where(
+            Customer.id == document_customer_id,
+            Customer.company_id == company_id,
+        )
         .options(_sil(Customer.addresses))
     )
     customer_result = await session.execute(customer_stmt)
@@ -882,6 +1007,25 @@ async def render_payment_receipt_pdf(
             logo_data_uri = f"data:{asset.mime_type};base64,{b64}"
 
     # -- Build HTML + render PDF ----------------------------------------------
+    if quote is not None:
+        quote_payments_result = await session.execute(
+            select(Payment).where(
+                Payment.quote_id == quote.id,
+                Payment.company_id == company_id,
+            )
+        )
+        quote_payments = list(quote_payments_result.scalars().all())
+        paid_total = sum(
+            (Decimal(str(item.amount)) for item in quote_payments), Decimal("0")
+        )
+        remaining_amount = Decimal(str(quote.total_incl_vat)) - paid_total
+    else:
+        assert invoice is not None
+        paid_total = Decimal(str(invoice.total_incl_vat)) - Decimal(
+            str(invoice.due_amount)
+        )
+        remaining_amount = Decimal(str(invoice.due_amount))
+
     html = build_payment_receipt_html(
         payment=payment,
         invoice=invoice,
@@ -889,11 +1033,19 @@ async def render_payment_receipt_pdf(
         customer=customer,
         locale=resolved_locale,
         logo_data_uri=logo_data_uri,
+        quote=quote,
+        paid_total=paid_total,
+        remaining_amount=remaining_amount,
     )
     pdf_bytes = html_to_pdf(html)
 
-    # Filename: receipt-<invoice_number>-<payment_date>.pdf
-    filename = f"receipt-{invoice.invoice_number}-{payment.payment_date}.pdf"
+    receipt_document_number: str | None
+    if quote is not None:
+        receipt_document_number = quote.quote_number
+    else:
+        assert invoice is not None
+        receipt_document_number = invoice.invoice_number
+    filename = f"receipt-{receipt_document_number}-{payment.payment_date}.pdf"
     return pdf_bytes, filename
 
 

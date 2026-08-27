@@ -24,14 +24,18 @@ from jai.schemas.payment import (
     InvoicePaymentsResponse,
     PaymentInput,
     PaymentListResponse,
+    PaymentMutationResponse,
     PaymentRead,
+    QuotePaymentsResponse,
 )
 from jai.services.payment import (
     delete_payment,
     get_payment,
     list_invoice_payments,
     list_payments,
+    list_quote_payments,
     record_payment,
+    record_quote_payment,
     update_payment,
 )
 
@@ -91,6 +95,38 @@ async def record_payment_endpoint(
         ) from exc
 
 
+@router.post(
+    "/quotes/{quote_id}/payments",
+    response_model=QuotePaymentsResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_quote_payment_endpoint(
+    quote_id: uuid.UUID,
+    body: PaymentInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuotePaymentsResponse:
+    """Record one deposit on an accepted domestic quote."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await record_quote_payment(
+            session,
+            quote_id=quote_id,
+            company_id=company_id,
+            body=body,
+            creator_id=user.id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # List payments for an invoice
 # ---------------------------------------------------------------------------
@@ -116,6 +152,26 @@ async def list_invoice_payments_endpoint(
         ) from exc
 
 
+@router.get(
+    "/quotes/{quote_id}/payments",
+    response_model=QuotePaymentsResponse,
+)
+async def list_quote_payments_endpoint(
+    quote_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuotePaymentsResponse:
+    """Return quote-origin payments, including after conversion."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await list_quote_payments(session, quote_id, company_id)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Global payments overview (step 3)
 # Note: this route MUST be registered before /payments/{payment_id} so that
@@ -125,7 +181,10 @@ async def list_invoice_payments_endpoint(
 
 @router.get("/payments", response_model=PaymentListResponse)
 async def list_payments_endpoint(
-    q: str | None = Query(default=None, description="Search invoice number or customer name."),
+    q: str | None = Query(
+        default=None,
+        description="Search invoice number, quote number, or customer name.",
+    ),
     customer_id: uuid.UUID | None = Query(default=None),
     payment_method_id: uuid.UUID | None = Query(default=None),
     date_from: date | None = Query(
@@ -184,14 +243,14 @@ async def get_payment_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.put("/payments/{payment_id}", response_model=InvoicePaymentsResponse)
+@router.put("/payments/{payment_id}", response_model=PaymentMutationResponse)
 async def update_payment_endpoint(
     payment_id: uuid.UUID,
     body: PaymentInput,
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
-) -> InvoicePaymentsResponse:
-    """Edit a payment and return the updated invoice aggregate."""
+) -> PaymentMutationResponse:
+    """Edit a payment and return every affected aggregate."""
     _owner_only(user)
     company_id = _require_company_id(user)
     try:
@@ -211,12 +270,12 @@ async def update_payment_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.delete("/payments/{payment_id}", response_model=InvoicePaymentsResponse)
+@router.delete("/payments/{payment_id}", response_model=PaymentMutationResponse)
 async def delete_payment_endpoint(
     payment_id: uuid.UUID,
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
-) -> InvoicePaymentsResponse:
+) -> PaymentMutationResponse:
     """Delete a payment and return the updated invoice aggregate.
 
     Returns 200 with the aggregate body (not 204) so the front-end gets the

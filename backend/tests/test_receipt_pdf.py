@@ -516,3 +516,41 @@ def test_build_payment_receipt_html_amounts_two_decimal() -> None:
     # Ensure 3-decimal forms are not present in the amounts section
     assert "60.500" not in html
     assert "121.000" not in html
+
+
+def test_quote_payment_receipt_is_explicitly_not_a_vat_invoice() -> None:
+    payment = _make_payment(amount="1600.000")
+    quote = SimpleNamespace(
+        quote_number="Q2026-0042",
+        total_incl_vat=Decimal("8000.000"),
+    )
+    html = build_payment_receipt_html(
+        payment,
+        None,
+        _make_company(),
+        _make_customer(),
+        "en",
+        None,
+        quote=quote,
+        paid_total=Decimal("5600.000"),
+        remaining_amount=Decimal("2400.000"),
+    )
+
+    assert "Q2026-0042" in html
+    assert "NOT A VAT INVOICE" in html
+    assert "非 VAT 发票" in html
+    assert "8000.00" in html
+    assert "5600.00" in html
+    assert "2400.00" in html
+
+
+def test_invoice_payment_receipt_has_no_non_vat_warning() -> None:
+    html = build_payment_receipt_html(
+        _make_payment(),
+        _make_invoice(),
+        _make_company(),
+        _make_customer(),
+        "en",
+        None,
+    )
+    assert "NOT A VAT INVOICE" not in html

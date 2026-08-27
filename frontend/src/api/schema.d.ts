@@ -1532,6 +1532,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/{quote_id}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Quote Payments Endpoint
+         * @description Return quote-origin payments, including after conversion.
+         */
+        get: operations["list_quote_payments_endpoint_api_v1_quotes__quote_id__payments_get"];
+        put?: never;
+        /**
+         * Record Quote Payment Endpoint
+         * @description Record one deposit on an accepted domestic quote.
+         */
+        post: operations["record_quote_payment_endpoint_api_v1_quotes__quote_id__payments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments": {
         parameters: {
             query?: never;
@@ -1566,7 +1590,7 @@ export interface paths {
         get: operations["get_payment_endpoint_api_v1_payments__payment_id__get"];
         /**
          * Update Payment Endpoint
-         * @description Edit a payment and return the updated invoice aggregate.
+         * @description Edit a payment and return every affected aggregate.
          */
         put: operations["update_payment_endpoint_api_v1_payments__payment_id__put"];
         post?: never;
@@ -5291,12 +5315,18 @@ export interface components {
              */
             id: string;
             /**
-             * Invoice Id
-             * Format: uuid
+             * Origin Type
+             * @enum {string}
              */
-            invoice_id: string;
+            origin_type: "INVOICE" | "QUOTE";
+            /** Invoice Id */
+            invoice_id?: string | null;
             /** Invoice Number */
-            invoice_number: string;
+            invoice_number?: string | null;
+            /** Quote Id */
+            quote_id?: string | null;
+            /** Quote Number */
+            quote_number?: string | null;
             /**
              * Customer Id
              * Format: uuid
@@ -5376,6 +5406,21 @@ export interface components {
             active?: boolean;
         };
         /**
+         * PaymentMutationResponse
+         * @description All aggregates affected by editing or deleting a payment.
+         */
+        PaymentMutationResponse: {
+            /**
+             * Payment Id
+             * Format: uuid
+             */
+            payment_id: string;
+            /** Deleted */
+            deleted: boolean;
+            quote?: components["schemas"]["QuotePaymentsResponse"] | null;
+            invoice?: components["schemas"]["InvoicePaymentsResponse"] | null;
+        };
+        /**
          * PaymentRead
          * @description Full payment record as returned by read endpoints.
          */
@@ -5386,12 +5431,18 @@ export interface components {
              */
             id: string;
             /**
-             * Invoice Id
-             * Format: uuid
+             * Origin Type
+             * @enum {string}
              */
-            invoice_id: string;
+            origin_type: "INVOICE" | "QUOTE";
+            /** Invoice Id */
+            invoice_id?: string | null;
             /** Invoice Number */
-            invoice_number: string;
+            invoice_number?: string | null;
+            /** Quote Id */
+            quote_id?: string | null;
+            /** Quote Number */
+            quote_number?: string | null;
             /**
              * Payment Date
              * Format: date
@@ -5421,6 +5472,35 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Tax Breakdown
+             * @default []
+             */
+            tax_breakdown?: components["schemas"]["PaymentTaxRead"][];
+        };
+        /**
+         * PaymentTaxRead
+         * @description Persisted VAT allocation for one payment/rate bucket.
+         */
+        PaymentTaxRead: {
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Taxable Amount */
+            base_taxable_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
         };
         /**
          * ProductCategoryListResponse
@@ -6031,6 +6111,32 @@ export interface components {
              * @description Read-only: preview of the next quote number (ignored on PUT).
              */
             preview?: string | null;
+        };
+        /**
+         * QuotePaymentsResponse
+         * @description Authoritative derived payment aggregate for one quote.
+         */
+        QuotePaymentsResponse: {
+            /**
+             * Quote Id
+             * Format: uuid
+             */
+            quote_id: string;
+            /** Quote Number */
+            quote_number: string;
+            /** Converted Invoice Id */
+            converted_invoice_id?: string | null;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Paid Total */
+            paid_total: string;
+            /** Remaining Amount */
+            remaining_amount: string;
+            /**
+             * Items
+             * @default []
+             */
+            items?: components["schemas"]["PaymentRead"][];
         };
         /**
          * QuoteReactivateWrite
@@ -10492,10 +10598,76 @@ export interface operations {
             };
         };
     };
+    list_quote_payments_endpoint_api_v1_quotes__quote_id__payments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotePaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_quote_payment_endpoint_api_v1_quotes__quote_id__payments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotePaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_payments_endpoint_api_v1_payments_get: {
         parameters: {
             query?: {
-                /** @description Search invoice number or customer name. */
+                /** @description Search invoice number, quote number, or customer name. */
                 q?: string | null;
                 customer_id?: string | null;
                 payment_method_id?: string | null;
@@ -10585,7 +10757,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvoicePaymentsResponse"];
+                    "application/json": components["schemas"]["PaymentMutationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10616,7 +10788,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvoicePaymentsResponse"];
+                    "application/json": components["schemas"]["PaymentMutationResponse"];
                 };
             };
             /** @description Validation Error */

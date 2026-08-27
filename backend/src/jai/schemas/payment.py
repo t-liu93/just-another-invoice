@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -45,12 +46,29 @@ class PaymentInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class PaymentTaxRead(BaseModel):
+    """Persisted VAT allocation for one payment/rate bucket."""
+
+    vat_rate_id: uuid.UUID | None = None
+    vat_rate_label: str
+    vat_rate_percent: Decimal
+    taxable_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+    base_taxable_amount: Decimal
+    base_vat_amount: Decimal
+    base_gross_amount: Decimal
+
+
 class PaymentRead(BaseModel):
     """Full payment record as returned by read endpoints."""
 
     id: uuid.UUID
-    invoice_id: uuid.UUID
-    invoice_number: str
+    origin_type: Literal["INVOICE", "QUOTE"]
+    invoice_id: uuid.UUID | None = None
+    invoice_number: str | None = None
+    quote_id: uuid.UUID | None = None
+    quote_number: str | None = None
     payment_date: date
     amount: Decimal
     base_amount: Decimal
@@ -61,6 +79,7 @@ class PaymentRead(BaseModel):
     note: str | None = None
     created_at: datetime
     updated_at: datetime
+    tax_breakdown: list[PaymentTaxRead] = []
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +112,27 @@ class InvoicePaymentsResponse(BaseModel):
     items: list[PaymentRead] = []
 
 
+class QuotePaymentsResponse(BaseModel):
+    """Authoritative derived payment aggregate for one quote."""
+
+    quote_id: uuid.UUID
+    quote_number: str
+    converted_invoice_id: uuid.UUID | None = None
+    total_incl_vat: Decimal
+    paid_total: Decimal
+    remaining_amount: Decimal
+    items: list[PaymentRead] = []
+
+
+class PaymentMutationResponse(BaseModel):
+    """All aggregates affected by editing or deleting a payment."""
+
+    payment_id: uuid.UUID
+    deleted: bool
+    quote: QuotePaymentsResponse | None = None
+    invoice: InvoicePaymentsResponse | None = None
+
+
 # ---------------------------------------------------------------------------
 # Global payments overview (step 3)
 # ---------------------------------------------------------------------------
@@ -106,8 +146,11 @@ class PaymentListItem(BaseModel):
     """
 
     id: uuid.UUID
-    invoice_id: uuid.UUID
-    invoice_number: str
+    origin_type: Literal["INVOICE", "QUOTE"]
+    invoice_id: uuid.UUID | None = None
+    invoice_number: str | None = None
+    quote_id: uuid.UUID | None = None
+    quote_number: str | None = None
     customer_id: uuid.UUID
     customer_name: str
     payment_date: date

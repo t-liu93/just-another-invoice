@@ -15,6 +15,7 @@ and require system PDF libraries (marked @pytest.mark.integration).
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -876,3 +877,76 @@ def test_resolve_billing_name_billing_name_in_invoice_html() -> None:
     bill_to_idx = html.index("BILL TO")
     acme_idx = html.index("Acme B.V.", bill_to_idx)
     assert acme_idx > bill_to_idx  # company_name is rendered after "BILL TO"
+
+
+def test_invoice_html_lists_payments_without_reducing_full_total_or_vat() -> None:
+    invoice = _make_invoice(
+        subtotal_excl_vat="6611.570",
+        vat_total="1388.430",
+        total_incl_vat="8000.000",
+        due_amount="2400.000",
+        taxes=[_make_tax(tax_amount="1388.430", taxable_amount="6611.570")],
+    )
+    payments = [
+        SimpleNamespace(
+            payment_date=date(2026, 2, 1),
+            reference="DEP-1",
+            amount=Decimal("1600.000"),
+        ),
+        SimpleNamespace(
+            payment_date=date(2026, 3, 1),
+            reference="DEP-2",
+            amount=Decimal("4000.000"),
+        ),
+    ]
+    html = build_invoice_html(
+        invoice,
+        _make_company(),
+        _make_customer(),
+        "en",
+        None,
+        payments=payments,
+        paid_total=Decimal("5600.000"),
+    )
+
+    assert "8000.00" in html
+    assert "1388.43" in html
+    assert "Already paid" in html
+    assert "5600.00" in html
+    assert "2400.00" in html
+    assert html.index("DEP-1") < html.index("DEP-2")
+
+
+def test_invoice_payment_rows_escape_reference_and_have_zh_settlement_labels() -> None:
+    """New settlement fields remain escaped and complete in the Chinese template."""
+    invoice = _make_invoice(
+        total_incl_vat="8000.000",
+        due_amount="2400.000",
+        subtotal_excl_vat="6611.570",
+        vat_total="1388.430",
+        taxes=[_make_tax(tax_amount="1388.430", taxable_amount="6611.570")],
+    )
+    malicious_reference = '<img src="https://evil.example/logo.png">'
+    payment = SimpleNamespace(
+        payment_date=date(2026, 2, 1),
+        reference=malicious_reference,
+        amount=Decimal("5600.000"),
+    )
+
+    html = build_invoice_html(
+        invoice,
+        _make_company(),
+        _make_customer(),
+        "zh",
+        None,
+        payments=[payment],
+        paid_total=Decimal("5600.000"),
+    )
+
+    assert malicious_reference not in html
+    assert "&lt;img src=&#34;https://evil.example/logo.png&#34;&gt;" in html
+    assert "已收款明细" in html
+    assert "已付款" in html
+    assert "应付款" in html
+    assert "8000.00" in html
+    assert "1388.43" in html

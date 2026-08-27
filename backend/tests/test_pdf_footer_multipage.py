@@ -280,6 +280,45 @@ def test_quote_footer_appears_on_every_page() -> None:
         )
 
 
+@pytest.mark.integration
+def test_chinese_invoice_payment_table_spans_pages_without_losing_footer_or_rows() -> None:
+    """The M11.5 settlement table keeps all rows and the running footer on every page."""
+    from jai.services.pdf import build_invoice_html, html_to_pdf
+
+    invoice = _make_invoice(n_lines=1)
+    invoice.due_amount = Decimal("149.900")
+    payments = [
+        SimpleNamespace(
+            payment_date=f"2026-02-{(index % 28) + 1:02d}",
+            reference=f"PAYMENT-ROW-{index:03d}",
+            amount=Decimal("1.000"),
+        )
+        for index in range(80)
+    ]
+    html = build_invoice_html(
+        invoice,
+        _make_company(),
+        _make_customer(),
+        "zh",
+        None,
+        payments=payments,
+        paid_total=Decimal("80.000"),
+    )
+    assert "已收款明细" in html
+    assert "已付款" in html
+
+    page_texts = _extract_page_texts(html_to_pdf(html))
+    assert len(page_texts) >= 2
+    rendered_text = "\n".join(page_texts)
+    assert "已收款明细" in rendered_text
+    assert "已付款" in rendered_text
+    for payment in payments:
+        assert payment.reference in rendered_text
+    for page_idx, page_text in enumerate(page_texts):
+        assert _COC in page_text, f"KvK missing from payment-table page {page_idx + 1}"
+        assert _EMAIL in page_text, f"Email missing from payment-table page {page_idx + 1}"
+
+
 # ---------------------------------------------------------------------------
 # Structural unit test: doc-footer precedes main content in HTML
 # ---------------------------------------------------------------------------

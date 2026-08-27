@@ -230,7 +230,12 @@ async def delete_quote_endpoint(
     """Delete a quote (cascade removes lines/taxes). Number is not recycled."""
     _owner_only(user)
     company_id = _require_company_id(user)
-    deleted = await delete_quote(session, quote_id, company_id)
+    try:
+        deleted = await delete_quote(session, quote_id, company_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")
 

@@ -19,6 +19,7 @@ import datetime
 import uuid
 
 import pyotp
+import pypdfium2
 import pytest
 from httpx import AsyncClient
 
@@ -148,6 +149,18 @@ async def _record_payment(client: AsyncClient, invoice_id: str, amount: str = "6
     return resp.json()["items"][-1]["id"]
 
 
+def _extract_pdf_text(pdf_bytes: bytes) -> str:
+    """Extract visible text from the actual WeasyPrint output."""
+    document = pypdfium2.PdfDocument(pdf_bytes)
+    try:
+        return "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+    finally:
+        document.close()
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -167,6 +180,14 @@ async def test_receipt_pdf_download_endpoint(db_client: AsyncClient) -> None:
     assert resp.headers["content-type"] == "application/pdf"
     assert "attachment" in resp.headers["content-disposition"]
     assert resp.content[:4] == b"%PDF"
+    invoice = await db_client.get(f"/api/v1/invoices/{invoice_id}")
+    assert invoice.status_code == 200, invoice.text
+    text = _extract_pdf_text(resp.content)
+    assert invoice.json()["invoice_number"] in text
+    assert "Receipt" in text
+    assert "NOT A VAT INVOICE" not in text
+    for expected in ("242.00", "60.50", "181.50"):
+        assert expected in text
 
 
 @pytest.mark.integration

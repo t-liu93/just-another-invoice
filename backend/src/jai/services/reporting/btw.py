@@ -63,6 +63,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jai.models._enums import InvoiceStatus
 from jai.models.expense import Expense
 from jai.models.invoice import Invoice
+from jai.models.payment import Payment, PaymentTax
 from jai.schemas.report import (
     VatBoxBaseOnly,
     VatBoxBaseVat,
@@ -403,6 +404,57 @@ async def compute_vat_return(
     result_inv = await session.execute(stmt_inv)
     invoices = result_inv.scalars().all()
 
+    # Quote-origin advances are recognised on their payment date, whether or
+    # not the quote has already been converted. These are locked PaymentTax
+    # snapshots; VAT is never inferred from the gross payment amount here.
+    advance_result = await session.execute(
+        select(Payment.id, PaymentTax)
+        .join(PaymentTax, PaymentTax.payment_id == Payment.id)
+        .where(
+            Payment.company_id == company_id,
+            Payment.quote_id.is_not(None),
+            Payment.payment_date >= date_from,
+            Payment.payment_date <= date_to,
+        )
+    )
+    advance_payment_ids: set[uuid.UUID] = set()
+    for payment_id, payment_tax in advance_result.all():
+        advance_payment_ids.add(payment_id)
+        _apply_invoice_line_nl(
+            acc,
+            payment_tax.vat_treatment_effect,
+            payment_tax.vat_treatment_requires_icp,
+            payment_tax.vat_treatment_code,
+            Decimal(str(payment_tax.vat_rate_percent)),
+            quantize_to_minor_unit(Decimal(str(payment_tax.base_taxable_amount))),
+            quantize_to_minor_unit(Decimal(str(payment_tax.base_vat_amount))),
+            tiers,
+        )
+    if advance_payment_ids:
+        warnings.append(
+            f"Included {len(advance_payment_ids)} quote-origin advance payment(s) "
+            "by payment date. Editing a filed-period payment may require a correction."
+        )
+
+    invoice_ids = [invoice.id for invoice in invoices]
+    offsets_by_invoice: dict[uuid.UUID, list[PaymentTax]] = {}
+    offset_payment_ids: set[uuid.UUID] = set()
+    if invoice_ids:
+        offset_result = await session.execute(
+            select(Payment.invoice_id, Payment.id, PaymentTax)
+            .join(PaymentTax, PaymentTax.payment_id == Payment.id)
+            .where(
+                Payment.invoice_id.in_(invoice_ids),
+                Payment.company_id == company_id,
+                Payment.quote_id.is_not(None),
+            )
+        )
+        for invoice_id, payment_id, payment_tax in offset_result.all():
+            if invoice_id is None:
+                continue
+            offsets_by_invoice.setdefault(invoice_id, []).append(payment_tax)
+            offset_payment_ids.add(payment_id)
+
     # Track EU B2B invoices that need ICP but have no customer vat_id.
     icp_invoices_missing_vat_id: list[str] = []
 
@@ -446,6 +498,23 @@ async def compute_vat_return(
                         tiers,
                     )
 
+        # The formal invoice contributes its complete VAT above. Subtract all
+        # quote-origin advance snapshots attached to it, including advances
+        # recognised in earlier quarters, so the project is filed exactly once.
+        for payment_tax in offsets_by_invoice.get(inv.id, []):
+            _apply_invoice_line_nl(
+                acc,
+                payment_tax.vat_treatment_effect,
+                payment_tax.vat_treatment_requires_icp,
+                payment_tax.vat_treatment_code,
+                Decimal(str(payment_tax.vat_rate_percent)),
+                -quantize_to_minor_unit(
+                    Decimal(str(payment_tax.base_taxable_amount))
+                ),
+                -quantize_to_minor_unit(Decimal(str(payment_tax.base_vat_amount))),
+                tiers,
+            )
+
         # D5 / warning: EU B2B invoices going to 3b require a customer vat_id.
         if requires_icp and effect == _EFFECT_ZERO_REVERSE:
             from jai.models.customer import Customer  # avoid circular at module level
@@ -466,6 +535,12 @@ async def compute_vat_return(
         warnings.append(
             f"The following EU B2B (ICP) invoices are missing a customer VAT ID, "
             f"which is required for the Opgaaf ICP declaration: {missing_str}{extra}."
+        )
+
+    if offset_payment_ids:
+        warnings.append(
+            f"Applied final-invoice VAT offsets for {len(offset_payment_ids)} "
+            "quote-origin advance payment(s)."
         )
 
     # -----------------------------------------------------------------------

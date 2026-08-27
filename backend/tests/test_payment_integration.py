@@ -40,6 +40,10 @@ import uuid
 import pyotp
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from jai.models.user import User
 
 # ---------------------------------------------------------------------------
 # Shared test helpers (self-contained, no cross-file imports)
@@ -290,6 +294,10 @@ class TestRecordPaymentHappyFlow:
         assert p["id"] == payment_id
         assert p["amount"] == "60.000"
         assert p["invoice_id"] == inv["id"]
+        assert p["origin_type"] == "INVOICE"
+        assert p["quote_id"] is None
+        assert p["quote_number"] is None
+        assert p["tax_breakdown"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +490,28 @@ class TestPaymentGuards:
             json={"payment_date": "2026-06-12", "amount": "50.000"},
         )
         assert resp.status_code == 401
+
+    async def test_non_owner_cannot_mutate_payments(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """The route enforces owner-only access before any payment lookup."""
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+        async with db_session_maker() as session:
+            user = await session.scalar(
+                select(User).where(User.email == "owner@example.com")
+            )
+            assert user is not None
+            user.role = "member"
+            await session.commit()
+
+        response = await db_client.put(
+            f"/api/v1/payments/{uuid.uuid4()}",
+            json={"payment_date": "2026-06-12", "amount": "50.000"},
+        )
+        assert response.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -722,7 +752,11 @@ class TestUpdatePayment:
             json={"payment_date": "2026-06-12", "amount": "50.000"},
         )
         assert put_resp.status_code == 200, put_resp.text
-        data = put_resp.json()
+        assert put_resp.json()["payment_id"] == final_payment_id
+        assert put_resp.json()["deleted"] is False
+        assert put_resp.json()["quote"] is None
+        data = put_resp.json()["invoice"]
+        assert data is not None
 
         assert data["paid_status"] == "PARTIALLY_PAID"
         assert data["status"] == "SENT"  # COMPLETED rolled back to SENT (D3)
@@ -804,8 +838,9 @@ class TestUpdatePayment:
         quantised = "33.334"
 
         # PUT response reflects quantised amount
-        assert put_resp.json()["items"][0]["amount"] == quantised
-        assert put_resp.json()["paid_total"] == quantised
+        invoice_aggregate = put_resp.json()["invoice"]
+        assert invoice_aggregate["items"][0]["amount"] == quantised
+        assert invoice_aggregate["paid_total"] == quantised
 
         # GET /payments/{id} returns the same quantised amount
         get_resp = await db_client.get(f"/api/v1/payments/{payment_id}")
@@ -842,7 +877,8 @@ class TestUpdatePayment:
             json={"payment_date": "2026-06-01", "amount": "120.9996"},
         )
         assert put_resp.status_code == 200, put_resp.text
-        data = put_resp.json()
+        data = put_resp.json()["invoice"]
+        assert data is not None
 
         assert data["items"][0]["amount"] == "121.000"
         assert data["paid_total"] == "121.000"
@@ -884,7 +920,11 @@ class TestDeletePayment:
         # Delete the second payment
         del_resp = await db_client.delete(f"/api/v1/payments/{payment2_id}")
         assert del_resp.status_code == 200, del_resp.text
-        data = del_resp.json()
+        assert del_resp.json()["payment_id"] == payment2_id
+        assert del_resp.json()["deleted"] is True
+        assert del_resp.json()["quote"] is None
+        data = del_resp.json()["invoice"]
+        assert data is not None
 
         assert data["paid_status"] == "PARTIALLY_PAID"
         assert data["status"] == "SENT"  # COMPLETED rolled back to SENT (D3)
@@ -916,7 +956,8 @@ class TestDeletePayment:
         # Delete the only payment
         del_resp = await db_client.delete(f"/api/v1/payments/{payment_id}")
         assert del_resp.status_code == 200, del_resp.text
-        data = del_resp.json()
+        data = del_resp.json()["invoice"]
+        assert data is not None
 
         assert data["paid_status"] == "UNPAID"
         assert data["status"] == "SENT"
@@ -949,7 +990,8 @@ class TestDeletePayment:
         # Delete it
         del_resp = await db_client.delete(f"/api/v1/payments/{payment_id}")
         assert del_resp.status_code == 200, del_resp.text
-        data = del_resp.json()
+        data = del_resp.json()["invoice"]
+        assert data is not None
 
         assert data["paid_status"] == "UNPAID"
         assert data["status"] == "SENT"

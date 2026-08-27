@@ -30,6 +30,7 @@ import { get, downloadBlob } from '../api/http'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
 import type { components } from '../api/schema'
 import { localDateStr, formatDate } from '../utils/date'
+import { isPaymentMutationBusy } from '../utils/quotePaymentPanelState'
 
 type PaymentMethodRead = components['schemas']['PaymentMethodRead']
 type PaymentMethodListResponse = components['schemas']['PaymentMethodListResponse']
@@ -69,7 +70,7 @@ const editMethodId = ref<string | null>(null)
 const editNote = ref<string | null>(null)
 const editReference = ref<string | null>(null)
 
-// Separate saving flags for record vs edit to avoid shared state
+// Saving flags feed one panel-wide mutation interlock.
 const recordSaving = ref(false)
 const editSaving = ref(false)
 const deleteSaving = ref<string | null>(null) // stores the payment id being deleted
@@ -131,9 +132,27 @@ function handleReceiptPreviewLocaleSelect(key: string) {
 }
 
 // ---- computed ----
-const canRecord = computed(() =>
+const invoiceAllowsRecording = computed(() =>
   props.invoiceStatus === 'SENT' || props.invoiceStatus === 'COMPLETED',
 )
+
+const mutationBusy = computed(() => isPaymentMutationBusy(
+  recordSaving.value,
+  editSaving.value,
+  deleteSaving.value,
+))
+
+const canRecord = computed(() => invoiceAllowsRecording.value && !mutationBusy.value)
+
+function invoiceAllowsManaging(payment: PaymentRead): boolean {
+  return invoiceAllowsRecording.value || (
+    props.invoiceStatus === 'DRAFT' && payment.origin_type === 'QUOTE'
+  )
+}
+
+function canManage(payment: PaymentRead): boolean {
+  return invoiceAllowsManaging(payment) && !mutationBusy.value
+}
 
 const paymentMethodOptions = computed(() =>
   paymentMethods.value
@@ -172,6 +191,7 @@ onMounted(async () => {
 
 // ---- record payment ----
 function openForm() {
+  if (!canRecord.value) return
   formDate.value = localDateStr(new Date())
   formAmount.value = null
   formMethodId.value = null
@@ -185,6 +205,7 @@ function cancelForm() {
 }
 
 async function handleRecord() {
+  if (!canRecord.value) return
   if (!formAmount.value || formAmount.value <= 0) {
     message.warning(t('payments.amountRequired'))
     return
@@ -211,6 +232,7 @@ async function handleRecord() {
 
 // ---- edit payment ----
 function openEdit(payment: PaymentRead) {
+  if (!canManage(payment)) return
   editingPayment.value = payment
   editDate.value = payment.payment_date
   editAmount.value = Number(payment.amount)
@@ -224,22 +246,24 @@ function cancelEdit() {
 }
 
 async function handleEdit() {
-  if (!editingPayment.value) return
+  const payment = editingPayment.value
+  if (!payment || !canManage(payment)) return
   if (!editAmount.value || editAmount.value <= 0) {
     message.warning(t('payments.amountRequired'))
     return
   }
   editSaving.value = true
   try {
-    const result = await store.updatePayment(editingPayment.value.id, {
+    const result = await store.updatePayment(payment.id, {
       payment_date: editDate.value,
       amount: editAmount.value,
       payment_method_id: editMethodId.value,
       note: editNote.value,
       reference: editReference.value,
     })
-    aggregate.value = result
-    emit('paymentsChanged', result)
+    if (!result.invoice) throw new Error(t('payments.missingInvoiceAggregate'))
+    aggregate.value = result.invoice
+    emit('paymentsChanged', result.invoice)
     editingPayment.value = null
     message.success(t('payments.updateSuccess'))
   } catch (e: unknown) {
@@ -251,18 +275,20 @@ async function handleEdit() {
 
 // ---- delete payment ----
 function handleDelete(payment: PaymentRead) {
+  if (!canManage(payment)) return
   dialog.warning({
     title: t('payments.deleteTitle'),
     content: t('payments.deleteConfirm'),
     positiveText: t('payments.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
+      if (!canManage(payment)) return
       deleteSaving.value = payment.id
       try {
-        // DELETE returns 200 + InvoicePaymentsResponse (M7 contract)
         const result = await store.deletePayment(payment.id)
-        aggregate.value = result
-        emit('paymentsChanged', result)
+        if (!result.invoice) throw new Error(t('payments.missingInvoiceAggregate'))
+        aggregate.value = result.invoice
+        emit('paymentsChanged', result.invoice)
         message.success(t('payments.deleteSuccess'))
       } catch (e: unknown) {
         message.error(e instanceof Error ? e.message : t('payments.deleteFailed'))
@@ -294,11 +320,13 @@ function handleDelete(payment: PaymentRead) {
 
       <!-- Guard: invoice not yet sent -->
       <n-alert
-        v-if="!canRecord"
+        v-if="!invoiceAllowsRecording"
         type="info"
         style="margin-bottom: 12px"
       >
-        {{ t('payments.needSentStatus') }}
+        {{ aggregate?.items?.length
+          ? t('payments.draftManageExisting')
+          : t('payments.needSentStatus') }}
       </n-alert>
 
       <!-- Existing payment items -->
@@ -349,7 +377,7 @@ function handleDelete(payment: PaymentRead) {
               <n-button v-if="editSaving" size="small" type="primary" loading disabled>
                 {{ t('payments.save') }}
               </n-button>
-              <n-button v-else size="small" type="primary" @click="handleEdit">
+              <n-button v-else size="small" type="primary" :disabled="!canManage(payment)" @click="handleEdit">
                 {{ t('payments.save') }}
               </n-button>
               <n-button size="small" @click="cancelEdit">{{ t('common.cancel') }}</n-button>
@@ -362,6 +390,15 @@ function handleDelete(payment: PaymentRead) {
             <div class="payment-item">
               <div class="payment-item-main">
                 <n-text strong>{{ fmtMoney(payment.amount) }}</n-text>
+                <n-tag
+                  size="small"
+                  :type="payment.origin_type === 'QUOTE' ? 'warning' : 'default'"
+                  style="margin-left: 8px"
+                >
+                  {{ payment.origin_type === 'QUOTE'
+                    ? t('payments.quoteOrigin', { number: payment.quote_number ?? '—' })
+                    : t('payments.invoiceOrigin') }}
+                </n-tag>
                 <n-text depth="3" style="margin-left: 8px; font-size: 13px">
                   {{ formatDate(payment.payment_date) }}
                 </n-text>
@@ -408,24 +445,37 @@ function handleDelete(payment: PaymentRead) {
                   </n-button>
                 </n-dropdown>
 
-                <template v-if="canRecord">
+                <template v-if="invoiceAllowsManaging(payment)">
                   <n-button
                     size="small"
                     quaternary
                     circle
                     :title="t('payments.edit')"
+                    :disabled="!canManage(payment)"
                     @click="openEdit(payment)"
                   >
                     <template #icon><n-icon><CreateOutline /></n-icon></template>
                   </n-button>
-                  <!-- Delete button: no dynamic prop, no loading state here; deletion dialog handles it -->
                   <n-button
+                    v-if="deleteSaving === payment.id"
                     size="small"
                     quaternary
                     circle
                     type="error"
                     :title="t('payments.delete')"
-                    :disabled="deleteSaving === payment.id"
+                    loading
+                    disabled
+                  >
+                    <template #icon><n-icon><TrashOutline /></n-icon></template>
+                  </n-button>
+                  <n-button
+                    v-else
+                    size="small"
+                    quaternary
+                    circle
+                    type="error"
+                    :title="t('payments.delete')"
+                    :disabled="!canManage(payment)"
                     @click="handleDelete(payment)"
                   >
                     <template #icon><n-icon><TrashOutline /></n-icon></template>
@@ -446,7 +496,7 @@ function handleDelete(payment: PaymentRead) {
       />
 
       <!-- Record new payment form -->
-      <template v-if="canRecord">
+      <template v-if="invoiceAllowsRecording">
         <template v-if="showForm && !editingPayment">
           <n-divider style="margin: 12px 0" />
           <n-form label-placement="left" label-width="90px">
@@ -489,7 +539,7 @@ function handleDelete(payment: PaymentRead) {
             <n-button v-if="recordSaving" size="small" type="primary" loading disabled>
               {{ t('payments.record') }}
             </n-button>
-            <n-button v-else size="small" type="primary" @click="handleRecord">
+            <n-button v-else size="small" type="primary" :disabled="!canRecord" @click="handleRecord">
               {{ t('payments.record') }}
             </n-button>
             <n-button size="small" @click="cancelForm">{{ t('common.cancel') }}</n-button>
@@ -497,7 +547,7 @@ function handleDelete(payment: PaymentRead) {
         </template>
 
         <div v-else-if="!editingPayment" style="margin-top: 12px">
-          <n-button dashed size="small" @click="openForm">
+          <n-button dashed size="small" :disabled="!canRecord" @click="openForm">
             <template #icon><n-icon><AddOutline /></n-icon></template>
             {{ t('payments.addPayment') }}
           </n-button>

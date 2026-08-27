@@ -5,6 +5,8 @@ import { ApiError } from '../api/http'
 import type { components } from '../api/schema'
 
 type InvoicePaymentsResponse = components['schemas']['InvoicePaymentsResponse']
+type QuotePaymentsResponse = components['schemas']['QuotePaymentsResponse']
+type PaymentMutationResponse = components['schemas']['PaymentMutationResponse']
 type PaymentRead = components['schemas']['PaymentRead']
 type PaymentInput = components['schemas']['PaymentInput']
 type PaymentListItem = components['schemas']['PaymentListItem']
@@ -12,6 +14,8 @@ type PaymentListResponse = components['schemas']['PaymentListResponse']
 
 export type {
   InvoicePaymentsResponse,
+  QuotePaymentsResponse,
+  PaymentMutationResponse,
   PaymentRead,
   PaymentInput,
   PaymentListItem,
@@ -78,11 +82,15 @@ export const usePaymentsStore = defineStore('payments', () => {
     }
   }
 
-  async function updatePayment(paymentId: string, body: PaymentInput): Promise<InvoicePaymentsResponse> {
+  async function listQuotePayments(quoteId: string): Promise<QuotePaymentsResponse> {
+    return await get<QuotePaymentsResponse>(`/api/v1/quotes/${quoteId}/payments`)
+  }
+
+  async function recordQuotePayment(quoteId: string, body: PaymentInput): Promise<QuotePaymentsResponse> {
     saving.value = true
     error.value = null
     try {
-      return await put<InvoicePaymentsResponse>(`/api/v1/payments/${paymentId}`, body)
+      return await post<QuotePaymentsResponse>(`/api/v1/quotes/${quoteId}/payments`, body)
     } catch (e: unknown) {
       if (e instanceof ApiError) error.value = e.message
       else error.value = String(e)
@@ -92,12 +100,25 @@ export const usePaymentsStore = defineStore('payments', () => {
     }
   }
 
-  async function deletePayment(paymentId: string): Promise<InvoicePaymentsResponse> {
+  async function updatePayment(paymentId: string, body: PaymentInput): Promise<PaymentMutationResponse> {
     saving.value = true
     error.value = null
     try {
-      // DELETE returns 200 + InvoicePaymentsResponse (not 204), per M7 contract
-      return await del<InvoicePaymentsResponse>(`/api/v1/payments/${paymentId}`)
+      return await put<PaymentMutationResponse>(`/api/v1/payments/${paymentId}`, body)
+    } catch (e: unknown) {
+      if (e instanceof ApiError) error.value = e.message
+      else error.value = String(e)
+      throw e
+    } finally {
+      saving.value = false
+    }
+  }
+
+  async function deletePayment(paymentId: string): Promise<PaymentMutationResponse> {
+    saving.value = true
+    error.value = null
+    try {
+      return await del<PaymentMutationResponse>(`/api/v1/payments/${paymentId}`)
     } catch (e: unknown) {
       if (e instanceof ApiError) error.value = e.message
       else error.value = String(e)
@@ -127,7 +148,9 @@ export const usePaymentsStore = defineStore('payments', () => {
     sortBy,
     fetchPayments,
     listInvoicePayments,
+    listQuotePayments,
     recordPayment,
+    recordQuotePayment,
     updatePayment,
     deletePayment,
     getPayment,

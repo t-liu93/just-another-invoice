@@ -15,11 +15,19 @@ Coverage:
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
+
+import pytest
 
 from jai.models._enums import InvoicePaidStatus, InvoiceStatus
 from jai.services.money import quantize_money
-from jai.services.payment import recompute_payment_state
+from jai.services.payment import (
+    TaxBucketSnapshot,
+    allocate_quote_payment_taxes,
+    recompute_payment_state,
+    tax_bucket_key,
+)
 
 # ---------------------------------------------------------------------------
 # Stub helper
@@ -288,3 +296,100 @@ def test_recompute_with_quantised_amount_detects_full_payment() -> None:
     assert state.paid_status == InvoicePaidStatus.PAID
     assert state.due_amount == Decimal("0")
     assert state.new_status == InvoiceStatus.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# Quote-deposit VAT allocation (M11.5)
+# ---------------------------------------------------------------------------
+
+
+def _tax_bucket(
+    order: int,
+    percent: str,
+    taxable: str,
+    vat: str,
+) -> TaxBucketSnapshot:
+    return TaxBucketSnapshot(
+        bucket_key=f"bucket-{order}",
+        sort_order=order,
+        vat_rate_id=uuid.UUID(int=order + 1),
+        vat_rate_label=f"VAT {percent}%",
+        vat_rate_percent=Decimal(percent),
+        vat_treatment_code="NL_DOMESTIC",
+        vat_treatment_effect="APPLY_RATE",
+        vat_treatment_requires_icp=False,
+        taxable_amount=Decimal(taxable),
+        vat_amount=Decimal(vat),
+    )
+
+
+def test_quote_payment_allocation_mixed_rates_20_50_30_is_exact() -> None:
+    buckets = [
+        _tax_bucket(0, "21", "100.00", "21.00"),
+        _tax_bucket(1, "9", "100.00", "9.00"),
+    ]
+    allocations = allocate_quote_payment_taxes(
+        buckets,
+        [Decimal("46.00"), Decimal("115.00"), Decimal("69.00")],
+    )
+
+    for expected, payment_rows in zip(
+        (Decimal("46.00"), Decimal("115.00"), Decimal("69.00")),
+        allocations,
+        strict=True,
+    ):
+        assert sum((row.gross_amount for row in payment_rows), Decimal("0")) == expected
+        assert all(row.taxable_amount >= 0 for row in payment_rows)
+        assert all(row.vat_amount >= 0 for row in payment_rows)
+
+    for bucket_index, bucket in enumerate(buckets):
+        assert sum(
+            (payment[bucket_index].taxable_amount for payment in allocations),
+            Decimal("0"),
+        ) == bucket.taxable_amount
+        assert sum(
+            (payment[bucket_index].vat_amount for payment in allocations),
+            Decimal("0"),
+        ) == bucket.vat_amount
+
+
+def test_quote_payment_allocation_cent_remainder_is_stable() -> None:
+    buckets = [
+        _tax_bucket(0, "21", "0.03", "0.01"),
+        _tax_bucket(1, "0", "0.02", "0.00"),
+    ]
+    first = allocate_quote_payment_taxes(
+        buckets,
+        [Decimal("0.01"), Decimal("0.02"), Decimal("0.03")],
+    )
+    second = allocate_quote_payment_taxes(
+        buckets,
+        [Decimal("0.01"), Decimal("0.02"), Decimal("0.03")],
+    )
+
+    assert first == second
+    assert [
+        sum((row.gross_amount for row in payment), Decimal("0"))
+        for payment in first
+    ] == [Decimal("0.01"), Decimal("0.02"), Decimal("0.03")]
+
+
+def test_quote_payment_allocation_zero_rate_full_payment() -> None:
+    bucket = _tax_bucket(0, "0", "42.10", "0.00")
+    allocations = allocate_quote_payment_taxes([bucket], [Decimal("42.10")])
+    assert allocations[0][0].taxable_amount == Decimal("42.10")
+    assert allocations[0][0].vat_amount == Decimal("0.00")
+    assert allocations[0][0].gross_amount == Decimal("42.10")
+
+
+def test_payment_tax_bucket_key_uses_only_immutable_snapshots() -> None:
+    """Deleting a VAT-rate FK cannot change the recognised bucket identity."""
+    assert tax_bucket_key(
+        Decimal("21.000"), "NL_DOMESTIC", "APPLY_RATE", False
+    ) == "NL_DOMESTIC|APPLY_RATE|0|21.000"
+
+
+def test_quote_payment_allocation_rejects_overpayment() -> None:
+    bucket = _tax_bucket(0, "21", "100.00", "21.00")
+    with pytest.raises(ValueError, match="exceeds the outstanding"):
+        allocate_quote_payment_taxes([bucket], [Decimal("121.01")])

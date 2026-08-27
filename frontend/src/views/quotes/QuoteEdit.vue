@@ -14,6 +14,7 @@ import { NIcon } from 'naive-ui'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import EmailLogPanel from '../../components/EmailLogPanel.vue'
+import QuotePaymentPanel from '../../components/QuotePaymentPanel.vue'
 import { useQuotesStore } from '../../stores/quotes'
 import { useInvoicesStore } from '../../stores/invoices'
 import { get, downloadBlob } from '../../api/http'
@@ -1122,6 +1123,13 @@ function handleSent(_log: EmailLogRead) {
               </n-card>
 
             </n-form>
+
+            <QuotePaymentPanel
+              v-if="isEdit && existingQuote"
+              :quote-id="existingQuote.id"
+              :quote-status="existingQuote.status"
+              :converted-invoice-id="existingQuote.converted_invoice_id"
+            />
 
             <!-- Email log (only for existing quotes) -->
             <EmailLogPanel

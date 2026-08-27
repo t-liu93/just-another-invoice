@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.models._enums import (
     DiscountType,
+    InvoiceStatus,
     InvoiceTaxMode,
     QuoteStatus,
     SettingLevel,
@@ -41,6 +42,8 @@ from jai.models._enums import (
 )
 from jai.models.customer import Customer
 from jai.models.dictionary import Unit
+from jai.models.invoice import Invoice
+from jai.models.payment import Payment
 from jai.models.product import Product
 from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax
 from jai.models.vat import VatRate, VatTreatment
@@ -65,9 +68,10 @@ from jai.schemas.setting import (
     QuoteDefaultValidDaysRead,
     QuoteNumberingConfig,
 )
-from jai.services.invoice import clone_quote_to_invoice
+from jai.services.invoice import clone_quote_to_invoice, get_invoice
 from jai.services.money import quantize_to_minor_unit
 from jai.services.numbering import allocate_quote_number
+from jai.services.payment import recompute_payment_state
 from jai.services.pricing import (
     _derive_treatment_from_customer,
     compute_pricing,
@@ -769,7 +773,13 @@ async def delete_quote(
         return False
 
     await session.delete(q)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ValueError(
+            "Cannot delete a quote that has payment history."
+        ) from exc
     return True
 
 
@@ -909,6 +919,39 @@ async def convert_to_invoice(
         session, q, company_id=company_id, creator_id=creator_id
     )
 
+    # The quote lock is also the parent lock used by quote-payment mutations.
+    # Lock all current payments after it, then transfer them inside this same
+    # transaction so no accepted payment can be missed by a concurrent convert.
+    payment_result = await session.execute(
+        select(Payment)
+        .where(Payment.quote_id == q.id)
+        .order_by(Payment.payment_date, Payment.created_at, Payment.id)
+        .with_for_update()
+    )
+    payments = list(payment_result.scalars().all())
+    invoice_result = await session.execute(
+        select(Invoice).where(Invoice.id == inv_read.id)
+    )
+    invoice = invoice_result.scalar_one()
+    for payment in payments:
+        payment.invoice_id = invoice.id
+
+    if payments:
+        invoice.invoice_date = max(
+            invoice.invoice_date,
+            max(payment.payment_date for payment in payments),
+        )
+    payment_state = recompute_payment_state(
+        Decimal(str(invoice.total_incl_vat)),
+        Decimal(str(invoice.base_total_incl_vat)),
+        payments,
+        InvoiceStatus.DRAFT,
+    )
+    invoice.due_amount = payment_state.due_amount
+    invoice.base_due_amount = payment_state.base_due_amount
+    invoice.paid_status = payment_state.paid_status
+    invoice.status = InvoiceStatus.DRAFT
+
     q.status = QuoteStatus.ACCEPTED
     q.converted_invoice_id = inv_read.id
 
@@ -918,7 +961,9 @@ async def convert_to_invoice(
         await session.rollback()
         raise ValueError("Invoice number already exists (concurrent creation).") from exc
 
-    return inv_read
+    refreshed = await get_invoice(session, invoice.id, company_id)
+    assert refreshed is not None
+    return refreshed
 
 
 async def reactivate(

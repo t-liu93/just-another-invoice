@@ -5,6 +5,26 @@
 <title>{{ labels.invoice }} {{ invoice.invoice_number or labels.draft }}</title>
 <style>
 {{ css | safe }}
+.payments-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5em 0;
+}
+.payments-table th,
+.payments-table td {
+    padding: 0.45em 0.6em;
+    border-bottom: 1px solid #e5e5e5;
+    text-align: left;
+}
+.payments-table th {
+    color: #555;
+    font-size: 0.85em;
+    text-transform: uppercase;
+}
+.payments-table .amount {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
 </style>
 </head>
 <body>
@@ -164,7 +184,11 @@
             <td class="label">{{ labels.total }}</td>
             <td class="amount">{{ invoice.total_incl_vat | money2 }}</td>
         </tr>
-        {% if invoice.due_amount != invoice.total_incl_vat %}
+        {% if payments or invoice.due_amount != invoice.total_incl_vat %}
+        <tr>
+            <td class="label">{{ labels.already_paid }}</td>
+            <td class="amount">-{{ paid_total | money2 }}</td>
+        </tr>
         <tr class="due-row">
             <td class="label">{{ labels.amount_due }}</td>
             <td class="amount">{{ invoice.due_amount | money2 }}</td>
@@ -173,6 +197,29 @@
         </tbody>
     </table>
 </div>
+
+{% if payments %}
+<!-- Payments affect settlement only; the full invoice subtotal and VAT remain above. -->
+<div class="content-block-title">{{ labels.payments }}</div>
+<table class="payments-table">
+    <thead>
+        <tr>
+            <th>{{ labels.payment_date }}</th>
+            <th>{{ labels.reference }}</th>
+            <th class="amount">{{ labels.amount_paid }}</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for payment in payments %}
+        <tr>
+            <td>{{ payment.payment_date }}</td>
+            <td>{{ payment.reference or "" }}</td>
+            <td class="amount">{{ payment.amount | money2 }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
 
 <!-- ── Content blocks ───────────────────────────────────────────────────── -->
 <div class="content-blocks">

@@ -189,6 +189,115 @@ def _insert_0025_expense_sentinel(url: str) -> dict[str, uuid.UUID]:
     return {key: value for key, value in params.items() if isinstance(value, uuid.UUID)}
 
 
+def _insert_0028_downgrade_sentinel(
+    url: str, *, quote_provenance: bool, payment_tax: bool
+) -> dict[str, uuid.UUID]:
+    """Insert one independently non-representable 0028 payment shape."""
+    assert quote_provenance or payment_tax
+    company_id = uuid.uuid4()
+    customer_id = uuid.uuid4()
+    treatment_id = uuid.uuid4()
+    invoice_id = uuid.uuid4()
+    payment_id = uuid.uuid4()
+    params: dict[str, object] = {
+        "company_id": company_id,
+        "customer_id": customer_id,
+        "treatment_id": treatment_id,
+        "invoice_id": invoice_id,
+        "payment_id": payment_id,
+    }
+    _query(
+        url,
+        """
+        INSERT INTO company (id, name, base_currency)
+        VALUES (:company_id, 'Downgrade safety Co', 'EUR');
+        INSERT INTO customer (id, company_id, name)
+        VALUES (:customer_id, :company_id, 'Safety customer');
+        INSERT INTO vat_treatment
+            (id, company_id, code, label, side, effect, requires_icp, active)
+        VALUES (:treatment_id, :company_id, 'NL_DOMESTIC', 'NL Domestic',
+                'SALES', 'APPLY_RATE', false, true);
+        INSERT INTO invoice
+            (id, company_id, customer_id, invoice_number, sequence_number,
+             invoice_date, status, paid_status, currency, exchange_rate,
+             tax_mode, amounts_include_vat, vat_treatment_id,
+             vat_treatment_code, vat_treatment_label, vat_treatment_effect,
+             vat_treatment_requires_icp, discount_type, discount_value,
+             document_discount_amount, subtotal_excl_vat, line_discount_total,
+             taxable_amount, vat_total, total_incl_vat, due_amount,
+             base_subtotal_excl_vat, base_line_discount_total,
+             base_taxable_amount, base_vat_total, base_total_incl_vat,
+             base_due_amount)
+        VALUES (:invoice_id, :company_id, :customer_id, 'DOWN-INV-1', 1,
+                DATE '2026-01-10', 'DRAFT', 'UNPAID', 'EUR', 1,
+                'LINE', false, :treatment_id,
+                'NL_DOMESTIC', 'NL Domestic', 'APPLY_RATE', false,
+                'NONE', 0, 0, 100, 0, 100, 21, 121, 121,
+                100, 0, 100, 21, 121, 121)
+        """,
+        params,
+    )
+    if quote_provenance:
+        quote_id = uuid.uuid4()
+        params["quote_id"] = quote_id
+        _query(
+            url,
+            """
+            INSERT INTO quote
+                (id, company_id, customer_id, quote_number, sequence_number,
+                 quote_date, status, currency, exchange_rate, tax_mode,
+                 amounts_include_vat, vat_treatment_id, vat_treatment_code,
+                 vat_treatment_label, vat_treatment_effect, vat_treatment_requires_icp,
+                 discount_type, discount_value, document_discount_amount,
+                 subtotal_excl_vat, line_discount_total, taxable_amount, vat_total,
+                 total_incl_vat, base_subtotal_excl_vat, base_line_discount_total,
+                 base_taxable_amount, base_vat_total, base_total_incl_vat)
+            VALUES (:quote_id, :company_id, :customer_id, 'DOWN-QUOTE-1', 1,
+                    DATE '2026-01-01', 'ACCEPTED', 'EUR', 1, 'LINE', false,
+                    :treatment_id, 'NL_DOMESTIC', 'NL Domestic', 'APPLY_RATE', false,
+                    'NONE', 0, 0, 100, 0, 100, 21, 121, 100, 0, 100, 21, 121);
+            INSERT INTO payment
+                (id, company_id, quote_id, payment_date, amount, base_amount,
+                 currency, exchange_rate)
+            VALUES (:payment_id, :company_id, :quote_id, DATE '2026-01-05',
+                    60, 60, 'EUR', 1)
+            """,
+            params,
+        )
+    else:
+        _query(
+            url,
+            """
+            INSERT INTO payment
+                (id, company_id, invoice_id, payment_date, amount, base_amount,
+                 currency, exchange_rate)
+            VALUES (:payment_id, :company_id, :invoice_id, DATE '2026-01-05',
+                    60, 60, 'EUR', 1)
+            """,
+            params,
+        )
+    if payment_tax:
+        tax_id = uuid.uuid4()
+        params["tax_id"] = tax_id
+        _query(
+            url,
+            """
+            INSERT INTO payment_tax
+                (id, payment_id, vat_rate_label, vat_rate_percent,
+                 vat_treatment_code, vat_treatment_effect, vat_treatment_requires_icp,
+                 taxable_amount, vat_amount, gross_amount,
+                 base_taxable_amount, base_vat_amount, base_gross_amount,
+                 bucket_key, sort_order)
+            VALUES (:tax_id, :payment_id, 'NL standard (21%)', 21,
+                    'NL_DOMESTIC', 'APPLY_RATE', false,
+                    49.587, 10.413, 60, 49.587, 10.413, 60,
+                    'NL_DOMESTIC|APPLY_RATE|0|21', 0)
+            """,
+            params,
+        )
+    return {key: value for key, value in params.items() if isinstance(value, uuid.UUID)}
+
+
 @pytest.mark.integration
 class TestMigrations:
     """Verify ``alembic upgrade head`` and ``alembic downgrade base``."""
@@ -423,6 +532,297 @@ class TestMigrations:
                 "rate_transport_type_name": "Migration Scope",
             }
         ]
+
+    def test_0028_preserves_legacy_payments_and_enforces_document_link(self) -> None:
+        """M11.5 migration is additive and keeps invoice-only history unchanged."""
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
+        assert _run_alembic("upgrade", "0027", url=self.url).returncode == 0
+        company_id = uuid.uuid4()
+        customer_id = uuid.uuid4()
+        treatment_id = uuid.uuid4()
+        invoice_id = uuid.uuid4()
+        payment_id = uuid.uuid4()
+        _query(
+            self.url,
+            """
+            INSERT INTO company (id, name, base_currency)
+            VALUES (:company_id, 'Pre-M11.5 Co', 'EUR');
+            INSERT INTO customer (id, company_id, name)
+            VALUES (:customer_id, :company_id, 'Legacy customer');
+            INSERT INTO vat_treatment
+                (id, company_id, code, label, side, effect, requires_icp, active)
+            VALUES
+                (:treatment_id, :company_id, 'NL_DOMESTIC', 'NL Domestic',
+                 'SALES', 'APPLY_RATE', false, true);
+            INSERT INTO invoice
+                (id, company_id, customer_id, invoice_number, sequence_number,
+                 invoice_date, status, paid_status, currency, exchange_rate,
+                 tax_mode, amounts_include_vat, vat_treatment_id,
+                 vat_treatment_code, vat_treatment_label, vat_treatment_effect,
+                 vat_treatment_requires_icp, discount_type, discount_value,
+                 document_discount_amount, subtotal_excl_vat, line_discount_total,
+                 taxable_amount, vat_total, total_incl_vat, due_amount,
+                 base_subtotal_excl_vat, base_line_discount_total,
+                 base_taxable_amount, base_vat_total, base_total_incl_vat,
+                 base_due_amount)
+            VALUES
+                (:invoice_id, :company_id, :customer_id, 'LEGACY-1', 1,
+                 DATE '2026-01-10', 'SENT', 'PARTIALLY_PAID', 'EUR', 1,
+                 'LINE', false, :treatment_id,
+                 'NL_DOMESTIC', 'NL Domestic', 'APPLY_RATE', false,
+                 'NONE', 0, 0, 100, 0, 100, 21, 121, 61,
+                 100, 0, 100, 21, 121, 61);
+            INSERT INTO payment
+                (id, company_id, invoice_id, payment_date, amount, base_amount,
+                 currency, exchange_rate, reference)
+            VALUES
+                (:payment_id, :company_id, :invoice_id, DATE '2026-01-15',
+                 60, 60, 'EUR', 1, 'LEGACY-PAYMENT')
+            """,
+            {
+                "company_id": company_id,
+                "customer_id": customer_id,
+                "treatment_id": treatment_id,
+                "invoice_id": invoice_id,
+                "payment_id": payment_id,
+            },
+        )
+
+        result = _run_alembic("upgrade", "0028", url=self.url)
+        assert result.returncode == 0, result.stderr
+        assert _query(
+            self.url,
+            """
+            SELECT invoice_id, quote_id, amount, payment_date, reference
+            FROM payment WHERE id = :payment_id
+            """,
+            {"payment_id": payment_id},
+        ) == [
+            {
+                "invoice_id": invoice_id,
+                "quote_id": None,
+                "amount": Decimal("60.000"),
+                "payment_date": date(2026, 1, 15),
+                "reference": "LEGACY-PAYMENT",
+            }
+        ]
+        assert _query(
+            self.url,
+            """
+            SELECT is_nullable FROM information_schema.columns
+            WHERE table_name = 'payment' AND column_name = 'invoice_id'
+            """,
+        ) == [{"is_nullable": "YES"}]
+        assert _query(
+            self.url,
+            """
+            SELECT delete_rule FROM information_schema.referential_constraints
+            WHERE constraint_name = 'fk_payment_invoice'
+            """,
+        ) == [{"delete_rule": "SET NULL"}]
+        assert _query(
+            self.url,
+            """
+            SELECT to_regclass('public.payment_tax')::text AS payment_tax_table
+            """,
+        ) == [{"payment_tax_table": "payment_tax"}]
+
+        async def _assert_check_constraint() -> None:
+            engine = create_async_engine(self.url)
+            try:
+                async with engine.begin() as conn:
+                    with pytest.raises(IntegrityError):
+                        async with conn.begin_nested():
+                            await conn.execute(
+                                text(
+                                    "INSERT INTO payment "
+                                    "(company_id, payment_date, amount, base_amount, "
+                                    "currency, exchange_rate) VALUES "
+                                    "(:company_id, DATE '2026-01-16', 1, 1, 'EUR', 1)"
+                                ),
+                                {"company_id": company_id},
+                            )
+            finally:
+                await engine.dispose()
+
+        asyncio.run(_assert_check_constraint())
+        assert _run_alembic("downgrade", "0027", url=self.url).returncode == 0
+        assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+
+    def test_0028_downgrade_refuses_quote_provenance_and_tax_snapshots(self) -> None:
+        """Downgrade must fail before DDL instead of destroying M11.5 history."""
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
+        assert _run_alembic("upgrade", "0028", url=self.url).returncode == 0
+        company_id = uuid.uuid4()
+        customer_id = uuid.uuid4()
+        treatment_id = uuid.uuid4()
+        invoice_id = uuid.uuid4()
+        quote_id = uuid.uuid4()
+        payment_id = uuid.uuid4()
+        tax_id = uuid.uuid4()
+        _query(
+            self.url,
+            """
+            INSERT INTO company (id, name, base_currency)
+            VALUES (:company_id, 'Downgrade safety Co', 'EUR');
+            INSERT INTO customer (id, company_id, name)
+            VALUES (:customer_id, :company_id, 'Safety customer');
+            INSERT INTO vat_treatment
+                (id, company_id, code, label, side, effect, requires_icp, active)
+            VALUES (:treatment_id, :company_id, 'NL_DOMESTIC', 'NL Domestic',
+                    'SALES', 'APPLY_RATE', false, true);
+            INSERT INTO invoice
+                (id, company_id, customer_id, invoice_number, sequence_number,
+                 invoice_date, status, paid_status, currency, exchange_rate,
+                 tax_mode, amounts_include_vat, vat_treatment_id,
+                 vat_treatment_code, vat_treatment_label, vat_treatment_effect,
+                 vat_treatment_requires_icp, discount_type, discount_value,
+                 document_discount_amount, subtotal_excl_vat, line_discount_total,
+                 taxable_amount, vat_total, total_incl_vat, due_amount,
+                 base_subtotal_excl_vat, base_line_discount_total,
+                 base_taxable_amount, base_vat_total, base_total_incl_vat,
+                 base_due_amount)
+            VALUES (:invoice_id, :company_id, :customer_id, 'DOWN-INV-1', 1,
+                    DATE '2026-01-10', 'DRAFT', 'UNPAID', 'EUR', 1,
+                    'LINE', false, :treatment_id,
+                    'NL_DOMESTIC', 'NL Domestic', 'APPLY_RATE', false,
+                    'NONE', 0, 0, 100, 0, 100, 21, 121, 121,
+                    100, 0, 100, 21, 121, 121);
+            INSERT INTO quote
+                (id, company_id, customer_id, quote_number, sequence_number,
+                 quote_date, status, converted_invoice_id, currency, exchange_rate,
+                 tax_mode, amounts_include_vat, vat_treatment_id,
+                 vat_treatment_code, vat_treatment_label, vat_treatment_effect,
+                 vat_treatment_requires_icp, discount_type, discount_value,
+                 document_discount_amount, subtotal_excl_vat, line_discount_total,
+                 taxable_amount, vat_total, total_incl_vat,
+                 base_subtotal_excl_vat, base_line_discount_total,
+                 base_taxable_amount, base_vat_total, base_total_incl_vat)
+            VALUES (:quote_id, :company_id, :customer_id, 'DOWN-QUOTE-1', 1,
+                    DATE '2026-01-01', 'ACCEPTED', :invoice_id, 'EUR', 1,
+                    'LINE', false, :treatment_id,
+                    'NL_DOMESTIC', 'NL Domestic', 'APPLY_RATE', false,
+                    'NONE', 0, 0, 100, 0, 100, 21, 121,
+                    100, 0, 100, 21, 121);
+            INSERT INTO payment
+                (id, company_id, invoice_id, quote_id, payment_date, amount, base_amount,
+                 currency, exchange_rate)
+            VALUES (:payment_id, :company_id, :invoice_id, :quote_id,
+                    DATE '2026-01-05', 60, 60, 'EUR', 1);
+            INSERT INTO payment_tax
+                (id, payment_id, vat_rate_label, vat_rate_percent,
+                 vat_treatment_code, vat_treatment_effect, vat_treatment_requires_icp,
+                 taxable_amount, vat_amount, gross_amount,
+                 base_taxable_amount, base_vat_amount, base_gross_amount,
+                 bucket_key, sort_order)
+            VALUES (:tax_id, :payment_id, 'NL standard (21%)', 21,
+                    'NL_DOMESTIC', 'APPLY_RATE', false,
+                    49.587, 10.413, 60, 49.587, 10.413, 60,
+                    'NL_DOMESTIC|APPLY_RATE|0|21', 0)
+            """,
+            {
+                "company_id": company_id,
+                "customer_id": customer_id,
+                "treatment_id": treatment_id,
+                "invoice_id": invoice_id,
+                "quote_id": quote_id,
+                "payment_id": payment_id,
+                "tax_id": tax_id,
+            },
+        )
+
+        result = _run_alembic("downgrade", "0027", url=self.url)
+        assert result.returncode != 0
+        assert "Cannot downgrade 0028" in result.stderr
+        # The guard runs before any DDL, so both provenance and VAT data survive.
+        assert _query(
+            self.url,
+            "SELECT invoice_id, quote_id FROM payment WHERE id = :payment_id",
+            {"payment_id": payment_id},
+        ) == [{"invoice_id": invoice_id, "quote_id": quote_id}]
+        assert _query(
+            self.url,
+            "SELECT id FROM payment_tax WHERE id = :tax_id",
+            {"tax_id": tax_id},
+        ) == [{"id": tax_id}]
+        assert _query(
+            self.url,
+            "SELECT version_num FROM alembic_version",
+        ) == [{"version_num": "0028"}]
+        # Explicitly remove the test-only non-representable rows, then prove
+        # a deliberate cleanup permits the normal downgrade path again.
+        _query(self.url, "DELETE FROM payment_tax; DELETE FROM payment")
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
+
+    def test_0028_downgrade_refuses_quote_provenance_without_payment_tax(self) -> None:
+        """A quote-only deposit independently blocks downgrade before any DDL."""
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
+        assert _run_alembic("upgrade", "0028", url=self.url).returncode == 0
+        ids = _insert_0028_downgrade_sentinel(
+            self.url, quote_provenance=True, payment_tax=False
+        )
+
+        result = _run_alembic("downgrade", "0027", url=self.url)
+        assert result.returncode != 0
+        assert "Cannot downgrade 0028" in result.stderr
+        assert _query(
+            self.url,
+            "SELECT invoice_id, quote_id FROM payment WHERE id = :payment_id",
+            {"payment_id": ids["payment_id"]},
+        ) == [{"invoice_id": None, "quote_id": ids["quote_id"]}]
+        assert _query(self.url, "SELECT count(*) AS count FROM payment_tax") == [{"count": 0}]
+        assert _query(
+            self.url,
+            "SELECT to_regclass('public.payment_tax')::text AS payment_tax_table, "
+            "(SELECT version_num FROM alembic_version) AS version_num",
+        ) == [{"payment_tax_table": "payment_tax", "version_num": "0028"}]
+        assert _query(
+            self.url,
+            "SELECT delete_rule FROM information_schema.referential_constraints "
+            "WHERE constraint_name = 'fk_payment_quote'",
+        ) == [{"delete_rule": "RESTRICT"}]
+        _query(self.url, "DELETE FROM payment")
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
+
+    def test_0028_downgrade_refuses_payment_tax_without_quote_provenance(self) -> None:
+        """A VAT snapshot independently blocks downgrade before any DDL."""
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
+        assert _run_alembic("upgrade", "0028", url=self.url).returncode == 0
+        ids = _insert_0028_downgrade_sentinel(
+            self.url, quote_provenance=False, payment_tax=True
+        )
+
+        result = _run_alembic("downgrade", "0027", url=self.url)
+        assert result.returncode != 0
+        assert "Cannot downgrade 0028" in result.stderr
+        assert _query(
+            self.url,
+            "SELECT invoice_id, quote_id FROM payment WHERE id = :payment_id",
+            {"payment_id": ids["payment_id"]},
+        ) == [{"invoice_id": ids["invoice_id"], "quote_id": None}]
+        assert _query(
+            self.url,
+            "SELECT payment_id, vat_rate_percent, gross_amount FROM payment_tax WHERE id = :tax_id",
+            {"tax_id": ids["tax_id"]},
+        ) == [
+            {
+                "payment_id": ids["payment_id"],
+                "vat_rate_percent": Decimal("21.000"),
+                "gross_amount": Decimal("60.000"),
+            }
+        ]
+        assert _query(
+            self.url,
+            "SELECT to_regclass('public.payment_tax')::text AS payment_tax_table, "
+            "(SELECT version_num FROM alembic_version) AS version_num",
+        ) == [{"payment_tax_table": "payment_tax", "version_num": "0028"}]
+        assert _query(
+            self.url,
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_name = 'payment' AND column_name = 'invoice_id'",
+        ) == [{"is_nullable": "YES"}]
+        _query(self.url, "DELETE FROM payment_tax; DELETE FROM payment")
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
 
     @pytest.mark.parametrize(
         ("setup_sql", "expected_error"),

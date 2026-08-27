@@ -43,6 +43,7 @@ from jai.models._enums import (
 from jai.models.customer import Customer
 from jai.models.dictionary import Unit
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
+from jai.models.payment import Payment
 from jai.models.product import Product
 from jai.models.quote import Quote as _Quote
 from jai.models.quote import QuoteLine as _QuoteLine
@@ -63,6 +64,7 @@ from jai.schemas.invoice import (
 from jai.schemas.setting import SETTING_KEY_INVOICE_NUMBERING, InvoiceNumberingConfig
 from jai.services.money import quantize_to_minor_unit
 from jai.services.numbering import allocate_invoice_number
+from jai.services.payment import recompute_payment_state, validate_invoice_tax_coverage
 from jai.services.pricing import (
     _derive_treatment_from_customer,
     compute_pricing,
@@ -801,9 +803,13 @@ async def update_invoice(
     company_currency: str,
 ) -> InvoiceRead | None:
     """Update an existing invoice: preserve number, recalculate, replace sub-tables."""
-    stmt = select(Invoice).where(
-        Invoice.id == invoice_id,
-        Invoice.company_id == company_id,
+    stmt = (
+        select(Invoice)
+        .where(
+            Invoice.id == invoice_id,
+            Invoice.company_id == company_id,
+        )
+        .with_for_update()
     )
     result = await session.execute(stmt)
     inv = result.scalar_one_or_none()
@@ -816,6 +822,27 @@ async def update_invoice(
             f"Cannot edit a {inv.status.value.lower()} invoice. "
             "Only DRAFT invoices may be modified."
         )
+
+    payment_result = await session.execute(
+        select(Payment).where(Payment.invoice_id == inv.id)
+    )
+    payments = list(payment_result.scalars().all())
+    quote_origin_payments = [p for p in payments if p.quote_id is not None]
+    if quote_origin_payments:
+        if body.customer_id != inv.customer_id:
+            raise ValueError(
+                "Cannot change the customer on a draft with quote-origin payments."
+            )
+        request_currency = body.currency or company_currency
+        if request_currency != inv.currency:
+            raise ValueError(
+                "Cannot change the currency on a draft with quote-origin payments."
+            )
+        latest_payment_date = max(p.payment_date for p in quote_origin_payments)
+        if body.invoice_date < latest_payment_date:
+            raise ValueError(
+                "Final invoice date cannot be earlier than an associated payment date."
+            )
 
     # Validate customer
     cust_stmt = select(Customer).where(
@@ -848,6 +875,25 @@ async def update_invoice(
         existing_invoice=inv,
     )
 
+    if payments:
+        payment_state = recompute_payment_state(
+            Decimal(str(updated.total_incl_vat)),
+            Decimal(str(updated.base_total_incl_vat)),
+            payments,
+            InvoiceStatus.DRAFT,
+        )
+        if payment_state.paid_total > Decimal(str(updated.total_incl_vat)):
+            raise ValueError(
+                "Final invoice total cannot be lower than its associated payments."
+            )
+        updated.due_amount = payment_state.due_amount
+        updated.base_due_amount = payment_state.base_due_amount
+        updated.paid_status = payment_state.paid_status
+        updated.status = InvoiceStatus.DRAFT
+
+    if quote_origin_payments:
+        await validate_invoice_tax_coverage(session, updated)
+
     await session.commit()
     await session.refresh(updated)
     return _invoice_to_read(updated)
@@ -862,9 +908,41 @@ async def delete_invoice(
 
     Only DRAFT invoices may be deleted.  Raises ValueError for any other status.
     """
-    stmt = select(Invoice).where(
-        Invoice.id == invoice_id,
-        Invoice.company_id == company_id,
+    # Deleting a converted draft makes PostgreSQL SET NULL on both the quote
+    # backlink and its payments. Lock source quotes before the invoice so this
+    # path shares the quote -> invoice order used by quote-payment mutations.
+    source_quote_ids_result = await session.execute(
+        select(Payment.quote_id)
+        .where(
+            Payment.invoice_id == invoice_id,
+            Payment.company_id == company_id,
+            Payment.quote_id.is_not(None),
+        )
+        .distinct()
+    )
+    source_quote_ids = sorted(
+        row.quote_id
+        for row in source_quote_ids_result.all()
+        if row.quote_id is not None
+    )
+    if source_quote_ids:
+        await session.execute(
+            select(_Quote)
+            .where(
+                _Quote.id.in_(source_quote_ids),
+                _Quote.company_id == company_id,
+            )
+            .order_by(_Quote.id)
+            .with_for_update()
+        )
+
+    stmt = (
+        select(Invoice)
+        .where(
+            Invoice.id == invoice_id,
+            Invoice.company_id == company_id,
+        )
+        .with_for_update()
     )
     result = await session.execute(stmt)
     inv = result.scalar_one_or_none()
@@ -980,9 +1058,13 @@ async def transition_status(
     already carries a number (e.g. re-issued after CANCELLED -> DRAFT) is never
     re-numbered.
     """
-    stmt = select(Invoice).where(
-        Invoice.id == invoice_id,
-        Invoice.company_id == company_id,
+    stmt = (
+        select(Invoice)
+        .where(
+            Invoice.id == invoice_id,
+            Invoice.company_id == company_id,
+        )
+        .with_for_update()
     )
     result = await session.execute(stmt)
     inv = result.scalar_one_or_none()
@@ -991,6 +1073,23 @@ async def transition_status(
 
     current_status = InvoiceStatus(inv.status)
     new_status = body.status
+
+    payment_result = await session.execute(
+        select(Payment)
+        .where(Payment.invoice_id == inv.id)
+        .order_by(Payment.payment_date, Payment.created_at, Payment.id)
+    )
+    payments = list(payment_result.scalars().all())
+
+    if (
+        current_status == InvoiceStatus.DRAFT
+        and new_status == InvoiceStatus.CANCELLED
+        and payments
+    ):
+        raise ValueError(
+            "Cannot cancel a draft invoice that has payments. Delete the draft "
+            "to return quote-origin payments, or handle the payments first."
+        )
 
     if new_status == InvoiceStatus.COMPLETED:
         raise ValueError(
@@ -1014,6 +1113,17 @@ async def transition_status(
 
     try:
         inv.status = new_status
+        if current_status == InvoiceStatus.DRAFT and new_status == InvoiceStatus.SENT:
+            payment_state = recompute_payment_state(
+                Decimal(str(inv.total_incl_vat)),
+                Decimal(str(inv.base_total_incl_vat)),
+                payments,
+                InvoiceStatus.SENT,
+            )
+            inv.due_amount = payment_state.due_amount
+            inv.base_due_amount = payment_state.base_due_amount
+            inv.paid_status = payment_state.paid_status
+            inv.status = payment_state.new_status
         if needs_number:
             numbering_config = await _load_numbering_config(session, company_id)
             cust_stmt = select(Customer).where(
