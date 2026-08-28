@@ -422,6 +422,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/credit-numbering": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Credit Numbering Config
+         * @description Return the independent Credit Note numbering configuration.
+         */
+        get: operations["get_credit_numbering_config_api_v1_settings_credit_numbering_get"];
+        /**
+         * Update Credit Numbering Config
+         * @description Persist the typed Credit Note series config without touching invoices.
+         */
+        put: operations["update_credit_numbering_config_api_v1_settings_credit_numbering_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/credit-number-sequence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Credit Number Sequence
+         * @description Return the next independent Credit Note sequence value and preview.
+         */
+        get: operations["get_credit_number_sequence_api_v1_settings_credit_number_sequence_get"];
+        /**
+         * Update Credit Number Sequence
+         * @description Forward-skip the Credit Note sequence independently from invoices.
+         */
+        put: operations["update_credit_number_sequence_api_v1_settings_credit_number_sequence_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/invoice-number-sequence": {
         parameters: {
             query?: never;
@@ -989,6 +1037,46 @@ export interface paths {
          * @description Preview invoice pricing without persisting (red-line 1).
          */
         post: operations["calculate_invoice_endpoint_api_v1_invoices_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/advance-invoices/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calculate Advance Placeholder
+         * @description Publish the dedicated M12 intent without silently accepting it in Standard pricing.
+         */
+        post: operations["calculate_advance_placeholder_api_v1_quotes__quote_id__advance_invoices_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{source_invoice_id}/credit-notes/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calculate Credit Placeholder
+         * @description Publish the dedicated M12 intent without silently accepting it in Standard pricing.
+         */
+        post: operations["calculate_credit_placeholder_api_v1_invoices__source_invoice_id__credit_notes_calculate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2478,6 +2566,31 @@ export interface components {
             type: components["schemas"]["AddressType"];
         };
         /**
+         * AdvanceCalculationRead
+         * @description Reserved authoritative Advance result component; Step 3 implements fields.
+         */
+        AdvanceCalculationRead: {
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * AdvanceCalculationRequest
+         * @description Frozen M12 Advance intent; accepted only by the dedicated future route.
+         */
+        AdvanceCalculationRequest: {
+            input_mode: components["schemas"]["AdvanceInputMode"];
+            /** Gross Amount */
+            gross_amount?: number | string | null;
+            /** Percentage */
+            percentage?: number | string | null;
+        };
+        /**
+         * AdvanceInputMode
+         * @description Intent accepted by the later Advance calculation/create commands.
+         * @enum {string}
+         */
+        AdvanceInputMode: "GROSS_AMOUNT" | "PERCENTAGE";
+        /**
          * AiSettingsRead
          * @description AI settings as returned by the API – ``api_key`` is desensitised.
          *
@@ -2740,6 +2853,99 @@ export interface components {
             is_default?: boolean;
         };
         /**
+         * CreditCalculationLineInput
+         * @description One source-basis selection for the dedicated future Credit calculator.
+         */
+        CreditCalculationLineInput: {
+            /**
+             * Source Basis Line Id
+             * Format: uuid
+             */
+            source_basis_line_id: string;
+            input_mode: components["schemas"]["CreditLineInputMode"];
+            /** Quantity */
+            quantity?: number | string | null;
+            /** Gross Amount */
+            gross_amount?: number | string | null;
+        };
+        /**
+         * CreditCalculationRead
+         * @description Reserved authoritative Credit result component; Step 5 implements fields.
+         */
+        CreditCalculationRead: {
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * CreditCalculationRequest
+         * @description Frozen M12 Credit intent; generic Standard pricing never accepts it.
+         */
+        CreditCalculationRequest: {
+            /**
+             * Full Remaining
+             * @default false
+             */
+            full_remaining?: boolean;
+            /** Lines */
+            lines?: components["schemas"]["CreditCalculationLineInput"][];
+        };
+        /**
+         * CreditLineInputMode
+         * @description Intent accepted by the later source-bound Credit line commands.
+         * @enum {string}
+         */
+        CreditLineInputMode: "QUANTITY" | "GROSS_AMOUNT";
+        /**
+         * CreditNumberSequenceRead
+         * @description Response for GET/PUT /settings/credit-number-sequence.
+         */
+        CreditNumberSequenceRead: {
+            /**
+             * Next Sequence
+             * @description The next sequence value that will be issued.
+             */
+            next_sequence: number;
+            /**
+             * Preview Number
+             * @description Preview of the next invoice number.
+             */
+            preview_number: string;
+        };
+        /**
+         * CreditNumberSequenceWrite
+         * @description Request body for credit-sequence forward skip.
+         */
+        CreditNumberSequenceWrite: {
+            /**
+             * Next Sequence
+             * @description New next sequence value. Must be strictly greater than the current next_sequence if a sequence already exists (forward-only).
+             */
+            next_sequence: number;
+        };
+        /**
+         * CreditNumberingConfig
+         * @description Typed independent Credit Note sequence configuration (M12).
+         */
+        CreditNumberingConfig: {
+            /**
+             * Template
+             * @description Credit Note numbering template; uses the normal safe placeholders.
+             * @default {{SERIES:CRN}}-{{SEQUENCE:6}}
+             */
+            template?: string;
+            /**
+             * Sequence Start
+             * @description Starting number used only when the sequence row is first created. Changing this after the first invoice has no effect.
+             * @default 1
+             */
+            sequence_start?: number;
+            /**
+             * Preview
+             * @description Read-only: preview of the next invoice number (ignored on PUT).
+             */
+            preview?: string | null;
+        };
+        /**
          * CustomerListResponse
          * @description Paginated list envelope for ``GET /api/v1/customers``.
          */
@@ -2967,6 +3173,82 @@ export interface components {
          * @enum {string}
          */
         DiscountType: "NONE" | "PERCENTAGE" | "FIXED";
+        /**
+         * DocumentChainTotals
+         * @description Compact, backend-authoritative settlement projection for one Quote chain.
+         */
+        DocumentChainTotals: {
+            /**
+             * Charge Total
+             * @default 0
+             */
+            charge_total?: string;
+            /**
+             * Credit Total
+             * @default 0
+             */
+            credit_total?: string;
+            /**
+             * Incoming Payment Total
+             * @default 0
+             */
+            incoming_payment_total?: string;
+            /**
+             * Refund Total
+             * @default 0
+             */
+            refund_total?: string;
+            /**
+             * Application Total
+             * @default 0
+             */
+            application_total?: string;
+            /**
+             * Due Amount
+             * @default 0
+             */
+            due_amount?: string;
+            /**
+             * Refund Due Amount
+             * @default 0
+             */
+            refund_due_amount?: string;
+            /**
+             * Base Charge Total
+             * @default 0
+             */
+            base_charge_total?: string;
+            /**
+             * Base Credit Total
+             * @default 0
+             */
+            base_credit_total?: string;
+            /**
+             * Base Incoming Payment Total
+             * @default 0
+             */
+            base_incoming_payment_total?: string;
+            /**
+             * Base Refund Total
+             * @default 0
+             */
+            base_refund_total?: string;
+            /**
+             * Base Application Total
+             * @default 0
+             */
+            base_application_total?: string;
+            /**
+             * Base Due Amount
+             * @default 0
+             */
+            base_due_amount?: string;
+            /**
+             * Base Refund Due Amount
+             * @default 0
+             */
+            base_refund_due_amount?: string;
+        };
         /**
          * DocumentDefaultsRead
          * @description Response body for ``GET /api/v1/settings/document-defaults``.
@@ -4221,6 +4503,18 @@ export interface components {
             lines: components["schemas"]["InvoiceLineInput"][];
         };
         /**
+         * InvoiceCreditStatus
+         * @description Credit coverage state independent from lifecycle and settlement.
+         * @enum {string}
+         */
+        InvoiceCreditStatus: "NOT_CREDITED" | "PARTIALLY_CREDITED" | "CREDITED";
+        /**
+         * InvoiceDocumentKind
+         * @description Formal document kind for the M12 invoice family.
+         * @enum {string}
+         */
+        InvoiceDocumentKind: "STANDARD" | "ADVANCE" | "FINAL" | "CREDIT_NOTE";
+        /**
          * InvoiceLineCalculationRead
          * @description Per-line calculation result returned by the pricing engine.
          */
@@ -4437,12 +4731,55 @@ export interface components {
             due_date?: string | null;
             status: components["schemas"]["InvoiceStatus"];
             paid_status: components["schemas"]["InvoicePaidStatus"];
+            /** @default STANDARD */
+            document_kind?: components["schemas"]["InvoiceDocumentKind"];
+            /** Quote Id */
+            quote_id?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Issued By User Id */
+            issued_by_user_id?: string | null;
+            party_snapshot_provenance?: components["schemas"]["PartySnapshotProvenance"] | null;
+            /** Source Invoice Id */
+            source_invoice_id?: string | null;
+            /** Replacement Of Credit Note Id */
+            replacement_of_credit_note_id?: string | null;
+            /** Compensates Credit Note Id */
+            compensates_credit_note_id?: string | null;
+            settlement_status: components["schemas"]["InvoiceSettlementStatus"];
+            credit_status: components["schemas"]["InvoiceCreditStatus"];
             /** Currency */
             currency: string;
             /** Total Incl Vat */
             total_incl_vat: string;
+            /** Payable Before Payments */
+            payable_before_payments: string;
+            /** Incoming Payment Total */
+            incoming_payment_total: string;
+            /** Credited Total */
+            credited_total: string;
+            /** Refunded Total */
+            refunded_total: string;
             /** Due Amount */
             due_amount: string;
+            /** Refund Due Amount */
+            refund_due_amount: string;
+            /** Base Total Incl Vat */
+            base_total_incl_vat: string;
+            /** Base Payable Before Payments */
+            base_payable_before_payments: string;
+            /** Base Incoming Payment Total */
+            base_incoming_payment_total: string;
+            /** Base Credited Total */
+            base_credited_total: string;
+            /** Base Refunded Total */
+            base_refunded_total: string;
+            /** Base Due Amount */
+            base_due_amount: string;
+            /** Base Refund Due Amount */
+            base_refund_due_amount: string;
             vat_treatment_snapshot: components["schemas"]["VatTreatmentSnapshot"];
             /**
              * Created At
@@ -4527,7 +4864,7 @@ export interface components {
          * @description Payment status of an invoice.
          * @enum {string}
          */
-        InvoicePaidStatus: "UNPAID" | "PARTIALLY_PAID" | "PAID";
+        InvoicePaidStatus: "UNPAID" | "PARTIALLY_PAID" | "PAID" | "NOT_APPLICABLE";
         /**
          * InvoicePaymentsResponse
          * @description Aggregate: invoice payment state + ordered list of payment records.
@@ -4605,8 +4942,25 @@ export interface components {
             invoice_date: string;
             /** Due Date */
             due_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
             status: components["schemas"]["InvoiceStatus"];
             paid_status: components["schemas"]["InvoicePaidStatus"];
+            /** @default STANDARD */
+            document_kind?: components["schemas"]["InvoiceDocumentKind"];
+            /** Quote Id */
+            quote_id?: string | null;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Issued By User Id */
+            issued_by_user_id?: string | null;
+            party_snapshot_provenance?: components["schemas"]["PartySnapshotProvenance"] | null;
+            /** Source Invoice Id */
+            source_invoice_id?: string | null;
+            /** Replacement Of Credit Note Id */
+            replacement_of_credit_note_id?: string | null;
+            /** Compensates Credit Note Id */
+            compensates_credit_note_id?: string | null;
             /** Currency */
             currency: string;
             /** Exchange Rate */
@@ -4639,6 +4993,18 @@ export interface components {
             total_incl_vat: string;
             /** Due Amount */
             due_amount: string;
+            /** Payable Before Payments */
+            payable_before_payments: string;
+            /** Incoming Payment Total */
+            incoming_payment_total: string;
+            /** Credited Total */
+            credited_total: string;
+            /** Refunded Total */
+            refunded_total: string;
+            /** Refund Due Amount */
+            refund_due_amount: string;
+            settlement_status: components["schemas"]["InvoiceSettlementStatus"];
+            credit_status: components["schemas"]["InvoiceCreditStatus"];
             /** Base Subtotal Excl Vat */
             base_subtotal_excl_vat: string;
             /** Base Line Discount Total */
@@ -4651,6 +5017,16 @@ export interface components {
             base_total_incl_vat: string;
             /** Base Due Amount */
             base_due_amount: string;
+            /** Base Payable Before Payments */
+            base_payable_before_payments: string;
+            /** Base Incoming Payment Total */
+            base_incoming_payment_total: string;
+            /** Base Credited Total */
+            base_credited_total: string;
+            /** Base Refunded Total */
+            base_refunded_total: string;
+            /** Base Refund Due Amount */
+            base_refund_due_amount: string;
             /** Notes */
             notes?: string | null;
             /** Warranty Text */
@@ -4684,6 +5060,12 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * InvoiceSettlementStatus
+         * @description Settlement state independent from the document lifecycle.
+         * @enum {string}
+         */
+        InvoiceSettlementStatus: "OPEN" | "PARTIALLY_SETTLED" | "SETTLED" | "REFUND_DUE";
         /**
          * InvoiceStatus
          * @description Lifecycle status of an invoice.
@@ -4769,6 +5151,11 @@ export interface components {
             invoice_date: string;
             /** Due Date */
             due_date?: string | null;
+            /**
+             * Supply Or Advance Date
+             * @description Optional supply/prepayment date for a draft; defaults to invoice_date on issue.
+             */
+            supply_or_advance_date?: string | null;
             /**
              * Currency
              * @description Must equal company base_currency in M5.
@@ -5303,6 +5690,18 @@ export interface components {
          */
         PaidBy: "PRIVATE" | "BUSINESS";
         /**
+         * PartySnapshotProvenance
+         * @description Whether an issue-party snapshot was captured natively or migrated.
+         * @enum {string}
+         */
+        PartySnapshotProvenance: "NATIVE_ISSUE" | "MIGRATED_CURRENT_STATE";
+        /**
+         * PaymentDirection
+         * @description Cash direction.  Refund support is wired in a later M12 step.
+         * @enum {string}
+         */
+        PaymentDirection: "INCOMING" | "REFUND";
+        /**
          * PaymentInput
          * @description Request body for POST /api/v1/invoices/{id}/payments.
          *
@@ -5354,6 +5753,12 @@ export interface components {
             quote_id?: string | null;
             /** Quote Number */
             quote_number?: string | null;
+            /** @default INCOMING */
+            direction?: components["schemas"]["PaymentDirection"];
+            /** Credit Note Id */
+            credit_note_id?: string | null;
+            /** Credit Note Number */
+            credit_note_number?: string | null;
             /**
              * Customer Id
              * Format: uuid
@@ -5470,6 +5875,12 @@ export interface components {
             quote_id?: string | null;
             /** Quote Number */
             quote_number?: string | null;
+            /** @default INCOMING */
+            direction?: components["schemas"]["PaymentDirection"];
+            /** Credit Note Id */
+            credit_note_id?: string | null;
+            /** Credit Note Number */
+            credit_note_number?: string | null;
             /**
              * Payment Date
              * Format: date
@@ -6060,6 +6471,8 @@ export interface components {
             status: components["schemas"]["QuoteStatus"];
             /** Converted Invoice Id */
             converted_invoice_id?: string | null;
+            /** @default UNSET */
+            settlement_mode?: components["schemas"]["QuoteSettlementMode"];
             /** Currency */
             currency: string;
             /** Total Incl Vat */
@@ -6213,6 +6626,39 @@ export interface components {
             status: components["schemas"]["QuoteStatus"];
             /** Converted Invoice Id */
             converted_invoice_id?: string | null;
+            /** @default UNSET */
+            settlement_mode?: components["schemas"]["QuoteSettlementMode"];
+            /** Settlement Mode Locked At */
+            settlement_mode_locked_at?: string | null;
+            /**
+             * @default {
+             *       "charge_total": "0",
+             *       "credit_total": "0",
+             *       "incoming_payment_total": "0",
+             *       "refund_total": "0",
+             *       "application_total": "0",
+             *       "due_amount": "0",
+             *       "refund_due_amount": "0",
+             *       "base_charge_total": "0",
+             *       "base_credit_total": "0",
+             *       "base_incoming_payment_total": "0",
+             *       "base_refund_total": "0",
+             *       "base_application_total": "0",
+             *       "base_due_amount": "0",
+             *       "base_refund_due_amount": "0"
+             *     }
+             */
+            chain_totals?: components["schemas"]["DocumentChainTotals"];
+            /**
+             * Incoming Payment Total
+             * @default 0
+             */
+            incoming_payment_total?: string;
+            /**
+             * Remaining Amount
+             * @default 0
+             */
+            remaining_amount?: string;
             /** Currency */
             currency: string;
             /** Exchange Rate */
@@ -6253,6 +6699,16 @@ export interface components {
             base_vat_total: string;
             /** Base Total Incl Vat */
             base_total_incl_vat: string;
+            /**
+             * Base Incoming Payment Total
+             * @default 0
+             */
+            base_incoming_payment_total?: string;
+            /**
+             * Base Remaining Amount
+             * @default 0
+             */
+            base_remaining_amount?: string;
             /** Notes */
             notes?: string | null;
             /** Warranty Text */
@@ -6286,6 +6742,12 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * QuoteSettlementMode
+         * @description The immutable billing branch selected for an accepted quote.
+         * @enum {string}
+         */
+        QuoteSettlementMode: "UNSET" | "DIRECT_INVOICE" | "RECEIPT_ONLY" | "FORMAL_ADVANCE";
         /**
          * QuoteStatus
          * @description Lifecycle status of a quote.
@@ -7879,6 +8341,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceNumberingConfig"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_credit_numbering_config_api_v1_settings_credit_numbering_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNumberingConfig"];
+                };
+            };
+        };
+    };
+    update_credit_numbering_config_api_v1_settings_credit_numbering_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditNumberingConfig"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNumberingConfig"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_credit_number_sequence_api_v1_settings_credit_number_sequence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNumberSequenceRead"];
+                };
+            };
+        };
+    };
+    update_credit_number_sequence_api_v1_settings_credit_number_sequence_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditNumberSequenceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNumberSequenceRead"];
                 };
             };
             /** @description Validation Error */
@@ -9531,6 +10099,76 @@ export interface operations {
             };
         };
     };
+    calculate_advance_placeholder_api_v1_quotes__quote_id__advance_invoices_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdvanceCalculationRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Successful Response */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdvanceCalculationRead"];
+                };
+            };
+        };
+    };
+    calculate_credit_placeholder_api_v1_invoices__source_invoice_id__credit_notes_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditCalculationRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Successful Response */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditCalculationRead"];
+                };
+            };
+        };
+    };
     list_invoices_endpoint_api_v1_invoices_get: {
         parameters: {
             query?: {
@@ -10698,6 +11336,8 @@ export interface operations {
                 q?: string | null;
                 customer_id?: string | null;
                 payment_method_id?: string | null;
+                direction?: components["schemas"]["PaymentDirection"] | null;
+                document_kind?: components["schemas"]["InvoiceDocumentKind"] | null;
                 /** @description Inclusive lower bound on payment_date. */
                 date_from?: string | null;
                 /** @description Inclusive upper bound on payment_date. */

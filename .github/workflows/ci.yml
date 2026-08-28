@@ -60,6 +60,22 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Provision deployment roles
+        working-directory: .
+        run: sh docker/postgres-init/provision-application-roles.sh
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: jai
+          POSTGRES_ADMIN_USER: jai
+          POSTGRES_ADMIN_PASSWORD: jai
+          POSTGRES_LEGACY_USER: jai
+          POSTGRES_LEGACY_PASSWORD: jai
+          POSTGRES_MIGRATION_USER: jai_migrator
+          POSTGRES_MIGRATION_PASSWORD: jai_migrator
+          POSTGRES_APP_USER: jai_app
+          POSTGRES_APP_PASSWORD: jai_app
+
       - name: Ruff check
         run: uv run ruff check .
 
@@ -71,12 +87,24 @@ jobs:
         env:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          POSTGRES_ADMIN_USER: jai
+          POSTGRES_ADMIN_PASSWORD: jai
+          POSTGRES_MIGRATION_USER: jai_migrator
+          POSTGRES_MIGRATION_PASSWORD: jai_migrator
+          POSTGRES_APP_USER: jai_app
+          POSTGRES_APP_PASSWORD: jai_app
 
       - name: Pytest integration
         run: uv run pytest -m integration
         env:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          POSTGRES_ADMIN_USER: jai
+          POSTGRES_ADMIN_PASSWORD: jai
+          POSTGRES_MIGRATION_USER: jai_migrator
+          POSTGRES_MIGRATION_PASSWORD: jai_migrator
+          POSTGRES_APP_USER: jai_app
+          POSTGRES_APP_PASSWORD: jai_app
 
   # =========================================================================
   # 4.2  CodeGen freshness — ensures schema.d.ts is in sync with the backend
@@ -120,6 +148,22 @@ jobs:
       - name: Install backend dependencies
         run: uv sync --frozen
 
+      - name: Provision deployment roles
+        working-directory: .
+        run: sh docker/postgres-init/provision-application-roles.sh
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: jai
+          POSTGRES_ADMIN_USER: jai
+          POSTGRES_ADMIN_PASSWORD: jai
+          POSTGRES_LEGACY_USER: jai
+          POSTGRES_LEGACY_PASSWORD: jai
+          POSTGRES_MIGRATION_USER: jai_migrator
+          POSTGRES_MIGRATION_PASSWORD: jai_migrator
+          POSTGRES_APP_USER: jai_app
+          POSTGRES_APP_PASSWORD: jai_app
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
@@ -127,8 +171,15 @@ jobs:
       - name: Run Alembic migrations
         run: uv run alembic upgrade head
         env:
+          DATABASE_URL: postgresql+asyncpg://jai_migrator:jai_migrator@localhost:5432/jai
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          POSTGRES_ADMIN_USER: jai
+          POSTGRES_ADMIN_PASSWORD: jai
+          POSTGRES_MIGRATION_USER: jai_migrator
+          POSTGRES_MIGRATION_PASSWORD: jai_migrator
+          POSTGRES_APP_USER: jai_app
+          POSTGRES_APP_PASSWORD: jai_app
 
       - name: Start backend server
         run: |
@@ -146,6 +197,12 @@ jobs:
         env:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          POSTGRES_ADMIN_USER: jai
+          POSTGRES_ADMIN_PASSWORD: jai
+          POSTGRES_MIGRATION_USER: jai_migrator
+          POSTGRES_MIGRATION_PASSWORD: jai_migrator
+          POSTGRES_APP_USER: jai_app
+          POSTGRES_APP_PASSWORD: jai_app
 
       - name: Regenerate schema.d.ts
         working-directory: frontend

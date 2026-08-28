@@ -510,11 +510,14 @@ async def render_invoice_pdf(
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
+    from jai.db import set_rls_company
     from jai.models.binary_asset import BinaryAsset
     from jai.models.company import Company
     from jai.models.customer import Customer
     from jai.models.invoice import Invoice
     from jai.models.payment import Payment
+
+    await set_rls_company(session, company_id)
 
     # -- Load invoice scoped to company (red-line 2) --------------------------
     stmt = (
@@ -862,12 +865,15 @@ async def render_payment_receipt_pdf(
     from fastapi import HTTPException, status
     from sqlalchemy import select
 
+    from jai.db import set_rls_company
     from jai.models.binary_asset import BinaryAsset
     from jai.models.company import Company
     from jai.models.customer import Customer
     from jai.models.invoice import Invoice
     from jai.models.payment import Payment
     from jai.models.quote import Quote
+
+    await set_rls_company(session, company_id)
 
     # The seed is deliberately projection-only: it chooses the immutable
     # payment origin, but is never used to render.  After taking the matching
@@ -1082,10 +1088,13 @@ async def render_quote_pdf(
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
+    from jai.db import set_rls_company
     from jai.models.binary_asset import BinaryAsset
     from jai.models.company import Company
     from jai.models.customer import Customer
     from jai.models.quote import Quote, QuoteLine
+
+    await set_rls_company(session, company_id)
 
     # -- Load quote scoped to company (red-line 2) ----------------------------
     stmt = (

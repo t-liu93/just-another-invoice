@@ -20,6 +20,7 @@ import type { InvoicePaymentsResponse } from '../../stores/payments'
 import { get, downloadBlob } from '../../api/http'
 import type { components } from '../../api/schema'
 import { persistedReceiptCustomer, receiptAuditTarget } from '../../utils/receiptEmail'
+import { invoiceDocumentKindLabelKey } from '../../utils/documentKind'
 
 type CustomerRead = components['schemas']['CustomerRead']
 type VatRateRead = components['schemas']['VatRateRead']
@@ -576,6 +577,9 @@ function handleReceiptSent(log: EmailLogRead) {
                   : t('invoices.new') }}
               </h2>
               <n-space v-if="existingInvoice" align="center">
+                <n-tag size="small">
+                  {{ t(invoiceDocumentKindLabelKey(existingInvoice.document_kind)) }}
+                </n-tag>
                 <n-tag :type="existingInvoice.status === 'DRAFT' ? 'default' : existingInvoice.status === 'SENT' ? 'info' : existingInvoice.status === 'COMPLETED' ? 'success' : 'warning'">
                   {{ t(`invoices.status${existingInvoice.status}`) }}
                 </n-tag>

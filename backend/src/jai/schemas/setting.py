@@ -16,6 +16,8 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+_POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807
+
 # ---------------------------------------------------------------------------
 # Setting key constants – single source of truth
 # ---------------------------------------------------------------------------
@@ -35,6 +37,9 @@ SETTING_KEY_AUTH_SECRET: str = "auth.secret"
 #: Invoice numbering template config (COMPANY level).  M2 stores only the
 #: configuration; the rendering engine is implemented in M5.
 SETTING_KEY_INVOICE_NUMBERING: str = "invoice.numbering"
+
+#: Independent M12 Credit Note numbering template (COMPANY level).
+SETTING_KEY_CREDIT_NUMBERING: str = "credit.numbering"
 
 #: Quote numbering template config (COMPANY level).
 SETTING_KEY_QUOTE_NUMBERING: str = "quote.numbering"
@@ -153,6 +158,7 @@ class InvoiceNumberingConfig(BaseModel):
     sequence_start: int = Field(
         default=1,
         ge=1,
+        le=_POSTGRES_BIGINT_MAX,
         description=(
             "Starting number used only when the sequence row is first created. "
             "Changing this after the first invoice has no effect."
@@ -161,6 +167,15 @@ class InvoiceNumberingConfig(BaseModel):
     preview: str | None = Field(
         default=None,
         description="Read-only: preview of the next invoice number (ignored on PUT).",
+    )
+
+
+class CreditNumberingConfig(InvoiceNumberingConfig):
+    """Typed independent Credit Note sequence configuration (M12)."""
+
+    template: str = Field(
+        default="{{SERIES:CRN}}-{{SEQUENCE:6}}",
+        description="Credit Note numbering template; uses the normal safe placeholders.",
     )
 
 
@@ -181,11 +196,20 @@ class InvoiceNumberSequenceWrite(BaseModel):
 
     next_sequence: int = Field(
         ge=1,
+        le=_POSTGRES_BIGINT_MAX,
         description=(
             "New next sequence value. Must be strictly greater than the current "
             "next_sequence if a sequence already exists (forward-only)."
         ),
     )
+
+
+class CreditNumberSequenceRead(InvoiceNumberSequenceRead):
+    """Response for GET/PUT /settings/credit-number-sequence."""
+
+
+class CreditNumberSequenceWrite(InvoiceNumberSequenceWrite):
+    """Request body for credit-sequence forward skip."""
 
 
 # ---------------------------------------------------------------------------

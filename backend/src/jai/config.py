@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -51,20 +51,30 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+    _database_url_was_explicit: bool = PrivateAttr(default=False)
 
     # -- PostgreSQL connection parts -----------------------------------------
-    # These double as the postgres container config (USER/PASSWORD/DB) and
-    # the backend's connection parameters.  In most cases you only need to
-    # override HOST and PORT.
+    # Runtime credentials are deliberately separate from the PostgreSQL
+    # bootstrap/migration owner.  New deployments pass these as separate
+    # fields so SQLAlchemy can encode credentials safely at the process edge.
     postgres_host: str = "localhost"
     postgres_port: int = 5432
+    # The old single-role pair remains accepted for existing deployments.
+    # New installations use the explicit least-privilege role pairs below.
     postgres_user: str = "jai"
     postgres_password: str = "jai"
     postgres_db: str = "jai"
+    postgres_app_user: str = "jai_app"
+    postgres_app_password: str = "jai_app"
+    postgres_migration_user: str = "jai_migrator"
+    postgres_migration_password: str = "jai_migrator"
+    postgres_admin_user: str = "jai_admin"
+    postgres_admin_password: str = "jai_admin"
 
-    # -- Full URL override (escape hatch) -----------------------------------
-    # If set, takes precedence over the individual POSTGRES_* fields above.
+    # -- Full URL overrides (external/legacy escape hatches) ----------------
+    # If set, these take precedence over the corresponding individual parts.
     database_url: str | None = None
+    database_migration_url: str | None = None
 
     # -- Frontend static files (deployment mode) ----------------------------
     # When set, FastAPI serves the SPA from this directory.
@@ -136,17 +146,67 @@ class Settings(BaseSettings):
         Uses ``URL.create()`` so that special characters in the password
         (``@``, ``:``, ``/``, ``#`` …) are safely percent-encoded.
         """
-        if self.database_url is None:
+        # Compose passes DATABASE_URL through even when the optional variable
+        # is unset.  Treat an empty string as absent and use POSTGRES_* then.
+        # DATABASE_URL is the established explicit runtime override.  If an
+        # old deployment only supplies POSTGRES_USER/PASSWORD, preserve that
+        # connection shape; otherwise runtime deliberately defaults to the
+        # non-owner application credentials.
+        self._database_url_was_explicit = bool(self.database_url)
+        legacy_parts_explicit = bool(
+            {"postgres_user", "postgres_password"} & self.model_fields_set
+        ) and not bool(
+            {"postgres_app_user", "postgres_app_password"} & self.model_fields_set
+        )
+        if not self.database_url:
+            runtime_user = self.postgres_user if legacy_parts_explicit else self.postgres_app_user
+            runtime_password = (
+                self.postgres_password if legacy_parts_explicit else self.postgres_app_password
+            )
             url = URL.create(
                 drivername="postgresql+asyncpg",
-                username=self.postgres_user,
-                password=self.postgres_password,
+                username=runtime_user,
+                password=runtime_password,
                 host=self.postgres_host,
                 port=self.postgres_port,
                 database=self.postgres_db,
             )
             self.database_url = url.render_as_string(hide_password=False)
         return self
+
+    @property
+    def migration_database_url(self) -> str:
+        """Return the Alembic connection URL using the migration owner.
+
+        ``DATABASE_MIGRATION_URL`` is the explicit, role-specific escape
+        hatch.  A legacy command that supplied only ``DATABASE_URL`` keeps
+        working, while new installations assemble an encoded URL from the
+        migration role's independent connection parts.
+        """
+        if self.database_migration_url:
+            return self.database_migration_url
+        if self._database_url_was_explicit and self.database_url:
+            return self.database_url
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.postgres_migration_user,
+            password=self.postgres_migration_password,
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
+        ).render_as_string(hide_password=False)
+
+    @property
+    def database_admin_url(self) -> str:
+        """Admin-only URL used by isolated test/database provisioning tools."""
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.postgres_admin_user,
+            password=self.postgres_admin_password,
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
+        ).render_as_string(hide_password=False)
 
 
 @lru_cache

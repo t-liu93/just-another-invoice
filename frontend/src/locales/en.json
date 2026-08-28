@@ -182,6 +182,19 @@
       "skipSuccess": "Sequence advanced.",
       "skipFailed": "Failed to advance sequence."
     },
+    "creditNumbering": {
+      "section": "Credit Note Numbering",
+      "template": "Numbering template",
+      "sequenceStart": "Starting number",
+      "preview": "Next Credit Note number",
+      "previewHint": "(current sequence: {seq})",
+      "save": "Save Credit Note numbering",
+      "saveSuccess": "Credit Note numbering config saved.",
+      "saveFailed": "Failed to save Credit Note numbering config.",
+      "skipTo": "Jump to number",
+      "skipSave": "Apply skip",
+      "skipFailed": "Failed to advance Credit Note sequence."
+    },
     "preferences": {
       "title": "Preferences",
       "theme": "Theme",
@@ -565,6 +578,11 @@
     "invoiceNumber": "Number",
     "concept": "Concept",
     "invoiceDate": "Date",
+    "documentKind": "Document type",
+    "documentKindSTANDARD": "Standard Invoice",
+    "documentKindADVANCE": "Advance Invoice",
+    "documentKindFINAL": "Final Invoice",
+    "documentKindCREDIT_NOTE": "Credit Note",
     "dueDate": "Due date",
     "status": "Status",
     "currency": "Currency",

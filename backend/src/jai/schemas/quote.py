@@ -19,7 +19,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from jai.models._enums import DiscountType, InvoiceTaxMode, QuoteStatus
+from jai.models._enums import DiscountType, InvoiceTaxMode, QuoteSettlementMode, QuoteStatus
 from jai.schemas.invoice import (
     DiscountInput,
     InvoiceCalculationRead,
@@ -153,6 +153,25 @@ class QuoteTaxRowRead(BaseModel):
     tax_amount: Decimal
 
 
+class DocumentChainTotals(BaseModel):
+    """Compact, backend-authoritative settlement projection for one Quote chain."""
+
+    charge_total: Decimal = Decimal("0")
+    credit_total: Decimal = Decimal("0")
+    incoming_payment_total: Decimal = Decimal("0")
+    refund_total: Decimal = Decimal("0")
+    application_total: Decimal = Decimal("0")
+    due_amount: Decimal = Decimal("0")
+    refund_due_amount: Decimal = Decimal("0")
+    base_charge_total: Decimal = Decimal("0")
+    base_credit_total: Decimal = Decimal("0")
+    base_incoming_payment_total: Decimal = Decimal("0")
+    base_refund_total: Decimal = Decimal("0")
+    base_application_total: Decimal = Decimal("0")
+    base_due_amount: Decimal = Decimal("0")
+    base_refund_due_amount: Decimal = Decimal("0")
+
+
 # ---------------------------------------------------------------------------
 # Quote read (step 2)
 # ---------------------------------------------------------------------------
@@ -176,6 +195,12 @@ class QuoteRead(BaseModel):
 
     status: QuoteStatus
     converted_invoice_id: uuid.UUID | None = None
+    settlement_mode: QuoteSettlementMode = QuoteSettlementMode.UNSET
+    settlement_mode_locked_at: datetime | None = None
+    chain_totals: DocumentChainTotals = DocumentChainTotals()
+    # M11.5 compatibility aliases. New clients must use chain_totals.
+    incoming_payment_total: Decimal = Decimal("0")
+    remaining_amount: Decimal = Decimal("0")
 
     currency: str
     exchange_rate: Decimal
@@ -202,6 +227,8 @@ class QuoteRead(BaseModel):
     base_taxable_amount: Decimal
     base_vat_total: Decimal
     base_total_incl_vat: Decimal
+    base_incoming_payment_total: Decimal = Decimal("0")
+    base_remaining_amount: Decimal = Decimal("0")
 
     notes: str | None = None
     warranty_text: str | None = None
@@ -235,6 +262,7 @@ class QuoteListItem(BaseModel):
     valid_until: date | None = None
     status: QuoteStatus
     converted_invoice_id: uuid.UUID | None = None
+    settlement_mode: QuoteSettlementMode = QuoteSettlementMode.UNSET
     currency: str
     total_incl_vat: Decimal
     vat_treatment_snapshot: VatTreatmentSnapshot
@@ -277,6 +305,7 @@ __all__ = [
     "InvoiceLineInput",
     "QuoteCalculationRead",
     "QuoteCalculationRequest",
+    "DocumentChainTotals",
     "QuoteLineRead",
     "QuoteLineReadTax",
     "QuoteListItem",

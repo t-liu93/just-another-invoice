@@ -620,6 +620,7 @@ class TestSetCompanyLogo:
         session = AsyncMock()
         old_asset = MagicMock()
         session.get = AsyncMock(return_value=old_asset)
+        session.scalar = AsyncMock(return_value=None)
 
         # Fix: use MagicMock for session.add to avoid AsyncMock warning.
         added_assets: list[object] = []
@@ -673,6 +674,7 @@ class TestClearCompanyLogo:
         session = AsyncMock()
         asset = MagicMock()
         session.get = AsyncMock(return_value=asset)
+        session.scalar = AsyncMock(return_value=None)
 
         with patch("jai.services.assets.get_company", return_value=company):
             result = await clear_company_logo(session)
@@ -680,6 +682,23 @@ class TestClearCompanyLogo:
         assert result is True
         assert company.logo_id is None
         session.delete.assert_called_once_with(asset)
+
+    async def test_clear_keeps_asset_referenced_by_issued_snapshot(self) -> None:
+        """Clear tests the old ID, retaining only a genuinely referenced logo."""
+        logo_id = uuid.uuid4()
+        company = _make_company_orm(logo_id=logo_id)
+        session = AsyncMock()
+        asset = MagicMock()
+        session.get = AsyncMock(return_value=asset)
+        session.scalar = AsyncMock(return_value=uuid.uuid4())
+
+        with patch("jai.services.assets.get_company", return_value=company):
+            assert await clear_company_logo(session) is True
+
+        assert company.logo_id is None
+        session.delete.assert_not_called()
+        whereclause = session.scalar.call_args.args[0].whereclause
+        assert logo_id.hex in str(whereclause.compile(compile_kwargs={"literal_binds": True}))
 
     async def test_clear_no_logo_returns_false(self) -> None:
         """Clearing when no logo exists returns False."""

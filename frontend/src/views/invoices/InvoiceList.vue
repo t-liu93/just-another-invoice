@@ -15,6 +15,7 @@ import { useInvoicesStore } from '../../stores/invoices'
 import type { InvoiceListItem } from '../../stores/invoices'
 import { get, downloadBlob } from '../../api/http'
 import type { components } from '../../api/schema'
+import { invoiceDocumentKindLabelKey } from '../../utils/documentKind'
 
 type CustomerRead = components['schemas']['CustomerRead']
 type EmailLogRead = components['schemas']['EmailLogRead']
@@ -255,6 +256,14 @@ const columns = computed(() => [
     title: t('invoices.invoiceDate'),
     key: 'invoice_date',
     width: 110,
+  },
+  {
+    title: t('invoices.documentKind'),
+    key: 'document_kind',
+    width: 130,
+    render(row: InvoiceListItem) {
+      return h(NTag, { size: 'small' }, () => t(invoiceDocumentKindLabelKey(row.document_kind)))
+    },
   },
   {
     title: t('invoices.status'),

@@ -40,9 +40,12 @@ from typing import Any
 import cssselect2
 import nh3
 import tinycss2
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jai.db import set_rls_company
 from jai.models.binary_asset import BinaryAsset
+from jai.models.document import InvoicePartySnapshot
 from jai.services.company import get_company
 
 # ---------------------------------------------------------------------------
@@ -463,10 +466,17 @@ async def set_company_logo(
     if company is None:
         raise AssetValidationError("Company profile must be created before uploading a logo.")
 
-    # Delete old asset if replacing.
+    # An issued document owns an immutable reference to its issue-time logo.
+    # Keep a referenced asset while allowing ordinary logo replacement/clear.
     if company.logo_id is not None:
+        await set_rls_company(session, company.id)
         old_asset = await session.get(BinaryAsset, company.logo_id)
-        if old_asset is not None:
+        snapshot_uses = await session.scalar(
+            select(InvoicePartySnapshot.id).where(
+                InvoicePartySnapshot.logo_id == company.logo_id
+            ).limit(1)
+        )
+        if old_asset is not None and snapshot_uses is None:
             await session.delete(old_asset)
             await session.flush()
 
@@ -507,12 +517,19 @@ async def clear_company_logo(session: AsyncSession) -> bool:
     if company is None or company.logo_id is None:
         return False
 
-    asset = await session.get(BinaryAsset, company.logo_id)
+    old_logo_id = company.logo_id
+    asset = await session.get(BinaryAsset, old_logo_id)
+    await set_rls_company(session, company.id)
     # The FK ON DELETE SET NULL fires at DB level, but we also set it
     # explicitly to avoid stale ORM state.
     company.logo_id = None
 
-    if asset is not None:
+    snapshot_uses = await session.scalar(
+        select(InvoicePartySnapshot.id).where(
+            InvoicePartySnapshot.logo_id == old_logo_id
+        ).limit(1)
+    )
+    if asset is not None and snapshot_uses is None:
         await session.delete(asset)
     await session.flush()
     return True

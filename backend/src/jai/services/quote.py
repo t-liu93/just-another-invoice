@@ -52,6 +52,7 @@ from jai.schemas.invoice import (
     VatTreatmentSnapshot,
 )
 from jai.schemas.quote import (
+    DocumentChainTotals,
     QuoteLineRead,
     QuoteLineReadTax,
     QuoteListItem,
@@ -71,7 +72,7 @@ from jai.schemas.setting import (
 from jai.services.invoice import clone_quote_to_invoice, get_invoice
 from jai.services.money import quantize_to_minor_unit
 from jai.services.numbering import allocate_quote_number
-from jai.services.payment import recompute_payment_state
+from jai.services.payment import _write_invoice_state, recompute_payment_state
 from jai.services.pricing import (
     _derive_treatment_from_customer,
     compute_pricing,
@@ -268,7 +269,17 @@ def _line_to_read(line: QuoteLine) -> QuoteLineRead:
     )
 
 
-def _quote_to_read(q: Quote) -> QuoteRead:
+def _quote_to_read(
+    q: Quote,
+    *,
+    incoming_payment_total: Decimal = Decimal("0"),
+    base_incoming_payment_total: Decimal = Decimal("0"),
+    chain_totals: DocumentChainTotals | None = None,
+) -> QuoteRead:
+    totals = chain_totals or DocumentChainTotals(
+        incoming_payment_total=incoming_payment_total,
+        base_incoming_payment_total=base_incoming_payment_total,
+    )
     treatment_snapshot = VatTreatmentSnapshot(
         id=q.vat_treatment_id,
         code=q.vat_treatment_code,
@@ -289,6 +300,13 @@ def _quote_to_read(q: Quote) -> QuoteRead:
         valid_until=q.valid_until,
         status=QuoteStatus(q.status),
         converted_invoice_id=q.converted_invoice_id,
+        settlement_mode=q.settlement_mode,
+        settlement_mode_locked_at=q.settlement_mode_locked_at,
+        chain_totals=totals,
+        incoming_payment_total=totals.incoming_payment_total,
+        remaining_amount=max(
+            Decimal("0"), Decimal(str(q.total_incl_vat)) - totals.incoming_payment_total
+        ),
         currency=q.currency,
         exchange_rate=Decimal(str(q.exchange_rate)),
         tax_mode=InvoiceTaxMode(q.tax_mode),
@@ -309,6 +327,11 @@ def _quote_to_read(q: Quote) -> QuoteRead:
         base_taxable_amount=Decimal(str(q.base_taxable_amount)),
         base_vat_total=Decimal(str(q.base_vat_total)),
         base_total_incl_vat=Decimal(str(q.base_total_incl_vat)),
+        base_incoming_payment_total=totals.base_incoming_payment_total,
+        base_remaining_amount=max(
+            Decimal("0"),
+            Decimal(str(q.base_total_incl_vat)) - totals.base_incoming_payment_total,
+        ),
         notes=q.notes,
         warranty_text=q.warranty_text,
         terms_text=q.terms_text,
@@ -333,6 +356,68 @@ def _quote_to_read(q: Quote) -> QuoteRead:
     )
 
 
+async def _quote_chain_totals(session: AsyncSession, quote: Quote) -> DocumentChainTotals:
+    """Return the compact M12 chain projection for legacy DIRECT/RECEIPT_ONLY.
+
+    Step 1 has no formal applications, Credits, or refunds yet, but keeps all
+    seven transaction/base concepts explicit so later steps extend one typed
+    projection instead of changing Quote arithmetic client-side.
+    """
+    invoices = list(
+        (
+            await session.execute(
+                select(Invoice).where(
+                    Invoice.company_id == quote.company_id,
+                    Invoice.quote_id == quote.id,
+                )
+            )
+        ).scalars()
+    )
+    if invoices:
+        charge = sum((Decimal(str(i.payable_before_payments)) for i in invoices), Decimal("0"))
+        incoming = sum((Decimal(str(i.incoming_payment_total)) for i in invoices), Decimal("0"))
+        credit = sum((Decimal(str(i.credited_total)) for i in invoices), Decimal("0"))
+        refund = sum((Decimal(str(i.refunded_total)) for i in invoices), Decimal("0"))
+        base_charge = sum(
+            (Decimal(str(i.base_payable_before_payments)) for i in invoices), Decimal("0")
+        )
+        base_incoming = sum(
+            (Decimal(str(i.base_incoming_payment_total)) for i in invoices), Decimal("0")
+        )
+        base_credit = sum((Decimal(str(i.base_credited_total)) for i in invoices), Decimal("0"))
+        base_refund = sum((Decimal(str(i.base_refunded_total)) for i in invoices), Decimal("0"))
+    else:
+        # RECEIPT_ONLY before conversion has cash but no issued charge. It is
+        # intentionally not a formal document charge and therefore cannot be
+        # mistaken for an Advance in later chain totals.
+        payment_totals = (
+            await session.execute(
+                select(
+                    func.coalesce(func.sum(Payment.amount), 0),
+                    func.coalesce(func.sum(Payment.base_amount), 0),
+                ).where(Payment.quote_id == quote.id)
+            )
+        ).one()
+        charge = credit = refund = base_charge = base_credit = base_refund = Decimal("0")
+        incoming = Decimal(str(payment_totals[0]))
+        base_incoming = Decimal(str(payment_totals[1]))
+    net_charge = charge - credit
+    net_cash = incoming - refund
+    base_net_charge = base_charge - base_credit
+    base_net_cash = base_incoming - base_refund
+    return DocumentChainTotals(
+        charge_total=charge, credit_total=credit, incoming_payment_total=incoming,
+        refund_total=refund, application_total=Decimal("0"),
+        due_amount=max(net_charge - net_cash, Decimal("0")),
+        refund_due_amount=max(net_cash - net_charge, Decimal("0")),
+        base_charge_total=base_charge, base_credit_total=base_credit,
+        base_incoming_payment_total=base_incoming, base_refund_total=base_refund,
+        base_application_total=Decimal("0"),
+        base_due_amount=max(base_net_charge - base_net_cash, Decimal("0")),
+        base_refund_due_amount=max(base_net_cash - base_net_charge, Decimal("0")),
+    )
+
+
 def _quote_to_list_item(q: Quote, *, customer_name: str) -> QuoteListItem:
     return QuoteListItem(
         id=q.id,
@@ -345,6 +430,7 @@ def _quote_to_list_item(q: Quote, *, customer_name: str) -> QuoteListItem:
         valid_until=q.valid_until,
         status=QuoteStatus(q.status),
         converted_invoice_id=q.converted_invoice_id,
+        settlement_mode=q.settlement_mode,
         currency=q.currency,
         total_incl_vat=Decimal(str(q.total_incl_vat)),
         vat_treatment_snapshot=VatTreatmentSnapshot(
@@ -685,14 +771,15 @@ async def get_quote(
     q = result.scalar_one_or_none()
     if q is None:
         return None
+    chain_totals = await _quote_chain_totals(session, q)
     if _apply_expiry_in_memory(q):
         q.status = QuoteStatus.EXPIRED
         # Build read model before commit (avoids post-commit attribute expiry)
-        read = _quote_to_read(q)
+        read = _quote_to_read(q, chain_totals=chain_totals)
         await session.flush()
         await session.commit()
         return read
-    return _quote_to_read(q)
+    return _quote_to_read(q, chain_totals=chain_totals)
 
 
 async def update_quote(
@@ -947,9 +1034,7 @@ async def convert_to_invoice(
         payments,
         InvoiceStatus.DRAFT,
     )
-    invoice.due_amount = payment_state.due_amount
-    invoice.base_due_amount = payment_state.base_due_amount
-    invoice.paid_status = payment_state.paid_status
+    _write_invoice_state(invoice, payment_state)
     invoice.status = InvoiceStatus.DRAFT
 
     q.status = QuoteStatus.ACCEPTED

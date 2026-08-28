@@ -37,6 +37,16 @@ const numberingMessage = ref('')
 const numberingMessageType = ref<'success' | 'error'>('success')
 const numberingPreview = ref('')
 
+const creditNumberingTemplate = ref('{{SERIES:CRN}}-{{SEQUENCE:6}}')
+const creditNumberingSequenceStart = ref(1)
+const creditNumberingSaving = ref(false)
+const creditNumberingMessage = ref('')
+const creditNumberingMessageType = ref<'success' | 'error'>('success')
+const creditNumberingPreview = ref('')
+const creditSequenceNextValue = ref(1)
+const creditSequenceSkipTo = ref<number | null>(null)
+const creditSequenceSkipping = ref(false)
+
 // Sequence skip state
 const sequenceNextValue = ref(1)
 const sequenceSkipTo = ref<number | null>(null)
@@ -117,6 +127,18 @@ onMounted(async () => {
     }
   } catch {
     // ignore – company may not exist yet
+  }
+
+  try {
+    const data = await get<{ template: string; sequence_start: number; preview?: string }>('/api/v1/settings/credit-numbering')
+    creditNumberingTemplate.value = data.template
+    creditNumberingSequenceStart.value = data.sequence_start
+    creditNumberingPreview.value = data.preview ?? ''
+    const seqData = await get<{ next_sequence: number; preview_number: string }>('/api/v1/settings/credit-number-sequence')
+    creditSequenceNextValue.value = seqData.next_sequence
+    creditNumberingPreview.value = seqData.preview_number
+  } catch {
+    // Credit settings remain at their typed defaults until a company exists.
   }
 
   // Quote numbering config
@@ -263,6 +285,48 @@ async function handleSkipSequence() {
     sequenceSkipMessageType.value = 'error'
   } finally {
     sequenceSkipping.value = false
+  }
+}
+
+async function handleSaveCreditNumbering() {
+  creditNumberingSaving.value = true
+  creditNumberingMessage.value = ''
+  try {
+    const result = await put<{ template: string; sequence_start: number; preview?: string }>(
+      '/api/v1/settings/credit-numbering',
+      { template: creditNumberingTemplate.value, sequence_start: creditNumberingSequenceStart.value },
+    )
+    creditNumberingTemplate.value = result.template
+    creditNumberingSequenceStart.value = result.sequence_start
+    creditNumberingPreview.value = result.preview ?? creditNumberingPreview.value
+    const seqData = await get<{ next_sequence: number; preview_number: string }>('/api/v1/settings/credit-number-sequence')
+    creditSequenceNextValue.value = seqData.next_sequence
+    creditNumberingPreview.value = seqData.preview_number
+    creditNumberingMessage.value = t('settings.creditNumbering.saveSuccess')
+    creditNumberingMessageType.value = 'success'
+  } catch (e: unknown) {
+    creditNumberingMessage.value = (e as { message?: string }).message || t('settings.creditNumbering.saveFailed')
+    creditNumberingMessageType.value = 'error'
+  } finally {
+    creditNumberingSaving.value = false
+  }
+}
+
+async function handleCreditSkipSequence() {
+  if (!creditSequenceSkipTo.value || creditSequenceSkipTo.value <= creditSequenceNextValue.value) return
+  creditSequenceSkipping.value = true
+  try {
+    const result = await put<{ next_sequence: number; preview_number: string }>(
+      '/api/v1/settings/credit-number-sequence', { next_sequence: creditSequenceSkipTo.value },
+    )
+    creditSequenceNextValue.value = result.next_sequence
+    creditNumberingPreview.value = result.preview_number
+    creditSequenceSkipTo.value = null
+  } catch (e: unknown) {
+    creditNumberingMessage.value = (e as { message?: string }).message || t('settings.creditNumbering.skipFailed')
+    creditNumberingMessageType.value = 'error'
+  } finally {
+    creditSequenceSkipping.value = false
   }
 }
 
@@ -506,6 +570,36 @@ async function handleSaveQuoteDefaultValidDays() {
                   @click="handleSkipSequence"
                 >
                   {{ t('settings.numbering.skipSave') }}
+                </n-button>
+              </n-form>
+
+              <n-divider style="margin-top: 32px">{{ t('settings.creditNumbering.section') }}</n-divider>
+              <n-form label-placement="left" label-width="150" :disabled="!companyStore.hasCompany" @submit.prevent="handleSaveCreditNumbering">
+                <n-form-item :label="t('settings.creditNumbering.template')">
+                  <n-input v-model:value="creditNumberingTemplate" placeholder="{{SERIES:CRN}}-{{SEQUENCE:6}}" />
+                </n-form-item>
+                <n-form-item :label="t('settings.creditNumbering.sequenceStart')">
+                  <n-input-number v-model:value="creditNumberingSequenceStart" :min="1" style="width: 100%" />
+                </n-form-item>
+                <n-form-item v-if="creditNumberingPreview" :label="t('settings.creditNumbering.preview')">
+                  <n-text code>{{ creditNumberingPreview }}</n-text>
+                  <n-text depth="3" style="margin-left: 8px; font-size: 12px">
+                    {{ t('settings.creditNumbering.previewHint', { seq: creditSequenceNextValue }) }}
+                  </n-text>
+                </n-form-item>
+                <n-alert v-if="creditNumberingMessage" :type="creditNumberingMessageType" style="margin-bottom: 16px">
+                  {{ creditNumberingMessage }}
+                </n-alert>
+                <n-button type="primary" :loading="creditNumberingSaving" :disabled="!companyStore.hasCompany" attr-type="submit">
+                  {{ t('settings.creditNumbering.save') }}
+                </n-button>
+              </n-form>
+              <n-form label-placement="left" label-width="150" :disabled="!companyStore.hasCompany" style="margin-top: 16px">
+                <n-form-item :label="t('settings.creditNumbering.skipTo')">
+                  <n-input-number v-model:value="creditSequenceSkipTo" :min="1" :placeholder="String(creditSequenceNextValue + 1)" style="width: 100%" />
+                </n-form-item>
+                <n-button type="default" :loading="creditSequenceSkipping" :disabled="!creditSequenceSkipTo || creditSequenceSkipTo <= creditSequenceNextValue" @click="handleCreditSkipSequence">
+                  {{ t('settings.creditNumbering.skipSave') }}
                 </n-button>
               </n-form>
 

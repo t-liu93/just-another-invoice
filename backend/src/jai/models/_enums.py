@@ -57,6 +57,70 @@ class InvoicePaidStatus(enum.StrEnum):
     UNPAID = "UNPAID"
     PARTIALLY_PAID = "PARTIALLY_PAID"
     PAID = "PAID"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class InvoiceDocumentKind(enum.StrEnum):
+    """Formal document kind for the M12 invoice family."""
+
+    STANDARD = "STANDARD"
+    ADVANCE = "ADVANCE"
+    FINAL = "FINAL"
+    CREDIT_NOTE = "CREDIT_NOTE"
+
+
+class QuoteSettlementMode(enum.StrEnum):
+    """The immutable billing branch selected for an accepted quote."""
+
+    UNSET = "UNSET"
+    DIRECT_INVOICE = "DIRECT_INVOICE"
+    RECEIPT_ONLY = "RECEIPT_ONLY"
+    FORMAL_ADVANCE = "FORMAL_ADVANCE"
+
+
+class PaymentDirection(enum.StrEnum):
+    """Cash direction.  Refund support is wired in a later M12 step."""
+
+    INCOMING = "INCOMING"
+    REFUND = "REFUND"
+
+
+class InvoiceSettlementStatus(enum.StrEnum):
+    """Settlement state independent from the document lifecycle."""
+
+    OPEN = "OPEN"
+    PARTIALLY_SETTLED = "PARTIALLY_SETTLED"
+    SETTLED = "SETTLED"
+    REFUND_DUE = "REFUND_DUE"
+
+
+class InvoiceCreditStatus(enum.StrEnum):
+    """Credit coverage state independent from lifecycle and settlement."""
+
+    NOT_CREDITED = "NOT_CREDITED"
+    PARTIALLY_CREDITED = "PARTIALLY_CREDITED"
+    CREDITED = "CREDITED"
+
+
+class AdvanceInputMode(enum.StrEnum):
+    """Intent accepted by the later Advance calculation/create commands."""
+
+    GROSS_AMOUNT = "GROSS_AMOUNT"
+    PERCENTAGE = "PERCENTAGE"
+
+
+class CreditLineInputMode(enum.StrEnum):
+    """Intent accepted by the later source-bound Credit line commands."""
+
+    QUANTITY = "QUANTITY"
+    GROSS_AMOUNT = "GROSS_AMOUNT"
+
+
+class PartySnapshotProvenance(enum.StrEnum):
+    """Whether an issue-party snapshot was captured natively or migrated."""
+
+    NATIVE_ISSUE = "NATIVE_ISSUE"
+    MIGRATED_CURRENT_STATE = "MIGRATED_CURRENT_STATE"
 
 
 class InvoiceTaxMode(enum.StrEnum):

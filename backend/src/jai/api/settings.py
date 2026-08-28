@@ -30,6 +30,7 @@ from jai.models.user import User
 from jai.schemas.setting import (
     DEFAULT_EMAIL_TEMPLATES,
     SETTING_KEY_AI,
+    SETTING_KEY_CREDIT_NUMBERING,
     SETTING_KEY_DOCUMENT_DEFAULTS,
     SETTING_KEY_EMAIL_TEMPLATES,
     SETTING_KEY_INVOICE_NUMBERING,
@@ -42,6 +43,9 @@ from jai.schemas.setting import (
     AiSettingsRead,
     AiSettingsUpdate,
     AiTestResult,
+    CreditNumberingConfig,
+    CreditNumberSequenceRead,
+    CreditNumberSequenceWrite,
     DocumentDefaultsRead,
     DocumentDefaultsSetting,
     DocumentDefaultsUpdate,
@@ -65,11 +69,14 @@ from jai.schemas.setting import (
 )
 from jai.services import email as email_svc
 from jai.services.numbering import (
+    advance_credit_sequence,
     advance_quote_sequence,
     advance_sequence,
+    get_next_credit_sequence_info,
     get_next_quote_sequence_info,
     get_next_sequence_info,
     needs_sequence_placeholder,
+    validate_credit_template,
     validate_template,
 )
 from jai.services.settings import get_effective_setting, get_setting, set_setting
@@ -306,6 +313,113 @@ async def update_numbering_config(
     )
     body.preview = preview
     return body
+
+
+# ---------------------------------------------------------------------------
+# Credit Note numbering configuration (M12 step 1)
+# ---------------------------------------------------------------------------
+
+
+async def _get_credit_numbering_config(
+    session: AsyncSession, company_id: object
+) -> CreditNumberingConfig:
+    import uuid as _uuid
+
+    company_uuid = company_id if isinstance(company_id, _uuid.UUID) else _uuid.UUID(str(company_id))
+    cfg = await get_setting(
+        session,
+        SETTING_KEY_CREDIT_NUMBERING,
+        level=SettingLevel.COMPANY,
+        scope_id=company_uuid,
+        value_type=CreditNumberingConfig,
+    )
+    return cfg if cfg is not None else CreditNumberingConfig()
+
+
+@router.get("/credit-numbering", response_model=CreditNumberingConfig)
+async def get_credit_numbering_config(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> CreditNumberingConfig:
+    """Return the independent Credit Note numbering configuration."""
+    _owner_only(user)
+    if user.company_id is None:
+        return CreditNumberingConfig()
+    config = await _get_credit_numbering_config(session, user.company_id)
+    _, config.preview = await get_next_credit_sequence_info(
+        session, user.company_id, date.today(), numbering_config=config
+    )
+    return config
+
+
+@router.put("/credit-numbering", response_model=CreditNumberingConfig)
+async def update_credit_numbering_config(
+    body: CreditNumberingConfig,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> CreditNumberingConfig:
+    """Persist the typed Credit Note series config without touching invoices."""
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(status_code=400, detail="Company profile must be created first.")
+    try:
+        validate_credit_template(body.template)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not needs_sequence_placeholder(body.template):
+        raise HTTPException(
+            status_code=422,
+            detail="Template must contain a company-level {{SEQUENCE:n}} placeholder.",
+        )
+    await set_setting(
+        session,
+        SETTING_KEY_CREDIT_NUMBERING,
+        body.model_copy(update={"preview": None}),
+        level=SettingLevel.COMPANY,
+        scope_id=user.company_id,
+    )
+    await session.commit()
+    _, body.preview = await get_next_credit_sequence_info(
+        session, user.company_id, date.today(), numbering_config=body
+    )
+    return body
+
+
+@router.get("/credit-number-sequence", response_model=CreditNumberSequenceRead)
+async def get_credit_number_sequence(
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> CreditNumberSequenceRead:
+    """Return the next independent Credit Note sequence value and preview."""
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(status_code=400, detail="Company profile must be created first.")
+    config = await _get_credit_numbering_config(session, user.company_id)
+    next_value, preview = await get_next_credit_sequence_info(
+        session, user.company_id, date.today(), numbering_config=config
+    )
+    return CreditNumberSequenceRead(next_sequence=next_value, preview_number=preview)
+
+
+@router.put("/credit-number-sequence", response_model=CreditNumberSequenceRead)
+async def update_credit_number_sequence(
+    body: CreditNumberSequenceWrite,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> CreditNumberSequenceRead:
+    """Forward-skip the Credit Note sequence independently from invoices."""
+    _owner_only(user)
+    if user.company_id is None:
+        raise HTTPException(status_code=400, detail="Company profile must be created first.")
+    config = await _get_credit_numbering_config(session, user.company_id)
+    try:
+        next_value, preview = await advance_credit_sequence(
+            session, user.company_id, body.next_sequence, numbering_config=config
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return CreditNumberSequenceRead(next_sequence=next_value, preview_number=preview)
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ os.environ["COOKIE_SECURE"] = "false"
 import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
+from sqlalchemy.engine import URL  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncEngine,
     AsyncSession,
@@ -37,6 +38,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
     create_async_engine,
 )
 
+from jai.config import get_settings  # noqa: E402
 from jai.db import get_session  # noqa: E402
 from jai.main import app  # noqa: E402
 
@@ -49,13 +51,25 @@ TEMPLATE_DB_NAME = "jai_test_template"
 _db_counter = 0
 
 
+def _url_for_database(url: str, dbname: str) -> str:
+    """Return *url* pointed at *dbname* without changing its role."""
+    parsed = urlparse(url)
+    return urlunparse(parsed._replace(path=f"/{dbname}"))
+
+
 def _get_test_db_url(dbname: str) -> str:
-    """Return a DATABASE_URL pointing at *dbname* on the same host/port/user."""
+    """Return the migration-owner URL pointed at *dbname*."""
     from jai.config import get_settings
 
     settings = get_settings()
-    parsed = urlparse(settings.database_url)
-    return urlunparse(parsed._replace(path=f"/{dbname}"))
+    return URL.create(
+        drivername="postgresql+asyncpg",
+        username=settings.postgres_migration_user,
+        password=settings.postgres_migration_password,
+        host=settings.postgres_host,
+        port=settings.postgres_port,
+        database=dbname,
+    ).render_as_string(hide_password=False)
 
 
 def _get_maintenance_url() -> str:
@@ -63,8 +77,15 @@ def _get_maintenance_url() -> str:
     from jai.config import get_settings
 
     settings = get_settings()
-    parsed = urlparse(settings.database_url)
-    return urlunparse(parsed._replace(path="/postgres"))
+    return _url_for_database(settings.database_admin_url, "postgres")
+
+
+def _get_runtime_test_db_url(dbname: str) -> str:
+    """Return the actual runtime-role URL pointed at *dbname*."""
+    from jai.config import get_settings
+
+    settings = get_settings()
+    return _url_for_database(settings.database_url or "", dbname)
 
 
 # ---------------------------------------------------------------------------
@@ -96,24 +117,31 @@ def _migrated_template_db() -> str:
             )
             await conn.execute(text(f'DROP DATABASE IF EXISTS "{TEMPLATE_DB_NAME}"'))
             await conn.execute(text(f'CREATE DATABASE "{TEMPLATE_DB_NAME}"'))
+            await conn.execute(
+                text(
+                    f'ALTER DATABASE "{TEMPLATE_DB_NAME}" OWNER TO '
+                    f'"{get_settings().postgres_migration_user}"'
+                )
+            )
         await engine.dispose()
 
     asyncio.run(_setup())
 
     # Run alembic in subprocess (avoids event-loop conflict with asyncio.run).
+    migration_env = os.environ.copy()
+    migration_env["DATABASE_URL"] = template_url
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "alembic",
-            "-x",
-            f"url={template_url}",
             "upgrade",
             "head",
         ],
         cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
+        env=migration_env,
     )
     assert result.returncode == 0, (
         f"alembic upgrade head failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -148,6 +176,12 @@ async def db_engine(_migrated_template_db: str) -> AsyncIterator[AsyncEngine]:
         await conn.execute(
             text(f'CREATE DATABASE "{test_db_name}" TEMPLATE "{template_name}"')
         )
+        await conn.execute(
+            text(
+                f'ALTER DATABASE "{test_db_name}" OWNER TO '
+                f'"{get_settings().postgres_migration_user}"'
+            )
+        )
     await maint_engine.dispose()
 
     engine = create_async_engine(test_db_url)
@@ -172,18 +206,63 @@ async def db_engine(_migrated_template_db: str) -> AsyncIterator[AsyncEngine]:
 async def db_session_maker(
     db_engine: AsyncEngine,
 ) -> async_sessionmaker[AsyncSession]:
-    """Session factory bound to the per-test database."""
+    """Migration-owner factory for direct setup and database assertions.
+
+    It is intentionally not injected into FastAPI; endpoint fixtures use the
+    separate runtime-role engine below.
+    """
     return async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
 
 
 @pytest.fixture
+async def runtime_db_engine(db_engine: AsyncEngine) -> AsyncIterator[AsyncEngine]:
+    """One pooled engine using the real NOSUPERUSER application credentials."""
+    database_name = db_engine.url.database
+    assert database_name is not None
+    engine = create_async_engine(_get_runtime_test_db_url(database_name), pool_size=1)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def admin_session_maker(
+    db_engine: AsyncEngine,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Maintenance-only superuser factory for verifying FORCE RLS rows.
+
+    Application calls never receive this fixture.  It is intentionally named
+    separately from the migration owner and runtime factories to make bypass
+    use visible in tests that assert database internals.
+    """
+    database_name = db_engine.url.database
+    assert database_name is not None
+    engine = create_async_engine(
+        _url_for_database(get_settings().database_admin_url, database_name)
+    )
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def runtime_session_maker(
+    runtime_db_engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    """FastAPI-facing session factory; never a SET ROLE simulation."""
+    return async_sessionmaker(runtime_db_engine, expire_on_commit=False, class_=AsyncSession)
+
+
+@pytest.fixture
 async def _override_session(
-    db_session_maker: async_sessionmaker[AsyncSession],
+    runtime_session_maker: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[None]:
     """Override the app's ``get_session`` dependency for the duration of a test."""
 
     async def _provider() -> AsyncIterator[AsyncSession]:
-        async with db_session_maker() as session:
+        async with runtime_session_maker() as session:
             yield session
 
     app.dependency_overrides[get_session] = _provider

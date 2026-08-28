@@ -17,9 +17,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from jai.models._enums import InvoicePaidStatus, InvoiceStatus
+from jai.models._enums import InvoicePaidStatus, InvoiceStatus, PaymentDirection
 
 # ---------------------------------------------------------------------------
 # Input
@@ -33,6 +33,10 @@ class PaymentInput(BaseModel):
     note.  base_amount / currency / exchange_rate are derived by the service
     (D2: single base currency).
     """
+
+    # Generic payments are incoming Standard-invoice payments only until the
+    # dedicated Credit/refund flow lands.  Do not silently drop that intent.
+    model_config = ConfigDict(extra="forbid")
 
     payment_date: date
     amount: Decimal = Field(gt=0, description="Payment amount – must be > 0.")
@@ -69,6 +73,9 @@ class PaymentRead(BaseModel):
     invoice_number: str | None = None
     quote_id: uuid.UUID | None = None
     quote_number: str | None = None
+    direction: PaymentDirection = PaymentDirection.INCOMING
+    credit_note_id: uuid.UUID | None = None
+    credit_note_number: str | None = None
     payment_date: date
     amount: Decimal
     base_amount: Decimal
@@ -151,6 +158,9 @@ class PaymentListItem(BaseModel):
     invoice_number: str | None = None
     quote_id: uuid.UUID | None = None
     quote_number: str | None = None
+    direction: PaymentDirection = PaymentDirection.INCOMING
+    credit_note_id: uuid.UUID | None = None
+    credit_note_number: str | None = None
     customer_id: uuid.UUID
     customer_name: str
     payment_date: date

@@ -13,7 +13,16 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from jai.models._enums import InvoicePaidStatus, InvoiceStatus, InvoiceTaxMode, QuoteStatus
+from jai.db import set_rls_company
+from jai.models._enums import (
+    InvoiceDocumentKind,
+    InvoicePaidStatus,
+    InvoiceSettlementStatus,
+    InvoiceStatus,
+    InvoiceTaxMode,
+    PaymentDirection,
+    QuoteStatus,
+)
 from jai.models.customer import Customer
 from jai.models.dictionary import PaymentMethod
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
@@ -617,6 +626,21 @@ def _write_invoice_state(invoice: Invoice, state: PaymentState) -> None:
     invoice.base_due_amount = state.base_due_amount
     invoice.paid_status = state.paid_status
     invoice.status = state.new_status
+    # These M12 columns are persisted caches, not a second settlement path.
+    # Keep them in the same transaction as the legacy due/paid state.
+    invoice.payable_before_payments = Decimal(str(invoice.total_incl_vat))
+    invoice.base_payable_before_payments = Decimal(str(invoice.base_total_incl_vat))
+    invoice.incoming_payment_total = state.paid_total
+    invoice.base_incoming_payment_total = state.base_paid_total
+    invoice.settlement_status = (
+        InvoiceSettlementStatus.SETTLED
+        if state.paid_status == InvoicePaidStatus.PAID
+        else (
+            InvoiceSettlementStatus.PARTIALLY_SETTLED
+            if state.paid_status == InvoicePaidStatus.PARTIALLY_PAID
+            else InvoiceSettlementStatus.OPEN
+        )
+    )
 
 
 async def record_payment(
@@ -626,7 +650,10 @@ async def record_payment(
     body: PaymentInput,
     creator_id: uuid.UUID | None,
 ) -> InvoicePaymentsResponse:
+    await set_rls_company(session, company_id)
     invoice = await _load_invoice(session, invoice_id, company_id, lock=True)
+    if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD:
+        raise ValueError("Generic payment operations currently support STANDARD invoices only.")
     if invoice.invoice_number is None:
         raise ValueError(
             "Cannot record a payment on an unissued draft invoice; "
@@ -671,6 +698,7 @@ async def record_payment(
         )
     _write_invoice_state(invoice, state)
     await session.commit()
+    await set_rls_company(session, company_id)
     payments = await _load_payments_for_invoice(session, invoice.id)
     return await _build_invoice_response(session, invoice, payments, state)
 
@@ -682,6 +710,7 @@ async def record_quote_payment(
     body: PaymentInput,
     creator_id: uuid.UUID | None,
 ) -> QuotePaymentsResponse:
+    await set_rls_company(session, company_id)
     quote = await _load_quote(session, quote_id, company_id, lock=True)
     if QuoteStatus(quote.status) != QuoteStatus.ACCEPTED:
         raise ValueError("Quote must be ACCEPTED before recording a payment.")
@@ -723,6 +752,7 @@ async def record_quote_payment(
     payments = await _load_payments_for_quote(session, quote.id, lock=True)
     await recompute_quote_payment_taxes(session, quote, payments)
     await session.commit()
+    await set_rls_company(session, company_id)
     payments = await _load_payments_for_quote(session, quote.id)
     return await _build_quote_response(session, quote, payments)
 
@@ -730,7 +760,10 @@ async def record_quote_payment(
 async def list_invoice_payments(
     session: AsyncSession, invoice_id: uuid.UUID, company_id: uuid.UUID
 ) -> InvoicePaymentsResponse:
+    await set_rls_company(session, company_id)
     invoice = await _load_invoice(session, invoice_id, company_id)
+    if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD:
+        raise ValueError("Generic payment operations currently support STANDARD invoices only.")
     payments = await _load_payments_for_invoice(session, invoice.id)
     return await _build_invoice_response(session, invoice, payments)
 
@@ -738,6 +771,7 @@ async def list_invoice_payments(
 async def list_quote_payments(
     session: AsyncSession, quote_id: uuid.UUID, company_id: uuid.UUID
 ) -> QuotePaymentsResponse:
+    await set_rls_company(session, company_id)
     quote = await _load_quote(session, quote_id, company_id)
     payments = await _load_payments_for_quote(session, quote.id)
     return await _build_quote_response(session, quote, payments)
@@ -746,6 +780,7 @@ async def list_quote_payments(
 async def get_payment(
     session: AsyncSession, payment_id: uuid.UUID, company_id: uuid.UUID
 ) -> PaymentRead | None:
+    await set_rls_company(session, company_id)
     result = await session.execute(
         select(Payment)
         .where(Payment.id == payment_id, Payment.company_id == company_id)
@@ -760,6 +795,7 @@ async def get_payment(
 async def _lock_payment_context(
     session: AsyncSession, payment_id: uuid.UUID, company_id: uuid.UUID
 ) -> tuple[Payment, Quote | None, Invoice | None]:
+    await set_rls_company(session, company_id)
     seed_result = await session.execute(
         select(Payment.quote_id, Payment.invoice_id).where(
             Payment.id == payment_id, Payment.company_id == company_id
@@ -801,6 +837,7 @@ async def update_payment(
     company_id: uuid.UUID,
     body: PaymentInput,
 ) -> PaymentMutationResponse:
+    await set_rls_company(session, company_id)
     payment, quote, invoice = await _lock_payment_context(
         session, payment_id, company_id
     )
@@ -840,6 +877,8 @@ async def update_payment(
     invoice_payments: list[Payment] | None = None
     invoice_state: PaymentState | None = None
     if invoice is not None:
+        if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD:
+            raise ValueError("Generic payment operations currently support STANDARD invoices only.")
         invoice_payments = await _load_payments_for_invoice(session, invoice.id)
         invoice_state = recompute_payment_state(
             Decimal(str(invoice.total_incl_vat)),
@@ -856,9 +895,12 @@ async def update_payment(
             await validate_invoice_tax_coverage(session, invoice)
         _write_invoice_state(invoice, invoice_state)
     await session.commit()
+    await set_rls_company(session, company_id)
     if quote is not None:
         quote_payments = await _load_payments_for_quote(session, quote.id)
     if invoice is not None:
+        if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD:
+            raise ValueError("Generic payment operations currently support STANDARD invoices only.")
         invoice_payments = await _load_payments_for_invoice(session, invoice.id)
     return PaymentMutationResponse(
         payment_id=payment_id,
@@ -881,9 +923,15 @@ async def update_payment(
 async def delete_payment(
     session: AsyncSession, payment_id: uuid.UUID, company_id: uuid.UUID
 ) -> PaymentMutationResponse:
+    await set_rls_company(session, company_id)
     payment, quote, invoice = await _lock_payment_context(
         session, payment_id, company_id
     )
+    if invoice is not None and (
+        InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD
+    ):
+        await session.rollback()
+        raise ValueError("Generic payment operations currently support STANDARD invoices only.")
     await session.delete(payment)
     await session.flush()
     quote_payments: list[Payment] | None = None
@@ -902,6 +950,7 @@ async def delete_payment(
         )
         _write_invoice_state(invoice, invoice_state)
     await session.commit()
+    await set_rls_company(session, company_id)
     if quote is not None:
         quote_payments = await _load_payments_for_quote(session, quote.id)
     if invoice is not None:
@@ -931,12 +980,15 @@ async def list_payments(
     q: str | None = None,
     customer_id: uuid.UUID | None = None,
     payment_method_id: uuid.UUID | None = None,
+    direction: PaymentDirection | None = None,
+    document_kind: InvoiceDocumentKind | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     limit: int = 50,
     offset: int = 0,
     sort_by: str = "payment_date",
 ) -> PaymentListResponse:
+    await set_rls_company(session, company_id)
     customer_link = func.coalesce(Invoice.customer_id, Quote.customer_id)
     base = (
         select(Payment)
@@ -958,6 +1010,10 @@ async def list_payments(
         base = base.where(customer_link == customer_id)
     if payment_method_id is not None:
         base = base.where(Payment.payment_method_id == payment_method_id)
+    if direction is not None:
+        base = base.where(Payment.direction == direction)
+    if document_kind is not None:
+        base = base.where(Invoice.document_kind == document_kind)
     if date_from is not None:
         base = base.where(Payment.payment_date >= date_from)
     if date_to is not None:

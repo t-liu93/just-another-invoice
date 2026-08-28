@@ -182,6 +182,19 @@
       "skipSuccess": "序号已更新。",
       "skipFailed": "序号更新失败。"
     },
+    "creditNumbering": {
+      "section": "贷项通知单编号",
+      "template": "编号模板",
+      "sequenceStart": "起始号",
+      "preview": "下一张贷项通知单编号",
+      "previewHint": "（当前序号：{seq}）",
+      "save": "保存贷项通知单编号",
+      "saveSuccess": "贷项通知单编号配置已保存。",
+      "saveFailed": "保存贷项通知单编号配置失败。",
+      "skipTo": "跳至序号",
+      "skipSave": "应用跳号",
+      "skipFailed": "贷项通知单序号更新失败。"
+    },
     "preferences": {
       "title": "个人偏好",
       "theme": "主题",
@@ -565,6 +578,11 @@
     "invoiceNumber": "发票号",
     "concept": "草稿",
     "invoiceDate": "日期",
+    "documentKind": "单据类型",
+    "documentKindSTANDARD": "普通发票",
+    "documentKindADVANCE": "预付款发票",
+    "documentKindFINAL": "最终结算发票",
+    "documentKindCREDIT_NOTE": "贷项通知单",
     "dueDate": "到期日",
     "status": "状态",
     "currency": "币种",

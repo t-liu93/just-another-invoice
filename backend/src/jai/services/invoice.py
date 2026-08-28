@@ -23,7 +23,7 @@ Red-line compliance
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import delete, func, or_, select
@@ -31,17 +31,25 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from jai.db import set_rls_company
 from jai.models._enums import (
     DiscountType,
+    InvoiceCreditStatus,
+    InvoiceDocumentKind,
     InvoicePaidStatus,
+    InvoiceSettlementStatus,
     InvoiceStatus,
     InvoiceTaxMode,
+    PartySnapshotProvenance,
     SettingLevel,
     VatTreatmentEffect,
     VatTreatmentSide,
 )
+from jai.models.address import Address
+from jai.models.company import Company
 from jai.models.customer import Customer
 from jai.models.dictionary import Unit
+from jai.models.document import InvoiceCreditBasisLine, InvoicePartySnapshot
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
 from jai.models.payment import Payment
 from jai.models.product import Product
@@ -61,10 +69,19 @@ from jai.schemas.invoice import (
     ProductInvoiceOptionRead,
     VatTreatmentSnapshot,
 )
-from jai.schemas.setting import SETTING_KEY_INVOICE_NUMBERING, InvoiceNumberingConfig
+from jai.schemas.setting import (
+    SETTING_KEY_DOCUMENT_DEFAULTS,
+    SETTING_KEY_INVOICE_NUMBERING,
+    DocumentDefaultsSetting,
+    InvoiceNumberingConfig,
+)
 from jai.services.money import quantize_to_minor_unit
-from jai.services.numbering import allocate_invoice_number
-from jai.services.payment import recompute_payment_state, validate_invoice_tax_coverage
+from jai.services.numbering import NumberSequenceExhaustedError, allocate_invoice_number
+from jai.services.payment import (
+    _write_invoice_state,
+    recompute_payment_state,
+    validate_invoice_tax_coverage,
+)
 from jai.services.pricing import (
     _derive_treatment_from_customer,
     compute_pricing,
@@ -85,6 +102,17 @@ _ALLOWED_TRANSITIONS: dict[InvoiceStatus, set[InvoiceStatus]] = {
     # Only DRAFT invoices can be cancelled, so reactivating back to DRAFT is safe.
     InvoiceStatus.CANCELLED: {InvoiceStatus.DRAFT},
 }
+
+
+class InvoiceLifecycleConflictError(ValueError):
+    """A stale or forbidden formal-document lifecycle command.
+
+    The API must distinguish a command which is structurally invalid (422)
+    from a valid lifecycle command that conflicts with the document's current
+    state (409).  Keep the code independent of localized display text.
+    """
+
+    code = "INVOICE_LIFECYCLE_CONFLICT"
 
 
 # ---------------------------------------------------------------------------
@@ -282,8 +310,18 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
         reference_number=inv.reference_number,
         invoice_date=inv.invoice_date,
         due_date=inv.due_date,
+        supply_or_advance_date=inv.supply_or_advance_date,
         status=InvoiceStatus(inv.status),
         paid_status=InvoicePaidStatus(inv.paid_status),
+        document_kind=InvoiceDocumentKind(inv.document_kind),
+        quote_id=inv.quote_id,
+        issued_at=inv.issued_at,
+        issued_by_user_id=inv.issued_by_user_id,
+        party_snapshot_provenance=(
+            PartySnapshotProvenance(snapshot.provenance)
+            if (snapshot := inv.__dict__.get("party_snapshot")) is not None
+            else None
+        ),
         currency=inv.currency,
         exchange_rate=Decimal(str(inv.exchange_rate)),
         tax_mode=InvoiceTaxMode(inv.tax_mode),
@@ -300,12 +338,24 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
         vat_total=Decimal(str(inv.vat_total)),
         total_incl_vat=Decimal(str(inv.total_incl_vat)),
         due_amount=Decimal(str(inv.due_amount)),
+        payable_before_payments=Decimal(str(inv.payable_before_payments)),
+        incoming_payment_total=Decimal(str(inv.incoming_payment_total)),
+        credited_total=Decimal(str(inv.credited_total)),
+        refunded_total=Decimal(str(inv.refunded_total)),
+        refund_due_amount=Decimal(str(inv.refund_due_amount)),
+        settlement_status=InvoiceSettlementStatus(inv.settlement_status),
+        credit_status=InvoiceCreditStatus(inv.credit_status),
         base_subtotal_excl_vat=Decimal(str(inv.base_subtotal_excl_vat)),
         base_line_discount_total=Decimal(str(inv.base_line_discount_total)),
         base_taxable_amount=Decimal(str(inv.base_taxable_amount)),
         base_vat_total=Decimal(str(inv.base_vat_total)),
         base_total_incl_vat=Decimal(str(inv.base_total_incl_vat)),
         base_due_amount=Decimal(str(inv.base_due_amount)),
+        base_payable_before_payments=Decimal(str(inv.base_payable_before_payments)),
+        base_incoming_payment_total=Decimal(str(inv.base_incoming_payment_total)),
+        base_credited_total=Decimal(str(inv.base_credited_total)),
+        base_refunded_total=Decimal(str(inv.base_refunded_total)),
+        base_refund_due_amount=Decimal(str(inv.base_refund_due_amount)),
         notes=inv.notes,
         warranty_text=inv.warranty_text,
         terms_text=inv.terms_text,
@@ -342,9 +392,33 @@ def _invoice_to_list_item(inv: Invoice, *, customer_name: str) -> InvoiceListIte
         due_date=inv.due_date,
         status=InvoiceStatus(inv.status),
         paid_status=InvoicePaidStatus(inv.paid_status),
+        document_kind=InvoiceDocumentKind(inv.document_kind),
+        quote_id=inv.quote_id,
+        supply_or_advance_date=inv.supply_or_advance_date,
+        issued_at=inv.issued_at,
+        issued_by_user_id=inv.issued_by_user_id,
+        party_snapshot_provenance=(
+            PartySnapshotProvenance(snapshot.provenance)
+            if (snapshot := inv.__dict__.get("party_snapshot")) is not None
+            else None
+        ),
+        settlement_status=InvoiceSettlementStatus(inv.settlement_status),
+        credit_status=InvoiceCreditStatus(inv.credit_status),
         currency=inv.currency,
         total_incl_vat=Decimal(str(inv.total_incl_vat)),
+        payable_before_payments=Decimal(str(inv.payable_before_payments)),
+        incoming_payment_total=Decimal(str(inv.incoming_payment_total)),
+        credited_total=Decimal(str(inv.credited_total)),
+        refunded_total=Decimal(str(inv.refunded_total)),
         due_amount=Decimal(str(inv.due_amount)),
+        refund_due_amount=Decimal(str(inv.refund_due_amount)),
+        base_total_incl_vat=Decimal(str(inv.base_total_incl_vat)),
+        base_payable_before_payments=Decimal(str(inv.base_payable_before_payments)),
+        base_incoming_payment_total=Decimal(str(inv.base_incoming_payment_total)),
+        base_credited_total=Decimal(str(inv.base_credited_total)),
+        base_refunded_total=Decimal(str(inv.base_refunded_total)),
+        base_due_amount=Decimal(str(inv.base_due_amount)),
+        base_refund_due_amount=Decimal(str(inv.base_refund_due_amount)),
         vat_treatment_snapshot=VatTreatmentSnapshot(
             id=inv.vat_treatment_id,
             code=inv.vat_treatment_code,
@@ -355,6 +429,21 @@ def _invoice_to_list_item(inv: Invoice, *, customer_name: str) -> InvoiceListIte
         created_at=inv.created_at,
         updated_at=inv.updated_at,
     )
+
+
+async def _load_invoice_read(session: AsyncSession, inv: Invoice) -> InvoiceRead:
+    """Load every response relationship before committing a tenant transaction."""
+    result = await session.execute(
+        select(Invoice)
+        .where(Invoice.id == inv.id)
+        .options(
+            selectinload(Invoice.lines).selectinload(InvoiceLine.line_taxes),
+            selectinload(Invoice.taxes),
+            selectinload(Invoice.party_snapshot),
+            selectinload(Invoice.credit_basis_lines),
+        )
+    )
+    return _invoice_to_read(result.scalar_one())
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +551,7 @@ async def _build_and_persist_invoice(
     inv.reference_number = body.reference_number
     inv.invoice_date = body.invoice_date
     inv.due_date = body.due_date
+    inv.supply_or_advance_date = body.supply_or_advance_date
     inv.currency = request_currency
     inv.exchange_rate = Decimal("1")
 
@@ -487,7 +577,15 @@ async def _build_and_persist_invoice(
     inv.taxable_amount = taxable_amount
     inv.vat_total = vat_total
     inv.total_incl_vat = total_incl_vat
-    inv.due_amount = total_incl_vat  # M5: full amount owed until M7
+    if existing_invoice is None:
+        inv.due_amount = total_incl_vat  # M5: full amount owed until M7
+        inv.payable_before_payments = total_incl_vat
+        inv.incoming_payment_total = Decimal("0")
+        inv.credited_total = Decimal("0")
+        inv.refunded_total = Decimal("0")
+        inv.refund_due_amount = Decimal("0")
+        inv.settlement_status = InvoiceSettlementStatus.OPEN
+        inv.credit_status = InvoiceCreditStatus.NOT_CREDITED
 
     # M5: exchange_rate = 1; base_* = *
     inv.base_subtotal_excl_vat = subtotal_excl_vat
@@ -495,7 +593,14 @@ async def _build_and_persist_invoice(
     inv.base_taxable_amount = taxable_amount
     inv.base_vat_total = vat_total
     inv.base_total_incl_vat = total_incl_vat
-    inv.base_due_amount = total_incl_vat
+    if existing_invoice is None:
+        inv.base_due_amount = total_incl_vat
+        inv.base_payable_before_payments = total_incl_vat
+        inv.base_incoming_payment_total = Decimal("0")
+        inv.base_credited_total = Decimal("0")
+        inv.base_refunded_total = Decimal("0")
+        inv.base_refund_due_amount = Decimal("0")
+    inv.document_kind = InvoiceDocumentKind.STANDARD
 
     inv.notes = body.notes
 
@@ -586,6 +691,194 @@ async def _build_and_persist_invoice(
 # ---------------------------------------------------------------------------
 
 
+def _address_snapshot(address: Address | None) -> dict[str, str | None]:
+    """Return a plain immutable structured-address payload."""
+    fields = (
+        "street",
+        "house_number",
+        "house_number_addition",
+        "postal_code",
+        "city",
+        "province",
+        "country_code",
+    )
+    return {field: getattr(address, field) if address is not None else None for field in fields}
+
+
+def _allocate_document_vat(line_nets: list[Decimal], total_vat: Decimal) -> list[Decimal]:
+    """Allocate a persisted document-tax amount by persisted line net amounts."""
+    vat_units = int(quantize_to_minor_unit(total_vat) * Decimal("100"))
+    net_units = [int(quantize_to_minor_unit(net) * Decimal("100")) for net in line_nets]
+    total_net_units = sum(net_units)
+    if vat_units == 0:
+        return [Decimal("0") for _ in line_nets]
+    if total_net_units <= 0:
+        raise ValueError("Document VAT cannot be allocated without taxable line snapshots.")
+    allocated: list[int] = []
+    remainders: list[tuple[int, int]] = []
+    for index, line_units in enumerate(net_units):
+        allocation, remainder = divmod(vat_units * line_units, total_net_units)
+        allocated.append(allocation)
+        remainders.append((remainder, index))
+    for _, index in sorted(remainders, key=lambda item: (-item[0], item[1]))[
+        : vat_units - sum(allocated)
+    ]:
+        allocated[index] += 1
+    return [Decimal(amount) / Decimal("100") for amount in allocated]
+
+
+async def _credit_basis_rows(
+    session: AsyncSession, inv: Invoice
+) -> list[InvoiceCreditBasisLine]:
+    """Build immutable basis rows from persisted invoice snapshots only."""
+    lines = list(
+        (
+            await session.execute(
+                select(InvoiceLine)
+                .where(InvoiceLine.invoice_id == inv.id)
+                .order_by(InvoiceLine.sort_order, InvoiceLine.id)
+            )
+        ).scalars()
+    )
+    taxes = list(
+        (await session.execute(select(InvoiceTax).where(InvoiceTax.invoice_id == inv.id))).scalars()
+    )
+    document_tax: InvoiceTax | None = None
+    if InvoiceTaxMode(inv.tax_mode) == InvoiceTaxMode.DOCUMENT:
+        if len(taxes) != 1:
+            raise ValueError(
+                "Issued DOCUMENT invoice must have exactly one persisted tax snapshot."
+            )
+        document_tax = taxes[0]
+        vat_amounts = _allocate_document_vat(
+            [Decimal(str(line.taxable_amount)) for line in lines],
+            Decimal(str(document_tax.tax_amount)),
+        )
+    else:
+        vat_amounts = [Decimal(str(line.vat_total)) for line in lines]
+    exchange_rate = Decimal(str(inv.exchange_rate))
+    rows: list[InvoiceCreditBasisLine] = []
+    for line, vat_amount in zip(lines, vat_amounts, strict=True):
+        net_amount = Decimal(str(line.taxable_amount))
+        gross_amount = net_amount + vat_amount
+        rows.append(
+            InvoiceCreditBasisLine(
+                company_id=inv.company_id,
+                invoice_id=inv.id,
+                invoice_line_id=line.id,
+                sort_order=line.sort_order,
+                name=line.name,
+                description=line.description,
+                quantity=Decimal(str(line.quantity)),
+                unit_name=line.unit_name,
+                vat_rate_id=document_tax.vat_rate_id if document_tax else line.vat_rate_id,
+                vat_rate_label=document_tax.vat_rate_label if document_tax else line.vat_rate_label,
+                vat_rate_percent=(
+                    Decimal(str(document_tax.vat_rate_percent))
+                    if document_tax is not None
+                    else (
+                        Decimal(str(line.vat_rate_percent))
+                        if line.vat_rate_percent is not None
+                        else None
+                    )
+                ),
+                vat_treatment_code=inv.vat_treatment_code,
+                vat_treatment_effect=inv.vat_treatment_effect,
+                vat_treatment_requires_icp=inv.vat_treatment_requires_icp,
+                net_amount=net_amount,
+                vat_amount=vat_amount,
+                gross_amount=gross_amount,
+                base_net_amount=net_amount * exchange_rate,
+                base_vat_amount=vat_amount * exchange_rate,
+                base_gross_amount=gross_amount * exchange_rate,
+            )
+        )
+    return rows
+
+
+async def _resolved_issue_locale(
+    session: AsyncSession, company_id: uuid.UUID, customer: Customer
+) -> str:
+    defaults = await get_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=DocumentDefaultsSetting,
+    )
+    if customer.locale in {"en", "zh"}:
+        return customer.locale
+    return defaults.locale if defaults is not None else "en"
+
+
+async def _create_native_issue_foundation(
+    session: AsyncSession,
+    inv: Invoice,
+    *,
+    issued_by_user_id: uuid.UUID | None,
+) -> None:
+    """Freeze party and source-basis snapshots for an issued Standard Invoice.
+
+    This is intentionally invoked only at the legal issue transition and is
+    part of the caller's transaction.  It does not calculate money: all values
+    are copied from already persisted invoice snapshots.
+    """
+    if inv.party_snapshot is not None:
+        return
+    company = (
+        await session.execute(select(Company).where(Company.id == inv.company_id))
+    ).scalar_one()
+    customer = (
+        await session.execute(
+            select(Customer)
+            .where(Customer.id == inv.customer_id)
+            .options(selectinload(Customer.addresses))
+        )
+    ).scalar_one()
+    billing_address = next(
+        (address for address in customer.addresses if address.type.value == "BILLING"), None
+    )
+    snapshot = InvoicePartySnapshot(
+        company_id=inv.company_id,
+        invoice_id=inv.id,
+        provenance=PartySnapshotProvenance.NATIVE_ISSUE,
+        seller_name=company.name,
+        seller_legal_name=company.legal_name,
+        seller_vat_id=company.vat_id,
+        seller_coc_number=company.coc_number,
+        seller_email=company.email,
+        seller_phone=company.phone,
+        seller_address={
+            "street": company.street,
+            "house_number": company.house_number,
+            "house_number_addition": company.house_number_addition,
+            "postal_code": company.postal_code,
+            "city": company.city,
+            "province": company.province,
+            "country_code": company.country_code,
+        },
+        buyer_name=customer.name,
+        buyer_company_name=customer.company_name,
+        buyer_contact_name=customer.contact_name,
+        buyer_vat_id=customer.vat_id,
+        buyer_email=customer.email,
+        buyer_phone=customer.phone,
+        buyer_address=_address_snapshot(billing_address),
+        locale=await _resolved_issue_locale(session, inv.company_id, customer),
+        logo_id=company.logo_id,
+    )
+    # Assign through ORM relationships too: ``inv`` was selectin-loaded before
+    # issue, so merely inserting FK rows would leave its in-memory cached
+    # relationship at None while we intentionally build the response precommit.
+    inv.party_snapshot = snapshot
+    inv.credit_basis_lines = await _credit_basis_rows(session, inv)
+    inv.issued_at = datetime.now(UTC)
+    inv.issued_by_user_id = issued_by_user_id
+    if inv.supply_or_advance_date is None:
+        inv.supply_or_advance_date = inv.invoice_date
+    await session.flush()
+
+
 async def clone_quote_to_invoice(
     session: AsyncSession,
     quote: _Quote,
@@ -613,8 +906,11 @@ async def clone_quote_to_invoice(
     inv.reference_number = quote.reference_number
     inv.invoice_date = date.today()
     inv.due_date = None
+    inv.supply_or_advance_date = None
     inv.status = InvoiceStatus.DRAFT
     inv.paid_status = InvoicePaidStatus.UNPAID
+    inv.document_kind = InvoiceDocumentKind.STANDARD
+    inv.quote_id = quote.id
     inv.currency = quote.currency
     inv.exchange_rate = Decimal(str(quote.exchange_rate))
     inv.tax_mode = InvoiceTaxMode(quote.tax_mode)
@@ -637,12 +933,24 @@ async def clone_quote_to_invoice(
     inv.vat_total = Decimal(str(quote.vat_total))
     inv.total_incl_vat = Decimal(str(quote.total_incl_vat))
     inv.due_amount = Decimal(str(quote.total_incl_vat))
+    inv.payable_before_payments = Decimal(str(quote.total_incl_vat))
+    inv.incoming_payment_total = Decimal("0")
+    inv.credited_total = Decimal("0")
+    inv.refunded_total = Decimal("0")
+    inv.refund_due_amount = Decimal("0")
+    inv.settlement_status = InvoiceSettlementStatus.OPEN
+    inv.credit_status = InvoiceCreditStatus.NOT_CREDITED
     inv.base_subtotal_excl_vat = Decimal(str(quote.base_subtotal_excl_vat))
     inv.base_line_discount_total = Decimal(str(quote.base_line_discount_total))
     inv.base_taxable_amount = Decimal(str(quote.base_taxable_amount))
     inv.base_vat_total = Decimal(str(quote.base_vat_total))
     inv.base_total_incl_vat = Decimal(str(quote.base_total_incl_vat))
     inv.base_due_amount = Decimal(str(quote.base_total_incl_vat))
+    inv.base_payable_before_payments = Decimal(str(quote.base_total_incl_vat))
+    inv.base_incoming_payment_total = Decimal("0")
+    inv.base_credited_total = Decimal("0")
+    inv.base_refunded_total = Decimal("0")
+    inv.base_refund_due_amount = Decimal("0")
     inv.notes = quote.notes
     inv.warranty_text = quote.warranty_text
     inv.terms_text = quote.terms_text
@@ -741,6 +1049,7 @@ async def create_invoice(
     No number is allocated at create; the legal number is assigned at the
     DRAFT -> SENT issue transition (see ``transition_status``).
     """
+    await set_rls_company(session, company_id)
     # Validate customer belongs to this company
     cust_stmt = select(Customer).where(
         Customer.id == body.customer_id,
@@ -784,6 +1093,7 @@ async def get_invoice(
     company_id: uuid.UUID,
 ) -> InvoiceRead | None:
     """Return a full InvoiceRead, or None if not found / wrong company."""
+    await set_rls_company(session, company_id)
     stmt = select(Invoice).where(
         Invoice.id == invoice_id,
         Invoice.company_id == company_id,
@@ -803,6 +1113,7 @@ async def update_invoice(
     company_currency: str,
 ) -> InvoiceRead | None:
     """Update an existing invoice: preserve number, recalculate, replace sub-tables."""
+    await set_rls_company(session, company_id)
     stmt = (
         select(Invoice)
         .where(
@@ -815,6 +1126,9 @@ async def update_invoice(
     inv = result.scalar_one_or_none()
     if inv is None:
         return None
+
+    if InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD:
+        raise ValueError("Generic invoice update currently supports STANDARD invoices only.")
 
     # Only DRAFT invoices can be fully edited; SENT is a locked formal document.
     if inv.status != InvoiceStatus.DRAFT:
@@ -875,21 +1189,19 @@ async def update_invoice(
         existing_invoice=inv,
     )
 
+    payment_state = recompute_payment_state(
+        Decimal(str(updated.total_incl_vat)),
+        Decimal(str(updated.base_total_incl_vat)),
+        payments,
+        InvoiceStatus.DRAFT,
+    )
     if payments:
-        payment_state = recompute_payment_state(
-            Decimal(str(updated.total_incl_vat)),
-            Decimal(str(updated.base_total_incl_vat)),
-            payments,
-            InvoiceStatus.DRAFT,
-        )
         if payment_state.paid_total > Decimal(str(updated.total_incl_vat)):
             raise ValueError(
                 "Final invoice total cannot be lower than its associated payments."
             )
-        updated.due_amount = payment_state.due_amount
-        updated.base_due_amount = payment_state.base_due_amount
-        updated.paid_status = payment_state.paid_status
-        updated.status = InvoiceStatus.DRAFT
+    _write_invoice_state(updated, payment_state)
+    updated.status = InvoiceStatus.DRAFT
 
     if quote_origin_payments:
         await validate_invoice_tax_coverage(session, updated)
@@ -908,6 +1220,7 @@ async def delete_invoice(
 
     Only DRAFT invoices may be deleted.  Raises ValueError for any other status.
     """
+    await set_rls_company(session, company_id)
     # Deleting a converted draft makes PostgreSQL SET NULL on both the quote
     # backlink and its payments. Lock source quotes before the invoice so this
     # path shares the quote -> invoice order used by quote-payment mutations.
@@ -949,6 +1262,9 @@ async def delete_invoice(
     if inv is None:
         return False
 
+    if InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD:
+        raise ValueError("Generic invoice deletion currently supports STANDARD invoices only.")
+
     if inv.status != InvoiceStatus.DRAFT:
         raise ValueError(
             f"Cannot delete a {inv.status.value.lower()} invoice. "
@@ -975,6 +1291,7 @@ async def list_invoices(
     sort_by: str = "invoice_date",
 ) -> InvoiceListResponse:
     """Return a paginated list of invoices for the company."""
+    await set_rls_company(session, company_id)
     # Always join Customer so we can search by customer name and return it.
     base = (
         select(Invoice)
@@ -1014,7 +1331,12 @@ async def list_invoices(
         "invoice_number": Invoice.sequence_number,
     }.get(sort_by, Invoice.invoice_date)
 
-    data_stmt = base.order_by(sort_col.desc()).limit(limit).offset(offset)
+    data_stmt = (
+        base.options(selectinload(Invoice.party_snapshot))
+        .order_by(sort_col.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     data_result = await session.execute(data_stmt)
     rows = list(data_result.scalars().all())
 
@@ -1041,6 +1363,8 @@ async def transition_status(
     invoice_id: uuid.UUID,
     company_id: uuid.UUID,
     body: InvoiceStatusWrite,
+    *,
+    issued_by_user_id: uuid.UUID | None = None,
 ) -> InvoiceRead | None:
     """Transition invoice lifecycle status.
 
@@ -1058,6 +1382,7 @@ async def transition_status(
     already carries a number (e.g. re-issued after CANCELLED -> DRAFT) is never
     re-numbered.
     """
+    await set_rls_company(session, company_id)
     stmt = (
         select(Invoice)
         .where(
@@ -1070,6 +1395,11 @@ async def transition_status(
     inv = result.scalar_one_or_none()
     if inv is None:
         return None
+
+    if InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD:
+        raise InvoiceLifecycleConflictError(
+            "Generic invoice lifecycle currently supports STANDARD invoices only."
+        )
 
     current_status = InvoiceStatus(inv.status)
     new_status = body.status
@@ -1086,20 +1416,20 @@ async def transition_status(
         and new_status == InvoiceStatus.CANCELLED
         and payments
     ):
-        raise ValueError(
+        raise InvoiceLifecycleConflictError(
             "Cannot cancel a draft invoice that has payments. Delete the draft "
             "to return quote-origin payments, or handle the payments first."
         )
 
     if new_status == InvoiceStatus.COMPLETED:
-        raise ValueError(
+        raise InvoiceLifecycleConflictError(
             "COMPLETED status is set automatically by payments (M7). "
             "It cannot be assigned manually in M5."
         )
 
     allowed = _ALLOWED_TRANSITIONS.get(current_status, set())
     if new_status not in allowed:
-        raise ValueError(
+        raise InvoiceLifecycleConflictError(
             f"Cannot transition from {current_status} to {new_status}. "
             f"Allowed transitions: {', '.join(s.value for s in allowed) or 'none'}."
         )
@@ -1124,6 +1454,23 @@ async def transition_status(
             inv.base_due_amount = payment_state.base_due_amount
             inv.paid_status = payment_state.paid_status
             inv.status = payment_state.new_status
+            inv.payable_before_payments = Decimal(str(inv.total_incl_vat))
+            inv.incoming_payment_total = payment_state.paid_total
+            inv.base_payable_before_payments = Decimal(str(inv.base_total_incl_vat))
+            inv.base_incoming_payment_total = payment_state.base_paid_total
+            inv.settlement_status = (
+                InvoiceSettlementStatus.SETTLED
+                if payment_state.paid_status == InvoicePaidStatus.PAID
+                else (
+                    InvoiceSettlementStatus.PARTIALLY_SETTLED
+                    if payment_state.paid_status == InvoicePaidStatus.PARTIALLY_PAID
+                    else InvoiceSettlementStatus.OPEN
+                )
+            )
+            if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.STANDARD:
+                await _create_native_issue_foundation(
+                    session, inv, issued_by_user_id=issued_by_user_id
+                )
         if needs_number:
             numbering_config = await _load_numbering_config(session, company_id)
             cust_stmt = select(Customer).where(
@@ -1144,13 +1491,23 @@ async def transition_status(
                 numbering_config=numbering_config,
                 customer_invoice_prefix=customer.invoice_prefix,
             )
+        # Build the response while this transaction still carries the RLS GUC.
+        # A post-commit refresh would begin a new transaction with an empty
+        # setting and can turn a successful legal issue into a client 500.
+        await session.flush()
+        read = await _load_invoice_read(session, inv)
         await session.commit()
+    except NumberSequenceExhaustedError:
+        # This command owns the issue transaction.  Roll it back here so a
+        # caller that catches the domain error can safely reuse its session and
+        # no status/snapshot/counter mutation is left pending.
+        await session.rollback()
+        raise
     except IntegrityError as exc:
         await session.rollback()
         raise ValueError("Invoice number already exists (concurrent issue).") from exc
 
-    await session.refresh(inv)
-    return _invoice_to_read(inv)
+    return read
 
 
 async def list_invoice_product_options(

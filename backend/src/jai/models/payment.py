@@ -32,6 +32,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jai.db import Base
+from jai.models._enums import PaymentDirection
 
 # ---------------------------------------------------------------------------
 # Money column type alias – matches invoice.py convention
@@ -71,6 +72,15 @@ class Payment(Base):
         ForeignKey("quote.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
+    )
+    credit_note_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    direction: Mapped[PaymentDirection] = mapped_column(
+        nullable=False, server_default="INCOMING"
     )
 
     # -- Payment date ---------------------------------------------------------
@@ -120,8 +130,11 @@ class Payment(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "invoice_id IS NOT NULL OR quote_id IS NOT NULL",
-            name="ck_payment_document_link",
+            "(direction = 'INCOMING' AND credit_note_id IS NULL "
+            "AND (invoice_id IS NOT NULL OR quote_id IS NOT NULL)) OR "
+            "(direction = 'REFUND' AND credit_note_id IS NOT NULL "
+            "AND invoice_id IS NULL AND quote_id IS NULL)",
+            name="ck_payment_direction_context",
         ),
     )
 

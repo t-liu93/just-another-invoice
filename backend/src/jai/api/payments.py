@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session
+from jai.models._enums import InvoiceDocumentKind, PaymentDirection
 from jai.models.user import User
 from jai.schemas.email_log import DocumentSendRequest, EmailLogRead
 from jai.schemas.payment import (
@@ -189,6 +190,8 @@ async def list_payments_endpoint(
     ),
     customer_id: uuid.UUID | None = Query(default=None),
     payment_method_id: uuid.UUID | None = Query(default=None),
+    direction: PaymentDirection | None = Query(default=None),
+    document_kind: InvoiceDocumentKind | None = Query(default=None),
     date_from: date | None = Query(
         default=None, description="Inclusive lower bound on payment_date."
     ),
@@ -210,6 +213,8 @@ async def list_payments_endpoint(
         q=q,
         customer_id=customer_id,
         payment_method_id=payment_method_id,
+        direction=direction,
+        document_kind=document_kind,
         date_from=date_from,
         date_to=date_to,
         limit=limit,

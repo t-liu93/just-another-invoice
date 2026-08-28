@@ -1,16 +1,53 @@
 services:
+  db-role-provision:
+    container_name: jai-db-role-provision
+    image: postgres:18
+    environment:
+      # These processes run inside the Compose network.  Never inherit the
+      # host-development fallback (normally localhost:5433 in .env.example).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-jai}
+      POSTGRES_ADMIN_USER: ${POSTGRES_ADMIN_USER:-jai_admin}
+      PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD:-jai_admin}
+      # An optional complete URL remains available for external/legacy
+      # deployments.  The normal in-cluster path deliberately leaves this
+      # empty and psql receives raw connection parts below.
+      DATABASE_URL: ${DATABASE_PROVISION_URL:-}
+      POSTGRES_LEGACY_USER: ${POSTGRES_LEGACY_USER:-${POSTGRES_USER:-jai}}
+      POSTGRES_LEGACY_PASSWORD: ${POSTGRES_LEGACY_PASSWORD:-${POSTGRES_PASSWORD:-jai}}
+      POSTGRES_LEGACY_DATABASE_URL: ${DATABASE_LEGACY_PROVISION_URL:-}
+      POSTGRES_MIGRATION_USER: ${POSTGRES_MIGRATION_USER:-jai_migrator}
+      POSTGRES_MIGRATION_PASSWORD: ${POSTGRES_MIGRATION_PASSWORD:-jai_migrator}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-jai_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-jai_app}
+    volumes:
+      - ./docker/postgres-init/provision-application-roles.sh:/provision/provision-application-roles.sh:ro
+    command: ["/bin/sh", "/provision/provision-application-roles.sh"]
+    restart: "no"
+
   db-migration:
     container_name: jai-db-migration
     image: ${JAI_IMAGE:-ghcr.io/yet-another-ledger/yet-another-ledger:latest}
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-role-provision:
+        condition: service_completed_successfully
     environment:
+      # DATABASE_MIGRATION_URL remains the external-DB escape hatch.  Without
+      # it, use only the internal postgres service, never host .env parts.
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-jai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jai}
+      POSTGRES_PORT: "5432"
       POSTGRES_DB: ${POSTGRES_DB:-jai}
+      POSTGRES_MIGRATION_USER: ${POSTGRES_MIGRATION_USER:-jai_migrator}
+      POSTGRES_MIGRATION_PASSWORD: ${POSTGRES_MIGRATION_PASSWORD:-jai_migrator}
+      # 0030 grants the runtime role named here; it must match provision/app.
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-jai_app}
+      # The process safely assembles from the fixed internal parts above when
+      # both overrides are empty. A legacy DATABASE_URL is accepted, while an
+      # explicit DATABASE_MIGRATION_URL is selected first without exposing the
+      # runtime URL to the migration container.
+      DATABASE_URL: ${DATABASE_MIGRATION_URL:-${DATABASE_URL:-}}
+      DATABASE_MIGRATION_URL: ${DATABASE_MIGRATION_URL:-}
     command: ["alembic", "upgrade", "head"]
     restart: "no"
 
@@ -21,11 +58,18 @@ services:
       db-migration:
         condition: service_completed_successfully
     environment:
+      # DATABASE_URL remains the external-DB escape hatch.  Without it, use
+      # only the internal postgres service, never host .env parts.
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-jai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jai}
+      POSTGRES_PORT: "5432"
       POSTGRES_DB: ${POSTGRES_DB:-jai}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-jai_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-jai_app}
+      POSTGRES_MIGRATION_USER: ${POSTGRES_MIGRATION_USER:-jai_migrator}
+      POSTGRES_MIGRATION_PASSWORD: ${POSTGRES_MIGRATION_PASSWORD:-jai_migrator}
+      # Leave this empty for internal Compose: Settings uses URL.create() on
+      # the raw role fields, so reserved URI characters in passwords are safe.
+      DATABASE_URL: ${DATABASE_URL:-}
       APP_VERSION: ${APP_VERSION:-0.4.0}
       # Cookies are HTTPS-only by default (production runs behind a TLS reverse
       # proxy).  Set COOKIE_SECURE=false in .env if you expose the app over
@@ -65,13 +109,18 @@ services:
     container_name: jai-postgres
     image: postgres:18
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-jai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jai}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-jai_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-jai_admin}
       POSTGRES_DB: ${POSTGRES_DB:-jai}
+      POSTGRES_MIGRATION_USER: ${POSTGRES_MIGRATION_USER:-jai_migrator}
+      POSTGRES_MIGRATION_PASSWORD: ${POSTGRES_MIGRATION_PASSWORD:-jai_migrator}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-jai_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-jai_app}
     volumes:
       - pgdata_jai:/var/lib/postgresql
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jai}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER:-jai_admin}"]
       interval: 5s
       timeout: 3s
       retries: 5

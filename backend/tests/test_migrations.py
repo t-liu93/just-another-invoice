@@ -10,6 +10,7 @@ Skipped by default; run with ``pytest -m integration``.
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 import uuid
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -30,19 +32,27 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 def _alembic_url() -> str:
     """Derive a dedicated migration-test database URL."""
-    from urllib.parse import urlparse, urlunparse
-
     settings = get_settings()
-    parsed = urlparse(settings.database_url)
-    return urlunparse(parsed._replace(path="/jai_test_migrations"))
+    migration_url = URL.create(
+        drivername="postgresql+asyncpg",
+        username=settings.postgres_migration_user,
+        password=settings.postgres_migration_password,
+        host=settings.postgres_host,
+        port=settings.postgres_port,
+        database="jai_test_migrations",
+    ).render_as_string(hide_password=False)
+    return migration_url
 
 
 def _run_alembic(*extra_args: str, url: str) -> subprocess.CompletedProcess[str]:
+    migration_env = os.environ.copy()
+    migration_env["DATABASE_URL"] = url
     return subprocess.run(
-        [sys.executable, "-m", "alembic", "-x", f"url={url}", *extra_args],
+        [sys.executable, "-m", "alembic", *extra_args],
         cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
+        env=migration_env,
     )
 
 
@@ -56,7 +66,7 @@ def _ensure_database(url: str) -> None:
 
     parsed = urlparse(url)
     db_name = parsed.path.lstrip("/")
-    maint_url = urlunparse(parsed._replace(path="/postgres"))
+    maint_url = urlunparse(urlparse(get_settings().database_admin_url)._replace(path="/postgres"))
 
     async def _create() -> None:
         engine = create_async_engine(maint_url, isolation_level="AUTOCOMMIT")
@@ -69,6 +79,12 @@ def _ensure_database(url: str) -> None:
             )
             await conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
             await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+            await conn.execute(
+                text(
+                    f'ALTER DATABASE "{db_name}" OWNER TO '
+                    f'"{get_settings().postgres_migration_user}"'
+                )
+            )
         await engine.dispose()
 
     asyncio.run(_create())
@@ -84,7 +100,7 @@ def _drop_database(url: str) -> None:
 
     parsed = urlparse(url)
     db_name = parsed.path.lstrip("/")
-    maint_url = urlunparse(parsed._replace(path="/postgres"))
+    maint_url = urlunparse(urlparse(get_settings().database_admin_url)._replace(path="/postgres"))
 
     async def _drop() -> None:
         engine = create_async_engine(maint_url, isolation_level="AUTOCOMMIT")
@@ -540,7 +556,17 @@ class TestMigrations:
         company_id = uuid.uuid4()
         customer_id = uuid.uuid4()
         treatment_id = uuid.uuid4()
+        rate_id = uuid.uuid4()
         invoice_id = uuid.uuid4()
+        line_id = uuid.uuid4()
+        line_tax_id = uuid.uuid4()
+        document_invoice_id = uuid.uuid4()
+        document_line_one_id = uuid.uuid4()
+        document_line_two_id = uuid.uuid4()
+        document_tax_id = uuid.uuid4()
+        tail_document_ids = [uuid.uuid4() for _ in range(3)]
+        tail_line_ids = [[uuid.uuid4() for _ in range(3)] for _ in range(3)]
+        tail_tax_ids = [uuid.uuid4() for _ in range(3)]
         payment_id = uuid.uuid4()
         _query(
             self.url,
@@ -554,6 +580,8 @@ class TestMigrations:
             VALUES
                 (:treatment_id, :company_id, 'NL_DOMESTIC', 'NL Domestic',
                  'SALES', 'APPLY_RATE', false, true);
+            INSERT INTO vat_rate (id, company_id, label, percent, active)
+            VALUES (:rate_id, :company_id, 'NL 21%', 21, true);
             INSERT INTO invoice
                 (id, company_id, customer_id, invoice_number, sequence_number,
                  invoice_date, status, paid_status, currency, exchange_rate,
@@ -570,23 +598,151 @@ class TestMigrations:
                  DATE '2026-01-10', 'SENT', 'PARTIALLY_PAID', 'EUR', 1,
                  'LINE', false, :treatment_id,
                  'NL_DOMESTIC', 'NL Domestic', 'APPLY_RATE', false,
-                 'NONE', 0, 0, 100, 0, 100, 21, 121, 61,
-                 100, 0, 100, 21, 121, 61);
+                 'NONE', 0, 0, 100.001, 0, 100.001, 21.005, 121.006, 61.006,
+                 100.001, 0, 100.001, 21.005, 121.006, 61.006);
             INSERT INTO payment
                 (id, company_id, invoice_id, payment_date, amount, base_amount,
                  currency, exchange_rate, reference)
             VALUES
                 (:payment_id, :company_id, :invoice_id, DATE '2026-01-15',
                  60, 60, 'EUR', 1, 'LEGACY-PAYMENT')
+            ;
+            INSERT INTO invoice_line
+                (id, invoice_id, sort_order, name, quantity, unit_price, vat_rate_id,
+                 vat_rate_label, vat_rate_percent, subtotal_excl_vat, subtotal_incl_vat,
+                 line_discount_amount, document_discount_share, taxable_amount, vat_total,
+                 total_incl_vat)
+            VALUES (:line_id, :invoice_id, 0, 'Legacy line', 1, 100.001, :rate_id,
+                    'NL 21%', 21, 100.001, 121.006, 0, 0, 100.001, 21.005, 121.006);
+            INSERT INTO invoice_line_tax
+                (id, invoice_line_id, vat_rate_id, vat_rate_label, vat_rate_percent,
+                 effective_vat_percent, taxable_amount, tax_amount)
+            VALUES (:line_tax_id, :line_id, :rate_id, 'NL 21%', 21, 21, 100.001, 21.005)
+            ;
+            INSERT INTO invoice
+                (id, company_id, customer_id, invoice_number, sequence_number,
+                 invoice_date, status, paid_status, currency, exchange_rate, tax_mode,
+                 amounts_include_vat, vat_treatment_id, document_vat_rate_id,
+                 vat_treatment_code, vat_treatment_label, vat_treatment_effect,
+                 vat_treatment_requires_icp, discount_type, discount_value,
+                 document_discount_amount, subtotal_excl_vat, line_discount_total,
+                 taxable_amount, vat_total, total_incl_vat, due_amount,
+                 base_subtotal_excl_vat, base_line_discount_total, base_taxable_amount,
+                 base_vat_total, base_total_incl_vat, base_due_amount)
+            VALUES (:document_invoice_id, :company_id, :customer_id, 'LEGACY-DOC', 2,
+                    DATE '2026-01-11', 'SENT', 'UNPAID', 'EUR', 1.234, 'DOCUMENT', false,
+                    :treatment_id, :rate_id, 'NL_DOMESTIC', 'NL Domestic', 'APPLY_RATE',
+                    false, 'NONE', 0, 0, 290, 0, 290, 60.905, 350.905, 350.905,
+                    357.860, 0, 357.860, 75.167, 433.027, 433.027);
+            INSERT INTO invoice_line
+                (id, invoice_id, sort_order, name, quantity, unit_price, subtotal_excl_vat,
+                 subtotal_incl_vat, line_discount_amount, document_discount_share,
+                 taxable_amount, vat_total, total_incl_vat)
+            VALUES (:document_line_one_id, :document_invoice_id, 0, 'Document A', 1, 100,
+                    100, 100, 0, 0, 100, 0, 100),
+                   (:document_line_two_id, :document_invoice_id, 1, 'Document B', 1, 190,
+                    190, 190, 0, 0, 190, 0, 190);
+            INSERT INTO invoice_tax
+                (id, invoice_id, vat_rate_id, vat_rate_label, vat_rate_percent,
+                 effective_vat_percent, taxable_amount, tax_amount)
+            VALUES (:document_tax_id, :document_invoice_id, :rate_id, 'NL 21%', 21, 21, 290, 60.905)
             """,
             {
                 "company_id": company_id,
                 "customer_id": customer_id,
                 "treatment_id": treatment_id,
+                "rate_id": rate_id,
                 "invoice_id": invoice_id,
+                "line_id": line_id,
+                "line_tax_id": line_tax_id,
+                "document_invoice_id": document_invoice_id,
+                "document_line_one_id": document_line_one_id,
+                "document_line_two_id": document_line_two_id,
+                "document_tax_id": document_tax_id,
                 "payment_id": payment_id,
             },
         )
+        # Historical NUMERIC(18,3) snapshots predate M7.5's customer-facing
+        # minor-unit rule.  Exercise all tail values plus a mixed/zero line
+        # shape before 0029 derives immutable credit basis rows.
+        tail_cases = (
+            (
+                "LEGACY-DOC-001",
+                Decimal("60.001"),
+                (Decimal("100.001"), Decimal("0"), Decimal("189.998")),
+                Decimal("74.041"),
+            ),
+            (
+                "LEGACY-DOC-005",
+                Decimal("60.005"),
+                (Decimal("100"), Decimal("0"), Decimal("189.999")),
+                Decimal("74.046"),
+            ),
+            (
+                "LEGACY-DOC-999",
+                Decimal("60.999"),
+                (Decimal("100.001"), Decimal("0"), Decimal("189.999")),
+                Decimal("75.273"),
+            ),
+        )
+        for index, (number, vat, line_amounts, base_vat) in enumerate(tail_cases):
+            invoice_tail_id = tail_document_ids[index]
+            tax_tail_id = tail_tax_ids[index]
+            lines = tail_line_ids[index]
+            net = sum(line_amounts)
+            _query(
+                self.url,
+                """
+                INSERT INTO invoice
+                    (id, company_id, customer_id, invoice_number, sequence_number,
+                     invoice_date, status, paid_status, currency, exchange_rate, tax_mode,
+                     amounts_include_vat, vat_treatment_id, document_vat_rate_id,
+                     vat_treatment_code, vat_treatment_label, vat_treatment_effect,
+                     vat_treatment_requires_icp, discount_type, discount_value,
+                     document_discount_amount, subtotal_excl_vat, line_discount_total,
+                     taxable_amount, vat_total, total_incl_vat, due_amount,
+                     base_subtotal_excl_vat, base_line_discount_total, base_taxable_amount,
+                     base_vat_total, base_total_incl_vat, base_due_amount)
+                VALUES
+                    (:invoice_id, :company_id, :customer_id, :number, :sequence,
+                     DATE '2026-01-12', 'SENT', 'UNPAID', 'EUR', 1.234, 'DOCUMENT', false,
+                     :treatment_id, :rate_id, 'NL_DOMESTIC', 'NL Domestic', 'APPLY_RATE',
+                     false, 'NONE', 0, 0, :net, 0, :net, :vat, :gross, :gross,
+                     357.860, 0, 357.860, :base_vat, :base_gross, :base_gross);
+                INSERT INTO invoice_line
+                    (id, invoice_id, sort_order, name, quantity, unit_price, subtotal_excl_vat,
+                     subtotal_incl_vat, line_discount_amount, document_discount_share,
+                     taxable_amount, vat_total, total_incl_vat)
+                VALUES
+                    (:line_one, :invoice_id, 0, 'Tail A', 1, :one, :one, :one, 0, 0, :one, 0, :one),
+                    (:line_zero, :invoice_id, 1, 'Tail Zero', 1, 0, 0, 0, 0, 0, 0, 0, 0),
+                    (:line_two, :invoice_id, 2, 'Tail B', 1, :two, :two, :two, 0, 0, :two, 0, :two);
+                INSERT INTO invoice_tax
+                    (id, invoice_id, vat_rate_id, vat_rate_label, vat_rate_percent,
+                     effective_vat_percent, taxable_amount, tax_amount)
+                VALUES (:tax_id, :invoice_id, :rate_id, 'NL 21%', 21, 21, :net, :vat)
+                """,
+                {
+                    "invoice_id": invoice_tail_id,
+                    "company_id": company_id,
+                    "customer_id": customer_id,
+                    "number": number,
+                    "sequence": index + 3,
+                    "treatment_id": treatment_id,
+                    "rate_id": rate_id,
+                    "net": net,
+                    "vat": vat,
+                    "gross": net + vat,
+                    "base_vat": base_vat,
+                    "base_gross": Decimal("357.860") + base_vat,
+                    "line_one": lines[0],
+                    "line_zero": lines[1],
+                    "line_two": lines[2],
+                    "one": line_amounts[0],
+                    "two": line_amounts[2],
+                    "tax_id": tax_tail_id,
+                },
+            )
 
         result = _run_alembic("upgrade", "0028", url=self.url)
         assert result.returncode == 0, result.stderr
@@ -648,6 +804,156 @@ class TestMigrations:
         asyncio.run(_assert_check_constraint())
         assert _run_alembic("downgrade", "0027", url=self.url).returncode == 0
         assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+        assert _query(
+            self.url,
+            """
+            SELECT set_config('jai.company_id', CAST(:company_id AS text), true);
+            SELECT i.invoice_number, sum(b.net_amount) AS net, sum(b.vat_amount) AS vat,
+                   sum(b.gross_amount) AS gross, sum(b.base_net_amount) AS base_net,
+                   sum(b.base_vat_amount) AS base_vat, sum(b.base_gross_amount) AS base_gross
+            FROM invoice i JOIN invoice_credit_basis_line b ON b.invoice_id = i.id
+            WHERE i.id = ANY(:invoice_ids) GROUP BY i.invoice_number ORDER BY i.invoice_number
+            """,
+            {"company_id": str(company_id), "invoice_ids": tail_document_ids},
+        ) == [
+            {
+                "invoice_number": number,
+                "net": sum(line_amounts),
+                "vat": vat,
+                "gross": sum(line_amounts) + vat,
+                "base_net": Decimal("357.860"),
+                "base_vat": base_vat,
+                "base_gross": Decimal("357.860") + base_vat,
+            }
+            for number, vat, line_amounts, base_vat in tail_cases
+        ]
+        # M12 foundation remains additive: existing financial snapshots and
+        # lifecycle values do not move, while its new compatibility metadata
+        # is filled from persisted rows only.
+        assert _query(
+            self.url,
+            """
+            SELECT document_kind::text, payable_before_payments, due_amount,
+                   incoming_payment_total, settlement_status::text,
+                   issued_at, issued_by_user_id
+            FROM invoice WHERE id = :invoice_id
+            """,
+            {"invoice_id": invoice_id},
+        ) == [
+            {
+                "document_kind": "STANDARD",
+                "payable_before_payments": Decimal("121.006"),
+                "due_amount": Decimal("61.006"),
+                "incoming_payment_total": Decimal("60.000"),
+                "settlement_status": "PARTIALLY_SETTLED",
+                "issued_at": None,
+                "issued_by_user_id": None,
+            }
+        ]
+        assert _query(
+            self.url,
+            "SELECT set_config('jai.company_id', CAST(:company_id AS text), true); "
+            "SELECT provenance::text FROM invoice_party_snapshot WHERE invoice_id = :invoice_id",
+            {"company_id": str(company_id), "invoice_id": invoice_id},
+        ) == [{"provenance": "MIGRATED_CURRENT_STATE"}]
+        assert _query(
+            self.url,
+            "SELECT direction::text, credit_note_id FROM payment WHERE id = :payment_id",
+            {"payment_id": payment_id},
+        ) == [{"direction": "INCOMING", "credit_note_id": None}]
+        assert _query(
+            self.url,
+            "SELECT set_config('jai.company_id', CAST(:company_id AS text), true); "
+            "SELECT net_amount, vat_amount, gross_amount, base_net_amount, base_vat_amount, "
+            "base_gross_amount FROM invoice_credit_basis_line WHERE invoice_line_id = :line_id",
+            {"company_id": str(company_id), "line_id": line_id},
+        ) == [
+            {
+                "net_amount": Decimal("100.001"),
+                "vat_amount": Decimal("21.005"),
+                "gross_amount": Decimal("121.006"),
+                "base_net_amount": Decimal("100.001"),
+                "base_vat_amount": Decimal("21.005"),
+                "base_gross_amount": Decimal("121.006"),
+            }
+        ]
+        # The production-shaped fixture deliberately contains both legacy tax
+        # layouts.  0029 may add compatibility state, but it must preserve
+        # every persisted reporting input and derive basis only from those
+        # snapshots: LINE reads its line-tax amount; DOCUMENT apportions the
+        # persisted document tax across its unchanged line bases.
+        assert _query(
+            self.url,
+            """
+            SELECT i.invoice_number, i.tax_mode::text, i.status::text, i.paid_status::text,
+                   i.subtotal_excl_vat, i.taxable_amount, i.vat_total,
+                   i.total_incl_vat, i.due_amount, i.base_total_incl_vat,
+                   COALESCE(lt.tax_amount, it.tax_amount) AS persisted_tax_input
+            FROM invoice i
+            LEFT JOIN invoice_line l ON l.invoice_id = i.id AND l.sort_order = 0
+            LEFT JOIN invoice_line_tax lt ON lt.invoice_line_id = l.id
+            LEFT JOIN invoice_tax it ON it.invoice_id = i.id
+            WHERE i.id IN (:invoice_id, :document_invoice_id)
+            ORDER BY i.invoice_number
+            """,
+            {"invoice_id": invoice_id, "document_invoice_id": document_invoice_id},
+        ) == [
+            {
+                "invoice_number": "LEGACY-1",
+                "tax_mode": "LINE",
+                "status": "SENT",
+                "paid_status": "PARTIALLY_PAID",
+                "subtotal_excl_vat": Decimal("100.001"),
+                "taxable_amount": Decimal("100.001"),
+                "vat_total": Decimal("21.005"),
+                "total_incl_vat": Decimal("121.006"),
+                "due_amount": Decimal("61.006"),
+                "base_total_incl_vat": Decimal("121.006"),
+                "persisted_tax_input": Decimal("21.005"),
+            },
+            {
+                "invoice_number": "LEGACY-DOC",
+                "tax_mode": "DOCUMENT",
+                "status": "SENT",
+                "paid_status": "UNPAID",
+                "subtotal_excl_vat": Decimal("290.000"),
+                "taxable_amount": Decimal("290.000"),
+                "vat_total": Decimal("60.905"),
+                "total_incl_vat": Decimal("350.905"),
+                "due_amount": Decimal("350.905"),
+                "base_total_incl_vat": Decimal("433.027"),
+                "persisted_tax_input": Decimal("60.905"),
+            },
+        ]
+        assert _query(
+            self.url,
+            "SELECT set_config('jai.company_id', CAST(:company_id AS text), true); "
+            "SELECT invoice_line_id, sort_order, net_amount, vat_amount, gross_amount, "
+            "base_net_amount, base_vat_amount, base_gross_amount "
+            "FROM invoice_credit_basis_line WHERE invoice_id = :invoice_id ORDER BY sort_order",
+            {"company_id": str(company_id), "invoice_id": document_invoice_id},
+        ) == [
+            {
+                "invoice_line_id": document_line_one_id,
+                "sort_order": 0,
+                "net_amount": Decimal("100.000"),
+                "vat_amount": Decimal("21.002"),
+                "gross_amount": Decimal("121.002"),
+                "base_net_amount": Decimal("123.400"),
+                "base_vat_amount": Decimal("25.920"),
+                "base_gross_amount": Decimal("149.320"),
+            },
+            {
+                "invoice_line_id": document_line_two_id,
+                "sort_order": 1,
+                "net_amount": Decimal("190.000"),
+                "vat_amount": Decimal("39.903"),
+                "gross_amount": Decimal("229.903"),
+                "base_net_amount": Decimal("234.460"),
+                "base_vat_amount": Decimal("49.247"),
+                "base_gross_amount": Decimal("283.707"),
+            },
+        ]
 
     def test_0028_downgrade_refuses_quote_provenance_and_tax_snapshots(self) -> None:
         """Downgrade must fail before DDL instead of destroying M11.5 history."""

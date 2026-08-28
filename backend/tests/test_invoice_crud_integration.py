@@ -815,7 +815,8 @@ class TestInvoiceStatusTransitions:
         cancel_resp = await db_client.post(
             f"/api/v1/invoices/{inv_id}/status", json={"status": "CANCELLED"}
         )
-        assert cancel_resp.status_code == 422
+        assert cancel_resp.status_code == 409
+        assert cancel_resp.json()["detail"]["code"] == "INVOICE_LIFECYCLE_CONFLICT"
 
     async def test_cancelled_can_be_reactivated(self, db_client: AsyncClient) -> None:
         """CANCELLED → DRAFT is allowed when the invoice was never sent."""
@@ -839,7 +840,7 @@ class TestInvoiceStatusTransitions:
         assert reactivate_resp.json()["status"] == "DRAFT"
 
     async def test_completed_cannot_be_set_manually(self, db_client: AsyncClient) -> None:
-        """COMPLETED is M7-reserved; manual attempt returns 422."""
+        """COMPLETED is M7-reserved; manual attempt is a lifecycle conflict."""
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
@@ -853,8 +854,9 @@ class TestInvoiceStatusTransitions:
         completed_resp = await db_client.post(
             f"/api/v1/invoices/{inv_id}/status", json={"status": "COMPLETED"}
         )
-        assert completed_resp.status_code == 422
-        assert "COMPLETED" in completed_resp.json()["detail"]
+        assert completed_resp.status_code == 409
+        assert completed_resp.json()["detail"]["code"] == "INVOICE_LIFECYCLE_CONFLICT"
+        assert "COMPLETED" in completed_resp.json()["detail"]["message"]
 
     async def test_draft_to_draft_invalid(self, db_client: AsyncClient) -> None:
         """DRAFT → DRAFT is invalid."""
@@ -871,7 +873,8 @@ class TestInvoiceStatusTransitions:
         bad_resp = await db_client.post(
             f"/api/v1/invoices/{inv_id}/status", json={"status": "DRAFT"}
         )
-        assert bad_resp.status_code == 422
+        assert bad_resp.status_code == 409
+        assert bad_resp.json()["detail"]["code"] == "INVOICE_LIFECYCLE_CONFLICT"
 
     async def test_cancelled_to_sent_invalid(self, db_client: AsyncClient) -> None:
         """CANCELLED → SENT is invalid."""
@@ -891,7 +894,8 @@ class TestInvoiceStatusTransitions:
         bad_resp = await db_client.post(
             f"/api/v1/invoices/{inv_id}/status", json={"status": "SENT"}
         )
-        assert bad_resp.status_code == 422
+        assert bad_resp.status_code == 409
+        assert bad_resp.json()["detail"]["code"] == "INVOICE_LIFECYCLE_CONFLICT"
 
     async def test_edit_cancelled_invoice_rejected(self, db_client: AsyncClient) -> None:
         """PUT on a cancelled invoice returns 422."""

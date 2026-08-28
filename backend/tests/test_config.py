@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from jai.config import Settings, get_settings
+
+
+@pytest.fixture(autouse=True)
+def _isolate_database_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep Settings unit tests independent from CI's role-provisioning env."""
+    for variable in tuple(os.environ):
+        if variable == "DATABASE_URL" or variable.startswith(("DATABASE_", "POSTGRES_")):
+            monkeypatch.delenv(variable, raising=False)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 class TestDefaults:
@@ -17,8 +29,11 @@ class TestDefaults:
         f = Settings.model_fields
         assert f["postgres_host"].default == "localhost"
         assert f["postgres_port"].default == 5432
-        assert f["postgres_user"].default == "jai"
+        assert f["postgres_user"].default == "jai"  # legacy compatibility
         assert f["postgres_password"].default == "jai"
+        assert f["postgres_app_user"].default == "jai_app"
+        assert f["postgres_app_password"].default == "jai_app"
+        assert f["postgres_migration_user"].default == "jai_migrator"
         assert f["postgres_db"].default == "jai"
 
     def test_static_dir_default_none(self) -> None:
@@ -30,6 +45,7 @@ class TestDefaults:
     def test_database_url_default_is_none(self) -> None:
         """Code default is None (assembled by model_validator)."""
         assert Settings.model_fields["database_url"].default is None
+        assert Settings.model_fields["database_migration_url"].default is None
 
 
 class TestURLAssembly:
@@ -40,8 +56,8 @@ class TestURLAssembly:
         s = Settings(
             postgres_host="db.example.com",
             postgres_port=5432,
-            postgres_user="myuser",
-            postgres_password="mypass",
+            postgres_app_user="myuser",
+            postgres_app_password="mypass",
             postgres_db="mydb",
         )
         assert s.database_url == "postgresql+asyncpg://myuser:mypass@db.example.com:5432/mydb"
@@ -88,6 +104,86 @@ class TestURLOverride:
         )
         assert s.database_url is not None
         assert "mypg" in s.database_url
+
+    def test_new_role_parts_default_to_runtime_url_only(self) -> None:
+        s = Settings(
+            postgres_host="db.example.com",
+            postgres_port=5432,
+            postgres_app_user="runtime",
+            postgres_app_password="runtime-password",
+            postgres_migration_user="owner",
+            postgres_migration_password="owner-password",
+        )
+        assert s.database_url == (
+            "postgresql+asyncpg://runtime:runtime-password@db.example.com:5432/jai"
+        )
+
+    def test_app_only_environment_never_falls_back_to_legacy_jai_credentials(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The documented host-dev variables select the runtime app role."""
+        for variable in (
+            "DATABASE_URL",
+            "POSTGRES_USER",
+            "POSTGRES_PASSWORD",
+            "POSTGRES_APP_USER",
+            "POSTGRES_APP_PASSWORD",
+            "POSTGRES_MIGRATION_USER",
+            "POSTGRES_MIGRATION_PASSWORD",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "\n".join(
+                (
+                    "POSTGRES_HOST=localhost",
+                    "POSTGRES_PORT=5433",
+                    "POSTGRES_DB=jai",
+                    "POSTGRES_APP_USER=jai_app",
+                    "POSTGRES_APP_PASSWORD=runtime-secret",
+                    "POSTGRES_MIGRATION_USER=jai_migrator",
+                    "POSTGRES_MIGRATION_PASSWORD=migration-secret",
+                )
+            ),
+            encoding="utf-8",
+        )
+        settings = Settings(_env_file=env_file)
+        assert settings.database_url == (
+            "postgresql+asyncpg://jai_app:runtime-secret@localhost:5433/jai"
+        )
+
+    def test_legacy_postgres_user_without_app_parts_stays_compatible(self) -> None:
+        s = Settings(postgres_user="legacy", postgres_password="legacy-password")
+        assert s.database_url is not None
+        assert "legacy:legacy-password" in s.database_url
+
+
+class TestMigrationURLAssembly:
+    """Alembic uses an independent, migration-owner connection URL."""
+
+    def test_migration_parts_safely_encode_reserved_password_characters(self) -> None:
+        settings = Settings(
+            postgres_host="db.example.com",
+            postgres_port=5432,
+            postgres_migration_user="owner",
+            postgres_migration_password="p@ss:w0rd/#test",
+            postgres_db="mydb",
+        )
+        assert settings.migration_database_url == (
+            "postgresql+asyncpg://owner:p%40ss%3Aw0rd%2F%23test@db.example.com:5432/mydb"
+        )
+
+    def test_explicit_migration_url_wins_over_runtime_and_parts(self) -> None:
+        settings = Settings(
+            database_url="postgresql+asyncpg://runtime:pw@runtime:5432/jai",
+            database_migration_url="postgresql+asyncpg://owner:pw@owner:5432/jai",
+            postgres_migration_user="ignored",
+        )
+        assert settings.migration_database_url == "postgresql+asyncpg://owner:pw@owner:5432/jai"
+
+    def test_legacy_database_url_remains_migration_fallback(self) -> None:
+        settings = Settings(database_url="postgresql+asyncpg://owner:pw@host:5432/jai")
+        assert settings.migration_database_url == settings.database_url
 
 
 class TestEnvFile:

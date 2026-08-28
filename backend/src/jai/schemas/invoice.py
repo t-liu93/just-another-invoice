@@ -20,9 +20,20 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from jai.models._enums import DiscountType, InvoicePaidStatus, InvoiceStatus, InvoiceTaxMode
+from jai.models._enums import (
+    AdvanceInputMode,
+    CreditLineInputMode,
+    DiscountType,
+    InvoiceCreditStatus,
+    InvoiceDocumentKind,
+    InvoicePaidStatus,
+    InvoiceSettlementStatus,
+    InvoiceStatus,
+    InvoiceTaxMode,
+    PartySnapshotProvenance,
+)
 
 # ---------------------------------------------------------------------------
 # Discount
@@ -85,6 +96,8 @@ class InvoiceLineInput(BaseModel):
 class InvoiceCalculationRequest(BaseModel):
     """Request body for ``POST /api/v1/invoices/calculate``."""
 
+    model_config = ConfigDict(extra="forbid")
+
     customer_id: uuid.UUID
     invoice_date: date
     due_date: date | None = None
@@ -100,6 +113,86 @@ class InvoiceCalculationRequest(BaseModel):
     document_vat_rate_id: uuid.UUID | None = None
     discount: DiscountInput = DiscountInput()
     lines: list[InvoiceLineInput] = Field(min_length=1, description="At least 1 line required.")
+
+
+class AdvanceCalculationRequest(BaseModel):
+    """Frozen M12 Advance intent; accepted only by the dedicated future route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_mode: AdvanceInputMode
+    gross_amount: Decimal | None = Field(default=None, gt=0)
+    percentage: Decimal | None = Field(default=None, gt=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_mode_payload(self) -> AdvanceCalculationRequest:
+        if (
+            self.input_mode == AdvanceInputMode.GROSS_AMOUNT
+            and self.gross_amount is not None
+            and self.percentage is None
+        ):
+            return self
+        if (
+            self.input_mode == AdvanceInputMode.PERCENTAGE
+            and self.percentage is not None
+            and self.gross_amount is None
+        ):
+            return self
+        raise ValueError("Advance input_mode requires exactly its matching amount field.")
+
+
+class AdvanceCalculationRead(BaseModel):
+    """Reserved authoritative Advance result component; Step 3 implements fields."""
+
+    detail: str
+
+
+class CreditCalculationLineInput(BaseModel):
+    """One source-basis selection for the dedicated future Credit calculator."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_basis_line_id: uuid.UUID
+    input_mode: CreditLineInputMode
+    quantity: Decimal | None = Field(default=None, gt=0)
+    gross_amount: Decimal | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_mode_payload(self) -> CreditCalculationLineInput:
+        if (
+            self.input_mode == CreditLineInputMode.QUANTITY
+            and self.quantity is not None
+            and self.gross_amount is None
+        ):
+            return self
+        if (
+            self.input_mode == CreditLineInputMode.GROSS_AMOUNT
+            and self.gross_amount is not None
+            and self.quantity is None
+        ):
+            return self
+        raise ValueError("Credit input_mode requires exactly its matching amount field.")
+
+
+class CreditCalculationRequest(BaseModel):
+    """Frozen M12 Credit intent; generic Standard pricing never accepts it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    full_remaining: bool = False
+    lines: list[CreditCalculationLineInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> CreditCalculationRequest:
+        if self.full_remaining != bool(self.lines):
+            return self
+        raise ValueError("Select exactly one of full_remaining=true or non-empty lines.")
+
+
+class CreditCalculationRead(BaseModel):
+    """Reserved authoritative Credit result component; Step 5 implements fields."""
+
+    detail: str
 
 
 # ---------------------------------------------------------------------------
@@ -205,10 +298,21 @@ class InvoiceCalculationRead(BaseModel):
 class InvoiceWrite(BaseModel):
     """Request body for ``POST /PUT /api/v1/invoices``."""
 
+    # The generic commands remain Standard-only in Step 1.  Rejecting extra
+    # fields prevents an M12 document intent from being silently treated as a
+    # normal invoice command while the dedicated engines are still deferred.
+    model_config = ConfigDict(extra="forbid")
+
     customer_id: uuid.UUID
     reference_number: str | None = None
     invoice_date: date
     due_date: date | None = None
+    supply_or_advance_date: date | None = Field(
+        default=None,
+        description=(
+            "Optional supply/prepayment date for a draft; defaults to invoice_date on issue."
+        ),
+    )
     currency: str | None = Field(
         default=None,
         max_length=3,
@@ -307,9 +411,18 @@ class InvoiceRead(BaseModel):
 
     invoice_date: date
     due_date: date | None = None
+    supply_or_advance_date: date | None = None
 
     status: InvoiceStatus
     paid_status: InvoicePaidStatus
+    document_kind: InvoiceDocumentKind = InvoiceDocumentKind.STANDARD
+    quote_id: uuid.UUID | None = None
+    issued_at: datetime | None = None
+    issued_by_user_id: uuid.UUID | None = None
+    party_snapshot_provenance: PartySnapshotProvenance | None = None
+    source_invoice_id: uuid.UUID | None = None
+    replacement_of_credit_note_id: uuid.UUID | None = None
+    compensates_credit_note_id: uuid.UUID | None = None
 
     currency: str
     exchange_rate: Decimal
@@ -331,6 +444,13 @@ class InvoiceRead(BaseModel):
     vat_total: Decimal
     total_incl_vat: Decimal
     due_amount: Decimal
+    payable_before_payments: Decimal
+    incoming_payment_total: Decimal
+    credited_total: Decimal
+    refunded_total: Decimal
+    refund_due_amount: Decimal
+    settlement_status: InvoiceSettlementStatus
+    credit_status: InvoiceCreditStatus
 
     base_subtotal_excl_vat: Decimal
     base_line_discount_total: Decimal
@@ -338,6 +458,11 @@ class InvoiceRead(BaseModel):
     base_vat_total: Decimal
     base_total_incl_vat: Decimal
     base_due_amount: Decimal
+    base_payable_before_payments: Decimal
+    base_incoming_payment_total: Decimal
+    base_credited_total: Decimal
+    base_refunded_total: Decimal
+    base_refund_due_amount: Decimal
 
     notes: str | None = None
     warranty_text: str | None = None
@@ -371,9 +496,32 @@ class InvoiceListItem(BaseModel):
     due_date: date | None = None
     status: InvoiceStatus
     paid_status: InvoicePaidStatus
+    document_kind: InvoiceDocumentKind = InvoiceDocumentKind.STANDARD
+    quote_id: uuid.UUID | None = None
+    supply_or_advance_date: date | None = None
+    issued_at: datetime | None = None
+    issued_by_user_id: uuid.UUID | None = None
+    party_snapshot_provenance: PartySnapshotProvenance | None = None
+    source_invoice_id: uuid.UUID | None = None
+    replacement_of_credit_note_id: uuid.UUID | None = None
+    compensates_credit_note_id: uuid.UUID | None = None
+    settlement_status: InvoiceSettlementStatus
+    credit_status: InvoiceCreditStatus
     currency: str
     total_incl_vat: Decimal
+    payable_before_payments: Decimal
+    incoming_payment_total: Decimal
+    credited_total: Decimal
+    refunded_total: Decimal
     due_amount: Decimal
+    refund_due_amount: Decimal
+    base_total_incl_vat: Decimal
+    base_payable_before_payments: Decimal
+    base_incoming_payment_total: Decimal
+    base_credited_total: Decimal
+    base_refunded_total: Decimal
+    base_due_amount: Decimal
+    base_refund_due_amount: Decimal
     vat_treatment_snapshot: VatTreatmentSnapshot
     created_at: datetime
     updated_at: datetime
@@ -393,6 +541,8 @@ class InvoiceListResponse(BaseModel):
 
 class InvoiceStatusWrite(BaseModel):
     """Request body for ``POST /api/v1/invoices/{id}/status``."""
+
+    model_config = ConfigDict(extra="forbid")
 
     status: InvoiceStatus
 

@@ -25,8 +25,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # --- Stage 3: runtime ----------------------------------------------------
 # Slim image: the venv + source + built SPA. No uv, no Node, no build tools.
-# DATABASE_URL is NOT hardcoded — it is assembled at runtime from POSTGRES_*
-# env vars (see jai.config.Settings).
+# DATABASE URLs are NOT hardcoded — normal Compose passes role-specific raw
+# parts and Settings safely assembles runtime/migration URLs; explicit full
+# URLs remain available for external or legacy deployments.
 FROM python:3.12-slim-bookworm AS runtime
 # WeasyPrint system libraries (D1 – M9 PDF rendering) + Noto fonts for
 # full Unicode/CJK coverage.  Cleaned in the same layer to keep image size down.

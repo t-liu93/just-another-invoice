@@ -20,10 +20,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
-from jai.db import get_session
+from jai.db import get_session, set_rls_company
 from jai.models.user import User
 from jai.schemas.email_log import DocumentSendRequest, EmailLogListResponse, EmailLogRead
 from jai.schemas.invoice import (
+    AdvanceCalculationRead,
+    AdvanceCalculationRequest,
+    CreditCalculationRead,
+    CreditCalculationRequest,
     InvoiceCalculationRead,
     InvoiceCalculationRequest,
     InvoiceListResponse,
@@ -33,6 +37,7 @@ from jai.schemas.invoice import (
     ProductInvoiceOptionListResponse,
 )
 from jai.services.invoice import (
+    InvoiceLifecycleConflictError,
     create_invoice,
     delete_invoice,
     get_invoice,
@@ -41,6 +46,7 @@ from jai.services.invoice import (
     transition_status,
     update_invoice,
 )
+from jai.services.numbering import NumberSequenceExhaustedError
 from jai.services.pricing import calculate_invoice
 
 router = APIRouter(prefix="/api/v1", tags=["invoices"])
@@ -108,6 +114,42 @@ async def calculate_invoice_endpoint(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+
+
+@router.post(
+    "/quotes/{quote_id}/advance-invoices/calculate",
+    response_model=AdvanceCalculationRead,
+    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+)
+async def calculate_advance_placeholder(
+    quote_id: uuid.UUID,
+    body: AdvanceCalculationRequest,
+    user: User = Depends(current_mfa_user),
+) -> AdvanceCalculationRead:
+    """Publish the dedicated M12 intent without silently accepting it in Standard pricing."""
+    _owner_only(user)
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Advance calculation lands in M12 Step 3.",
+    )
+
+
+@router.post(
+    "/invoices/{source_invoice_id}/credit-notes/calculate",
+    response_model=CreditCalculationRead,
+    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+)
+async def calculate_credit_placeholder(
+    source_invoice_id: uuid.UUID,
+    body: CreditCalculationRequest,
+    user: User = Depends(current_mfa_user),
+) -> CreditCalculationRead:
+    """Publish the dedicated M12 intent without silently accepting it in Standard pricing."""
+    _owner_only(user)
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Credit calculation lands in M12 Step 5.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +295,19 @@ async def transition_status_endpoint(
     _owner_only(user)
     company_id = _require_company_id(user)
     try:
-        inv = await transition_status(session, invoice_id, company_id, body)
+        inv = await transition_status(
+            session, invoice_id, company_id, body, issued_by_user_id=user.id
+        )
+    except NumberSequenceExhaustedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except InvoiceLifecycleConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -328,6 +382,7 @@ async def send_invoice_email_endpoint(
 
     _owner_only(user)
     company_id = _require_company_id(user)
+    await set_rls_company(session, company_id)
 
     # -- Load invoice scoped to company (cross-company → 404) ------------------
     stmt = (

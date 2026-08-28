@@ -39,7 +39,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jai.db import Base
-from jai.models._enums import DiscountType, InvoiceTaxMode, QuoteStatus
+from jai.models._enums import DiscountType, InvoiceTaxMode, QuoteSettlementMode, QuoteStatus
 
 if TYPE_CHECKING:
     pass
@@ -87,6 +87,12 @@ class Quote(Base):
     # -- Lifecycle status (no paid dimension for quotes) ----------------------
     status: Mapped[QuoteStatus] = mapped_column(
         nullable=False, server_default="DRAFT"
+    )
+    settlement_mode: Mapped[QuoteSettlementMode] = mapped_column(
+        nullable=False, server_default="UNSET"
+    )
+    settlement_mode_locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # -- Convert reverse link -------------------------------------------------

@@ -38,10 +38,18 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jai.db import Base
-from jai.models._enums import DiscountType, InvoicePaidStatus, InvoiceStatus, InvoiceTaxMode
+from jai.models._enums import (
+    DiscountType,
+    InvoiceCreditStatus,
+    InvoiceDocumentKind,
+    InvoicePaidStatus,
+    InvoiceSettlementStatus,
+    InvoiceStatus,
+    InvoiceTaxMode,
+)
 
 if TYPE_CHECKING:
-    pass
+    from jai.models.document import InvoiceCreditBasisLine, InvoicePartySnapshot
 
 # ---------------------------------------------------------------------------
 # Money column type alias for readability
@@ -96,6 +104,22 @@ class Invoice(Base):
     # -- Dates ----------------------------------------------------------------
     invoice_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    supply_or_advance_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    document_kind: Mapped[InvoiceDocumentKind] = mapped_column(
+        nullable=False, server_default="STANDARD"
+    )
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quote.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="M12 authoritative quote provenance; converted_invoice_id remains compatible.",
+    )
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    issued_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
 
     # -- Lifecycle status -----------------------------------------------------
     status: Mapped[InvoiceStatus] = mapped_column(
@@ -150,6 +174,23 @@ class Invoice(Base):
     vat_total: Mapped[object] = mapped_column(_MONEY, nullable=False)
     total_incl_vat: Mapped[object] = mapped_column(_MONEY, nullable=False)
     due_amount: Mapped[object] = mapped_column(_MONEY, nullable=False)
+    payable_before_payments: Mapped[object] = mapped_column(
+        _MONEY, nullable=False, server_default=text("0")
+    )
+    incoming_payment_total: Mapped[object] = mapped_column(
+        _MONEY, nullable=False, server_default=text("0")
+    )
+    credited_total: Mapped[object] = mapped_column(_MONEY, nullable=False, server_default=text("0"))
+    refunded_total: Mapped[object] = mapped_column(_MONEY, nullable=False, server_default=text("0"))
+    refund_due_amount: Mapped[object] = mapped_column(
+        _MONEY, nullable=False, server_default=text("0")
+    )
+    settlement_status: Mapped[InvoiceSettlementStatus] = mapped_column(
+        nullable=False, server_default="OPEN"
+    )
+    credit_status: Mapped[InvoiceCreditStatus] = mapped_column(
+        nullable=False, server_default="NOT_CREDITED"
+    )
 
     # -- Base-currency mirrors (M5: same as above, exchange_rate = 1) --------
     base_subtotal_excl_vat: Mapped[object] = mapped_column(_MONEY, nullable=False)
@@ -158,6 +199,21 @@ class Invoice(Base):
     base_vat_total: Mapped[object] = mapped_column(_MONEY, nullable=False)
     base_total_incl_vat: Mapped[object] = mapped_column(_MONEY, nullable=False)
     base_due_amount: Mapped[object] = mapped_column(_MONEY, nullable=False)
+    base_payable_before_payments: Mapped[object] = mapped_column(
+        _MONEY, nullable=False, server_default=text("0")
+    )
+    base_incoming_payment_total: Mapped[object] = mapped_column(
+        _MONEY, nullable=False, server_default=text("0")
+    )
+    base_credited_total: Mapped[object] = mapped_column(
+        _MONEY, nullable=False, server_default=text("0")
+    )
+    base_refunded_total: Mapped[object] = mapped_column(
+        _MONEY, nullable=False, server_default=text("0")
+    )
+    base_refund_due_amount: Mapped[object] = mapped_column(
+        _MONEY, nullable=False, server_default=text("0")
+    )
 
     # -- Content block snapshot text (M6 step 4) -----------------------------
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -192,6 +248,13 @@ class Invoice(Base):
         "InvoiceTax",
         cascade="all, delete-orphan",
         lazy="selectin",
+    )
+    party_snapshot: Mapped[InvoicePartySnapshot | None] = relationship(
+        "InvoicePartySnapshot", cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+    credit_basis_lines: Mapped[list[InvoiceCreditBasisLine]] = relationship(
+        "InvoiceCreditBasisLine", cascade="all, delete-orphan", lazy="selectin",
+        order_by="InvoiceCreditBasisLine.sort_order",
     )
 
     # -- Table constraints ----------------------------------------------------

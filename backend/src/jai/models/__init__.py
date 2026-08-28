@@ -10,6 +10,7 @@ from jai.models.content import (  # noqa: F401
 )
 from jai.models.customer import Customer  # noqa: F401
 from jai.models.dictionary import ExpenseCategory, PaymentMethod, Unit  # noqa: F401
+from jai.models.document import InvoiceCreditBasisLine, InvoicePartySnapshot  # noqa: F401
 from jai.models.email_log import EmailLog  # noqa: F401
 from jai.models.estimate import Estimate, EstimateGroup, EstimateLine  # noqa: F401
 from jai.models.expense import Expense  # noqa: F401

@@ -32,14 +32,16 @@ import re
 import uuid
 from datetime import date
 from decimal import Decimal
+from typing import NoReturn
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.models._enums import NumberSequenceScope
+from jai.models.invoice import Invoice
 from jai.models.number_sequence import NumberSequence
-from jai.schemas.setting import InvoiceNumberingConfig, QuoteNumberingConfig
+from jai.schemas.setting import CreditNumberingConfig, InvoiceNumberingConfig, QuoteNumberingConfig
 
 # ---------------------------------------------------------------------------
 # Placeholder regex
@@ -54,6 +56,37 @@ _SAFE_DATE_FORMAT_RE = re.compile(r"^[A-Za-z0-9%\-_ ]+$")
 # Document type constants.
 DOCUMENT_TYPE_INVOICE = "INVOICE"
 DOCUMENT_TYPE_QUOTE = "QUOTE"
+DOCUMENT_TYPE_CREDIT_NOTE = "CREDIT_NOTE"
+POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807
+
+
+class NumberSequenceExhaustedError(ValueError):
+    """A legal document-number series has no representable free candidate."""
+
+    code = "NUMBER_SEQUENCE_EXHAUSTED"
+
+
+def _raise_sequence_exhausted() -> NoReturn:
+    raise NumberSequenceExhaustedError(
+        "No document number is available in this sequence. Advance or change its template."
+    )
+
+
+async def _lock_invoice_number_namespace(
+    session: AsyncSession, company_id: uuid.UUID
+) -> None:
+    """Serialize every writer of the shared ``invoice_number`` namespace.
+
+    Invoice and Credit Note counters intentionally remain independent, but a
+    custom template can render the same string from either counter.  A
+    transaction-scoped advisory lock covers the check, allocation and caller's
+    eventual INSERT, so a Standard/Credit race is observed as a normal occupied
+    number and advances the losing counter instead of leaking an IntegrityError.
+    """
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:company_id AS text), 0))"),
+        {"company_id": str(company_id)},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +128,17 @@ def needs_sequence_placeholder(template: str) -> bool:
         if re.fullmatch(r"SEQUENCE:\d+", token):
             return True
     return False
+
+
+def validate_credit_template(template: str) -> None:
+    """Validate the smaller, company-scoped Credit Note template language."""
+    validate_template(template)
+    for match in _PLACEHOLDER_RE.finditer(template):
+        token = match.group(1).strip()
+        if token == "CUSTOMER_SERIES" or re.fullmatch(r"CUSTOMER_SEQUENCE:\d+", token):
+            raise ValueError(
+                "Credit Note numbering does not support customer-scoped placeholders."
+            )
 
 
 def render_template(
@@ -367,6 +411,7 @@ async def allocate_invoice_number(
 
     # Validate template before touching the DB
     validate_template(template)
+    await _lock_invoice_number_namespace(session, company_id)
 
     # --- Company-scope sequence -----------------------------------------
     await _upsert_company_sequence(
@@ -375,33 +420,64 @@ async def allocate_invoice_number(
     company_seq_row = await _lock_company_sequence(
         session, company_id, DOCUMENT_TYPE_INVOICE
     )
-    allocated_company = company_seq_row.next_value
-    company_seq_row.next_value = allocated_company + 1
-    await session.flush()
-
     # --- Customer-scope sequence (only if template demands it) ----------
-    customer_seq_value: int | None = None
+    # Both Standard and Credit numbers share Invoice.invoice_number's unique
+    # namespace.  Keep the advisory lock until the caller inserts/commits, and
+    # advance *both* counters for every occupied candidate so a skipped company
+    # suffix never becomes paired with a stale customer suffix.
+    customer_seq_row: NumberSequence | None = None
     if needs_customer_sequence(template):
         await _upsert_customer_sequence(
             session, company_id, DOCUMENT_TYPE_INVOICE, customer_id
         )
-        cust_seq_row = await _lock_customer_sequence(
+        customer_seq_row = await _lock_customer_sequence(
             session, company_id, DOCUMENT_TYPE_INVOICE, customer_id
         )
-        customer_seq_value = cust_seq_row.next_value
-        cust_seq_row.next_value = customer_seq_value + 1
-        await session.flush()
-
-    # --- Render ---------------------------------------------------------
-    invoice_number = render_template(
-        template,
-        sequence=allocated_company,
-        customer_series=customer_invoice_prefix,
-        customer_sequence=customer_seq_value,
-        invoice_date=invoice_date,
-    )
-
-    return invoice_number, allocated_company, customer_seq_value
+    for _ in range(1000):
+        allocated_company = company_seq_row.next_value
+        if allocated_company > POSTGRES_BIGINT_MAX:
+            _raise_sequence_exhausted()
+        customer_seq_value: int | None = None
+        if customer_seq_row is not None:
+            customer_seq_value = customer_seq_row.next_value
+            if customer_seq_value > POSTGRES_BIGINT_MAX:
+                _raise_sequence_exhausted()
+        invoice_number = render_template(
+            template,
+            sequence=allocated_company,
+            customer_series=customer_invoice_prefix,
+            customer_sequence=customer_seq_value,
+            invoice_date=invoice_date,
+        )
+        # An existing Credit can have used a custom template which overlaps a
+        # Standard template (or vice versa).  The namespace lock serialises
+        # the check with both allocators; the caller's INSERT remains in this
+        # transaction, so no post-allocation insertion window exists.
+        exists = await session.scalar(
+            select(Invoice.id).where(
+                Invoice.company_id == company_id, Invoice.invoice_number == invoice_number
+            ).limit(1)
+        )
+        if exists is None:
+            # BIGINT's last legal value is allocatable.  Leave the counter at
+            # that value; a subsequent request observes the occupied candidate
+            # and returns the stable exhaustion error without an overflow write.
+            if allocated_company < POSTGRES_BIGINT_MAX:
+                company_seq_row.next_value = allocated_company + 1
+            if customer_seq_row is not None and customer_seq_value is not None:
+                if customer_seq_value < POSTGRES_BIGINT_MAX:
+                    customer_seq_row.next_value = customer_seq_value + 1
+            await session.flush()
+            return invoice_number, allocated_company, customer_seq_value
+        if (
+            allocated_company == POSTGRES_BIGINT_MAX
+            or customer_seq_value == POSTGRES_BIGINT_MAX
+        ):
+            _raise_sequence_exhausted()
+        company_seq_row.next_value = allocated_company + 1
+        if customer_seq_row is not None and customer_seq_value is not None:
+            customer_seq_row.next_value = customer_seq_value + 1
+    _raise_sequence_exhausted()
 
 
 async def get_next_sequence_info(
@@ -509,6 +585,110 @@ async def advance_sequence(
     except ValueError:
         preview = "<invalid template>"
 
+    return new_next_value, preview
+
+
+async def allocate_credit_number(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    credit_date: date,
+    *,
+    numbering_config: CreditNumberingConfig,
+) -> tuple[str, int]:
+    """Allocate an independent, company-scoped Credit Note number safely."""
+    validate_credit_template(numbering_config.template)
+    await _lock_invoice_number_namespace(session, company_id)
+    await _upsert_company_sequence(
+        session, company_id, DOCUMENT_TYPE_CREDIT_NOTE, numbering_config.sequence_start
+    )
+    row = await _lock_company_sequence(session, company_id, DOCUMENT_TYPE_CREDIT_NOTE)
+    for _ in range(1000):
+        allocated = row.next_value
+        if allocated > POSTGRES_BIGINT_MAX:
+            _raise_sequence_exhausted()
+        number = render_template(
+            numbering_config.template,
+            sequence=allocated,
+            customer_series=None,
+            customer_sequence=None,
+            invoice_date=credit_date,
+        )
+        # The shared invoice number unique constraint covers Standard and
+        # Credit strings.  A custom Credit template may overlap a legacy
+        # Standard string, so advance under the locked sequence and retry.
+        exists = await session.scalar(
+            select(Invoice.id).where(
+                Invoice.company_id == company_id, Invoice.invoice_number == number
+            ).limit(1)
+        )
+        if exists is None:
+            if allocated < POSTGRES_BIGINT_MAX:
+                row.next_value = allocated + 1
+            await session.flush()
+            return number, allocated
+        if allocated == POSTGRES_BIGINT_MAX:
+            _raise_sequence_exhausted()
+        row.next_value = allocated + 1
+    _raise_sequence_exhausted()
+
+
+async def get_next_credit_sequence_info(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    credit_date: date,
+    *,
+    numbering_config: CreditNumberingConfig,
+) -> tuple[int, str]:
+    """Preview the separate Credit Note counter without mutating it."""
+    try:
+        validate_credit_template(numbering_config.template)
+    except ValueError:
+        return numbering_config.sequence_start, f"<invalid template: {numbering_config.template}>"
+    row = (
+        await session.execute(
+            select(NumberSequence).where(
+                NumberSequence.company_id == company_id,
+                NumberSequence.document_type == DOCUMENT_TYPE_CREDIT_NOTE,
+                NumberSequence.scope == NumberSequenceScope.COMPANY,
+            )
+        )
+    ).scalar_one_or_none()
+    next_value = row.next_value if row is not None else numbering_config.sequence_start
+    return (
+        next_value,
+        render_template(
+            numbering_config.template,
+            sequence=next_value,
+            customer_series=None,
+            customer_sequence=None,
+            invoice_date=credit_date,
+        ),
+    )
+
+
+async def advance_credit_sequence(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    new_next_value: int,
+    *,
+    numbering_config: CreditNumberingConfig,
+) -> tuple[int, str]:
+    """Forward-skip the independent Credit Note counter."""
+    validate_credit_template(numbering_config.template)
+    await _upsert_company_sequence(
+        session, company_id, DOCUMENT_TYPE_CREDIT_NOTE, numbering_config.sequence_start
+    )
+    row = await _lock_company_sequence(session, company_id, DOCUMENT_TYPE_CREDIT_NOTE)
+    if new_next_value <= row.next_value:
+        raise ValueError(
+            f"Can only advance the sequence forward. Current next value is {row.next_value}; "
+            f"requested {new_next_value}."
+        )
+    row.next_value = new_next_value
+    await session.flush()
+    _, preview = await get_next_credit_sequence_info(
+        session, company_id, date.today(), numbering_config=numbering_config
+    )
     return new_next_value, preview
 
 

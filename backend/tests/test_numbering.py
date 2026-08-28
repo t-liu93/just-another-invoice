@@ -18,6 +18,7 @@ from jai.services.numbering import (
     needs_customer_sequence,
     needs_sequence_placeholder,
     render_template,
+    validate_credit_template,
     validate_template,
 )
 
@@ -70,6 +71,15 @@ class TestValidateTemplate:
         validate_template(
             "{{SERIES:FACT}}-{{DATE:%Y}}-{{SEQUENCE:6}}"
         )  # no error
+
+
+class TestValidateCreditTemplate:
+    def test_rejects_customer_scoped_placeholders_before_persisting(self) -> None:
+        with pytest.raises(ValueError, match="does not support"):
+            validate_credit_template("{{SERIES:CR}}-{{CUSTOMER_SEQUENCE:4}}-{{SEQUENCE:4}}")
+
+    def test_keeps_company_scoped_template(self) -> None:
+        validate_credit_template("{{SERIES:CR}}-{{DATE:%Y}}-{{SEQUENCE:4}}")
 
 
 # ---------------------------------------------------------------------------

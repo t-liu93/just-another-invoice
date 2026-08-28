@@ -5,9 +5,8 @@ The module exposes:
 - ``Base`` – the SQLAlchemy declarative base that all ORM models inherit from.
 - ``get_engine`` / ``get_session_maker`` – lazy singletons (created on first call).
 - ``get_session`` – a FastAPI dependency that yields an ``AsyncSession``.
-- ``set_rls_company`` / ``reset_rls`` – **placeholder** hooks for future
-  row-level-security (multi-tenant) support.  Currently no-ops; will be
-  implemented when RLS is introduced in a later milestone.
+- ``set_rls_company`` / ``reset_rls`` – transaction-local tenant context for
+  RLS-protected document snapshots.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -75,21 +75,27 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 # ---------------------------------------------------------------------------
-# RLS placeholder hooks (multi-tenant support – future milestone)
+# RLS session context
 # ---------------------------------------------------------------------------
 
 async def set_rls_company(session: AsyncSession, company_id: uuid.UUID) -> None:
     """Set the current tenant for row-level-security.
 
-    **Placeholder** – currently a no-op.  Will be implemented when RLS is
-    introduced in a later milestone.  The intended behaviour is to execute
-    ``SET LOCAL jai.company_id = <uuid>`` on the session so that PostgreSQL
-    RLS policies can filter rows transparently.
+    The setting is transaction-local, so pooled connections cannot leak a
+    previous tenant into the next request.
     """
+    await session.execute(
+        text("SELECT set_config('jai.company_id', :company_id, true)"),
+        {"company_id": str(company_id)},
+    )
 
 
 async def reset_rls(session: AsyncSession) -> None:
     """Reset the RLS context after a request.
 
-    **Placeholder** – currently a no-op.
+    ``RESET`` deliberately leaves PostgreSQL's custom GUC as an empty string.
+    The policies therefore use ``NULLIF(current_setting(...), '')``.  Reset is
+    still useful for long-lived explicit transactions and documents the pool
+    boundary; callers must set a company again for every transaction.
     """
+    await session.execute(text("RESET jai.company_id"))

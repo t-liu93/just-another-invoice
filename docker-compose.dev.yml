@@ -14,6 +14,9 @@
 name: jai-dev
 
 services:
+  db-role-provision:
+    container_name: jai-db-role-provision-dev
+
   db-migration:
     container_name: jai-db-migration-dev
     build: .

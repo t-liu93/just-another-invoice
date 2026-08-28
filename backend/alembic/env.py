@@ -28,11 +28,16 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override alembic.ini's empty sqlalchemy.url with the app's configured URL,
-# unless the caller passed -x url=... on the CLI (lets tests point elsewhere).
-_x_args = context.get_x_argument(as_dictionary=True)
-_url = _x_args.get("url") or get_settings().database_url
-config.set_main_option("sqlalchemy.url", _url)
+# Override alembic.ini's empty sqlalchemy.url with a migration-owner URL.
+# DATABASE_MIGRATION_URL wins for role-specific external deployments;
+# DATABASE_URL remains a compatibility override for existing host commands.
+# Otherwise Settings safely builds the URL from POSTGRES_MIGRATION_* parts.
+_url = get_settings().migration_database_url
+# Alembic stores options in ConfigParser, where percent signs are interpolation
+# markers. URL.create() correctly percent-encodes reserved password characters,
+# so escape them only for ConfigParser; ``get_section`` restores the real URL
+# before SQLAlchemy opens the connection.
+config.set_main_option("sqlalchemy.url", _url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 
