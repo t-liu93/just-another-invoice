@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-里程碑 M0–M10 已完成（认证、设置、客户、目录、发票、报价、成本核算、收款、开支、PDF/邮件、报表 + 荷兰 BTW 申报）。M11（私人交通工具商业里程支出）已完成规划、待实现；后续 M12 为自托管收尾（备份、i18n 补全、文档）。详见 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
+截至 M11.5 的里程碑均已完成。M12 是当前规划中的 Standard/Advance/Final Invoice 与 Credit Note 里程碑；后续 M13 为自托管收尾（备份、i18n 补全、文档）。详见 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
 
 ## 文档
 
