@@ -34,6 +34,7 @@ from jai.schemas.setting import SmtpSettings
 from jai.services.email import (
     _build_template_context,
     _send_mail,
+    payment_receipt_email_template,
 )
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,18 @@ def _smtp() -> SmtpSettings:
         use_tls=True,
         use_ssl=False,
     )
+
+
+def test_payment_receipt_defaults_are_localized_and_independent() -> None:
+    """Receipt mail defaults are distinct from invoice/quote Settings templates."""
+    en = payment_receipt_email_template("en")
+    zh = payment_receipt_email_template("zh")
+
+    assert en.subject == "Payment receipt for {DOCUMENT_NUMBER} from {COMPANY_NAME}"
+    assert "payment receipt" in en.body.lower()
+    assert zh.subject == "{COMPANY_NAME} 的收款收据（{DOCUMENT_NUMBER}）"
+    assert "收款收据" in zh.body
+    assert payment_receipt_email_template("unexpected") == en
 
 
 # ---------------------------------------------------------------------------

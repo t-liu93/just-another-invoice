@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pyotp
 import pypdfium2
@@ -21,6 +22,8 @@ from jai.main import app
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment, PaymentTax
 from jai.models.quote import Quote
+from jai.schemas.setting import SmtpSettings
+from jai.services import email as email_service
 from jai.services import pdf as pdf_service
 from jai.services.payment import delete_payment
 
@@ -61,19 +64,26 @@ async def _create_customer(
     *,
     name: str = "Deposit Customer",
     country_code: str = "NL",
+    email: str | None = None,
+    locale: str | None = None,
 ) -> str:
+    payload: dict[str, object] = {
+        "name": name,
+        "addresses": [
+            {
+                "type": "BILLING",
+                "country_code": country_code,
+                "city": "Amsterdam",
+            }
+        ],
+    }
+    if email is not None:
+        payload["email"] = email
+    if locale is not None:
+        payload["locale"] = locale
     response = await client.post(
         "/api/v1/customers",
-        json={
-            "name": name,
-            "addresses": [
-                {
-                    "type": "BILLING",
-                    "country_code": country_code,
-                    "city": "Amsterdam",
-                }
-            ],
-        },
+        json=payload,
     )
     assert response.status_code == 201, response.text
     return response.json()["id"]
@@ -170,6 +180,19 @@ async def _create_invoice(client: AsyncClient, customer_id: str, rate_id: str) -
     issued = await client.post(f"/api/v1/invoices/{invoice['id']}/status", json={"status": "SENT"})
     assert issued.status_code == 200, issued.text
     return issued.json()
+
+
+def _smtp() -> SmtpSettings:
+    return SmtpSettings(
+        host="smtp.example.com",
+        port=587,
+        username="smtp-user",
+        password="smtp-secret",
+        from_email="sender@example.com",
+        from_name="Receipt Test",
+        use_tls=True,
+        use_ssl=False,
+    )
 
 
 def _tax_amounts(item: dict) -> tuple[Decimal, Decimal, Decimal]:
@@ -579,6 +602,11 @@ class TestQuotePaymentCrud:
                     {"payment_date": "2026-01-16", "amount": "30.00"},
                 ),
                 ("delete", f"/api/v1/payments/{payment_id}", None),
+                (
+                    "post",
+                    f"/api/v1/payments/{payment_id}/send-receipt",
+                    {"to": "customer@example.com"},
+                ),
             ):
                 request = getattr(db_client, method)
                 response = (
@@ -611,6 +639,11 @@ class TestQuotePaymentCrud:
                     {"payment_date": "2026-01-16", "amount": "30.00"},
                 ),
                 ("delete", f"/api/v1/payments/{payment_id}", None),
+                (
+                    "post",
+                    f"/api/v1/payments/{payment_id}/send-receipt",
+                    {"to": "customer@example.com"},
+                ),
             ):
                 request = getattr(db_client, method)
                 response = (
@@ -1159,13 +1192,13 @@ class TestQuotePaymentConversion:
         for expected in (
             quote["quote_number"],
             "NOT A VAT INVOICE",
-            "非 VAT 发票",
             "8000.00",
             "1600.00",
             "5600.00",
             "2400.00",
         ):
             assert expected in before_text, expected
+        assert "非 VAT 发票" not in before_text
 
         converted = await db_client.post(f"/api/v1/quotes/{quote['id']}/convert")
         assert converted.status_code == 201, converted.text
@@ -1180,13 +1213,13 @@ class TestQuotePaymentConversion:
         for expected in (
             quote["quote_number"],
             "NOT A VAT INVOICE",
-            "非 VAT 发票",
             "8000.00",
             "1600.00",
             "5600.00",
             "2400.00",
         ):
             assert expected in after_text, expected
+        assert "非 VAT 发票" not in after_text
 
         final_invoice = await db_client.get(
             f"/api/v1/invoices/{converted.json()['id']}/pdf?locale=en"
@@ -1587,6 +1620,245 @@ class TestPdfPaymentSnapshot:
 
         assert deleted.deleted is True
 
+
+@pytest.mark.integration
+class TestPaymentReceiptEmail:
+    """Receipt send API preserves immutable payment provenance and mail safety."""
+
+    async def test_quote_receipt_email_uses_quote_source_and_selected_locale(
+        self, db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        quote = await _create_quote(
+            db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
+        )
+        await _accept_quote(db_client, quote["id"])
+        payment = await _record(db_client, quote["id"], "60.00", "2026-02-01")
+        payment_id = payment["items"][0]["id"]
+        render = AsyncMock(return_value=(b"%PDF-1.4 receipt-zh", "receipt-Q.pdf"))
+        send = AsyncMock()
+        monkeypatch.setattr(pdf_service, "render_payment_receipt_pdf", render)
+        monkeypatch.setattr(email_service, "_get_smtp_config", AsyncMock(return_value=_smtp()))
+        monkeypatch.setattr(email_service, "_send_mail", send)
+
+        response = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={"to": "customer@example.com", "locale": "zh"},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["related_type"] == "QUOTE"
+        assert payload["related_id"] == quote["id"]
+        assert payload["locale"] == "zh"
+        assert payload["subject"] == f"Deposit Test Co 的收款收据（{quote['quote_number']}）"
+        assert render.await_args.kwargs["locale"] == "zh"
+        assert send.await_args.kwargs["attachment_bytes"] == b"%PDF-1.4 receipt-zh"
+
+        converted = await db_client.post(f"/api/v1/quotes/{quote['id']}/convert")
+        assert converted.status_code == 201, converted.text
+        second = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={"to": "customer@example.com"},
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["related_type"] == "QUOTE"
+        assert second.json()["related_id"] == quote["id"]
+
+    async def test_receipt_email_sends_real_localized_attachment_and_keeps_provenance(
+        self, db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The send endpoint attaches the real renderer output, not a stub."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(
+            db_client, email="zh@example.com", locale="zh"
+        )
+        quote = await _create_quote(
+            db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
+        )
+        await _accept_quote(db_client, quote["id"])
+        payment = await _record(db_client, quote["id"], "60.00", "2026-02-01")
+        payment_id = payment["items"][0]["id"]
+        attachments: list[tuple[bytes, str]] = []
+
+        async def capture_send(**kwargs: object) -> None:
+            attachments.append((kwargs["attachment_bytes"], kwargs["attachment_filename"]))  # type: ignore[arg-type]
+
+        monkeypatch.setattr(email_service, "_get_smtp_config", AsyncMock(return_value=_smtp()))
+        monkeypatch.setattr(email_service, "_send_mail", capture_send)
+
+        zh = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={"to": "zh@example.com"},
+        )
+        assert zh.status_code == 200, zh.text
+        zh_text = _extract_pdf_text(attachments[-1][0])
+        assert "非 VAT 发票" in zh_text
+        assert "NOT A VAT INVOICE" not in zh_text
+        assert attachments[-1][1].startswith(f"receipt-{quote['quote_number']}-")
+
+        converted = await db_client.post(f"/api/v1/quotes/{quote['id']}/convert")
+        assert converted.status_code == 201, converted.text
+        en = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={"to": "zh@example.com", "locale": "en"},
+        )
+        assert en.status_code == 200, en.text
+        assert en.json()["related_type"] == "QUOTE"
+        assert en.json()["related_id"] == quote["id"]
+        en_text = _extract_pdf_text(attachments[-1][0])
+        assert "NOT A VAT INVOICE" in en_text
+        assert "非 VAT 发票" not in en_text
+        assert attachments[-1][1].startswith(f"receipt-{quote['quote_number']}-")
+
+        invoice_customer = await _create_customer(db_client, email="invoice@example.com")
+        invoice = await _create_invoice(
+            db_client, invoice_customer, seeds["rates"]["NL standard (21%)"]["id"]
+        )
+        recorded = await db_client.post(
+            f"/api/v1/invoices/{invoice['id']}/payments",
+            json={"payment_date": "2026-02-01", "amount": "60.00"},
+        )
+        invoice_payment_id = recorded.json()["items"][0]["id"]
+        invoice_send = await db_client.post(
+            f"/api/v1/payments/{invoice_payment_id}/send-receipt",
+            json={"to": "invoice@example.com"},
+        )
+        assert invoice_send.status_code == 200, invoice_send.text
+        invoice_text = _extract_pdf_text(attachments[-1][0])
+        assert "NOT A VAT INVOICE" not in invoice_text
+        assert "非 VAT 发票" not in invoice_text
+
+    async def test_receipt_email_real_renderer_falls_back_to_english(
+        self, db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No request/customer/company locale override falls back to English."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        # The fresh company has no persisted document-defaults setting, and this
+        # customer deliberately has no locale either.
+        customer_id = await _create_customer(db_client, email="fallback@example.com")
+        quote = await _create_quote(
+            db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
+        )
+        await _accept_quote(db_client, quote["id"])
+        payment = await _record(db_client, quote["id"], "60.00", "2026-02-01")
+        payment_id = payment["items"][0]["id"]
+        attachments: list[tuple[bytes, str]] = []
+
+        async def capture_send(**kwargs: object) -> None:
+            attachments.append((kwargs["attachment_bytes"], kwargs["attachment_filename"]))  # type: ignore[arg-type]
+
+        monkeypatch.setattr(email_service, "_get_smtp_config", AsyncMock(return_value=_smtp()))
+        monkeypatch.setattr(email_service, "_send_mail", capture_send)
+
+        response = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={"to": "fallback@example.com"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["locale"] == "en"
+        text = _extract_pdf_text(attachments[-1][0])
+        assert "NOT A VAT INVOICE" in text
+        assert "非 VAT 发票" not in text
+        assert attachments[-1][1].startswith(f"receipt-{quote['quote_number']}-")
+
+    async def test_invoice_receipt_email_defaults_custom_body_and_failure_safety(
+        self, db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        invoice = await _create_invoice(
+            db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
+        )
+        recorded = await db_client.post(
+            f"/api/v1/invoices/{invoice['id']}/payments",
+            json={"payment_date": "2026-02-01", "amount": "60.00"},
+        )
+        assert recorded.status_code == 201, recorded.text
+        payment_id = recorded.json()["items"][0]["id"]
+        monkeypatch.setattr(
+            pdf_service,
+            "render_payment_receipt_pdf",
+            AsyncMock(return_value=(b"%PDF-1.4 receipt-en", "receipt-I.pdf")),
+        )
+        monkeypatch.setattr(email_service, "_get_smtp_config", AsyncMock(return_value=_smtp()))
+        monkeypatch.setattr(email_service, "_send_mail", AsyncMock())
+
+        response = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={
+                "to": "customer@example.com",
+                "subject": "Due {AMOUNT_DUE} for {DOCUMENT_NUMBER}",
+                "body": "<script>bad()</script>Receipt for {DOCUMENT_NUMBER}; due {AMOUNT_DUE}",
+            },
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["related_type"] == "INVOICE"
+        assert payload["related_id"] == invoice["id"]
+        assert payload["locale"] == "en"
+        assert payload["subject"] == f"Due 61.000 for {invoice['invoice_number']}"
+        assert "<script>" not in payload["body_snapshot"]
+        assert invoice["invoice_number"] in payload["body_snapshot"]
+        assert "due 61.000" in payload["body_snapshot"]
+
+        async def fail_send(*_args: object, **_kwargs: object) -> None:
+            raise ConnectionError("smtp-secret smtp-user rejected")
+
+        monkeypatch.setattr(email_service, "_send_mail", fail_send)
+        failed = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={"to": "customer@example.com"},
+        )
+        assert failed.status_code == 200, failed.text
+        assert failed.json()["status"] == "FAILED"
+        assert "smtp-secret" not in failed.json()["error_message"]
+        assert "smtp-user" not in failed.json()["error_message"]
+
+    async def test_receipt_email_unconfigured_and_missing_are_safe(
+        self, db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        invoice = await _create_invoice(
+            db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
+        )
+        recorded = await db_client.post(
+            f"/api/v1/invoices/{invoice['id']}/payments",
+            json={"payment_date": "2026-02-01", "amount": "60.00"},
+        )
+        assert recorded.status_code == 201, recorded.text
+        payment_id = recorded.json()["items"][0]["id"]
+        monkeypatch.setattr(
+            pdf_service,
+            "render_payment_receipt_pdf",
+            AsyncMock(return_value=(b"%PDF", "receipt-I.pdf")),
+        )
+        monkeypatch.setattr(email_service, "_get_smtp_config", AsyncMock(return_value=None))
+
+        unconfigured = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={"to": "customer@example.com"},
+        )
+        assert unconfigured.status_code == 400
+        assert "SMTP" in unconfigured.json()["detail"]
+        logs = await db_client.get(f"/api/v1/invoices/{invoice['id']}/emails")
+        assert logs.status_code == 200
+        assert logs.json()["items"] == []
+
+        missing = await db_client.post(
+            f"/api/v1/payments/{uuid.uuid4()}/send-receipt",
+            json={"to": "customer@example.com"},
+        )
+        assert missing.status_code == 404
+
     async def test_invoice_receipt_waits_for_current_payment_delete(
         self,
         db_client: AsyncClient,
@@ -1649,6 +1921,61 @@ class TestPdfPaymentSnapshot:
                 deleted = await asyncio.wait_for(delete_task, timeout=2)
 
         assert deleted.deleted is True
+
+    async def test_receipt_endpoint_releases_snapshot_locks_before_slow_smtp(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A writer waits for the snapshot, but never for SMTP network I/O."""
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        invoice = await _create_invoice(
+            db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
+        )
+        recorded = await db_client.post(
+            f"/api/v1/invoices/{invoice['id']}/payments",
+            json={
+                "payment_date": "2026-02-01",
+                "amount": "60.00",
+                "reference": "SMTP-SNAPSHOT",
+            },
+        )
+        payment_id = uuid.UUID(recorded.json()["items"][0]["id"])
+        company_id = uuid.UUID(seeds["company_id"])
+        smtp_entered = asyncio.Event()
+        release_smtp = asyncio.Event()
+        sent_attachments: list[bytes] = []
+
+        async def slow_send(**kwargs: object) -> None:
+            sent_attachments.append(kwargs["attachment_bytes"])  # type: ignore[arg-type]
+            smtp_entered.set()
+            await release_smtp.wait()
+
+        monkeypatch.setattr(email_service, "_get_smtp_config", AsyncMock(return_value=_smtp()))
+        monkeypatch.setattr(email_service, "_send_mail", slow_send)
+        monkeypatch.setattr(pdf_service, "html_to_pdf", lambda html: html.encode())
+
+        send_task = asyncio.create_task(
+            db_client.post(
+                f"/api/v1/payments/{payment_id}/send-receipt",
+                json={"to": "customer@example.com"},
+            )
+        )
+        await asyncio.wait_for(smtp_entered.wait(), timeout=2)
+
+        async with db_session_maker() as writer_session:
+            deleted = await asyncio.wait_for(
+                delete_payment(writer_session, payment_id, company_id), timeout=2
+            )
+        assert deleted.deleted is True
+        assert b"SMTP-SNAPSHOT" in sent_attachments[0]
+
+        release_smtp.set()
+        response = await asyncio.wait_for(send_task, timeout=2)
+        assert response.status_code == 200, response.text
 
     async def test_quote_receipt_waits_for_current_payment_delete(
         self,

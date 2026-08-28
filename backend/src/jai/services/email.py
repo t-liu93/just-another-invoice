@@ -83,6 +83,47 @@ _ALLOWED_TOKENS: frozenset[str] = frozenset(
 #: Regex matching any ``{TOKEN_NAME}`` placeholder.
 _PLACEHOLDER_RE = re.compile(r"\{([A-Z_]+)\}")
 
+
+# ---------------------------------------------------------------------------
+# Payment-receipt defaults
+# ---------------------------------------------------------------------------
+
+# Receipt mail is deliberately separate from the configurable invoice/quote
+# templates.  A receipt has different legal wording and must never fall back
+# to an invoice or quote message merely because the user has not customised a
+# template in Settings.
+_PAYMENT_RECEIPT_EMAIL_TEMPLATES: dict[str, EmailTemplate] = {
+    "en": EmailTemplate(
+        subject="Payment receipt for {DOCUMENT_NUMBER} from {COMPANY_NAME}",
+        body=(
+            "Dear {CUSTOMER_NAME},\n\n"
+            "Please find the payment receipt for {DOCUMENT_NUMBER} attached.\n\n"
+            "Kind regards,\n{COMPANY_NAME}"
+        ),
+    ),
+    "zh": EmailTemplate(
+        subject="{COMPANY_NAME} 的收款收据（{DOCUMENT_NUMBER}）",
+        body=(
+            "尊敬的 {CUSTOMER_NAME}：\n\n"
+            "随信附上 {DOCUMENT_NUMBER} 的收款收据。\n\n"
+            "此致\n{COMPANY_NAME}"
+        ),
+    ),
+}
+
+
+def payment_receipt_email_template(locale: str) -> EmailTemplate:
+    """Return the typed, built-in payment-receipt email copy for ``locale``.
+
+    Unknown locales deliberately use English, matching document locale
+    resolution's final fallback.  Return a copy so this remains a pure default
+    factory even though ``EmailTemplate`` is a mutable Pydantic model.
+    """
+    template = _PAYMENT_RECEIPT_EMAIL_TEMPLATES.get(
+        locale, _PAYMENT_RECEIPT_EMAIL_TEMPLATES["en"]
+    )
+    return template.model_copy(deep=True)
+
 # ---------------------------------------------------------------------------
 # Jinja2 environment (autoescape ON → red-line 7)
 # ---------------------------------------------------------------------------
@@ -318,6 +359,18 @@ async def is_smtp_configured(session: AsyncSession) -> bool:
     return _configured(cfg)
 
 
+async def get_configured_smtp_config(session: AsyncSession) -> SmtpSettings | None:
+    """Return a usable SMTP configuration without sending or writing a log.
+
+    Receipt sending uses this as an early preflight, before it takes the
+    document snapshot locks needed for PDF consistency.  Keeping the result
+    lets the subsequent send avoid opening a settings transaction across SMTP
+    network I/O.
+    """
+    cfg = await _get_smtp_config(session)
+    return cfg if _configured(cfg) else None
+
+
 # ---------------------------------------------------------------------------
 # Email template rendering (M9 step 5)
 # ---------------------------------------------------------------------------
@@ -475,6 +528,8 @@ async def send_document_email(
     pdf_bytes: bytes,
     filename: str,
     creator_id: object | None = None,
+    default_template: EmailTemplate | None = None,
+    smtp_config: SmtpSettings | None = None,
 ) -> EmailLog:
     """Send a document email with PDF attachment and write an EmailLog row.
 
@@ -515,6 +570,12 @@ async def send_document_email(
     creator_id:
         ``User.id`` of the authenticated user who triggered the send, or
         ``None`` if not available.
+    default_template:
+        Optional typed built-in default for a specialised document derivative
+        such as a payment receipt.  When supplied it replaces the Settings
+        invoice/quote template only for this send; explicit ``subject`` and
+        ``body`` still pass through the same placeholder and sanitisation
+        pipeline.
 
     Returns
     -------
@@ -536,7 +597,7 @@ async def send_document_email(
     from jai.models.email_log import EmailLog
 
     # -- Pre-condition: SMTP must be configured --------------------------------
-    cfg = await _get_smtp_config(session)
+    cfg = smtp_config if smtp_config is not None else await _get_smtp_config(session)
     if not _configured(cfg):
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -560,24 +621,25 @@ async def send_document_email(
     )
     from jai.services.settings import get_setting
 
-    templates_setting = await get_setting(
-        session,
-        SETTING_KEY_EMAIL_TEMPLATES,
-        level=SettingLevel.COMPANY,
-        scope_id=getattr(company, "id", None),
-        value_type=EmailTemplatesSetting,
-    )
-    if templates_setting is None:
-        templates_setting = DEFAULT_EMAIL_TEMPLATES
+    if default_template is not None:
+        stored_template = default_template
+    else:
+        templates_setting = await get_setting(
+            session,
+            SETTING_KEY_EMAIL_TEMPLATES,
+            level=SettingLevel.COMPANY,
+            scope_id=getattr(company, "id", None),
+            value_type=EmailTemplatesSetting,
+        )
+        if templates_setting is None:
+            templates_setting = DEFAULT_EMAIL_TEMPLATES
 
-    locale_map = (
-        templates_setting.invoice
-        if doc_type == "invoice"
-        else templates_setting.quote
-    )
-    stored_template: EmailTemplate = (
-        locale_map.en if locale == "en" else locale_map.zh
-    )
+        locale_map = (
+            templates_setting.invoice
+            if doc_type == "invoice"
+            else templates_setting.quote
+        )
+        stored_template = locale_map.en if locale == "en" else locale_map.zh
 
     # 2. If caller supplied an explicit subject or body, build a temporary
     #    EmailTemplate from them (so the same render pipeline is always used).

@@ -1607,6 +1607,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/{payment_id}/send-receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Payment Receipt Email Endpoint
+         * @description Send a localized payment-receipt PDF and audit it on its source document.
+         *
+         *     Quote-origin payments always use their immutable quote/customer provenance,
+         *     even after conversion.  Invoice-origin payments use their invoice source.
+         *     The attachment is rendered by ``render_payment_receipt_pdf`` using the
+         *     exact resolved locale chosen for the email.  The EmailLog related target
+         *     likewise remains the source quote or invoice, so existing document email
+         *     logs remain the complete audit surface.
+         */
+        post: operations["send_payment_receipt_email_endpoint_api_v1_payments__payment_id__send_receipt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses": {
         parameters: {
             query?: never;
@@ -2967,7 +2994,7 @@ export interface components {
         };
         /**
          * DocumentSendRequest
-         * @description Body for POST /api/v1/invoices/{id}/send and /api/v1/quotes/{id}/send.
+         * @description Body for document and payment-receipt send endpoints.
          *
          *     ``to`` is mandatory; all other fields are optional overrides.
          *
@@ -2976,7 +3003,7 @@ export interface components {
          *     layer.
          *
          *     ``locale`` when omitted falls through to the D2 resolution chain:
-         *       export override → customer.locale → company default locale → "en".
+         *       request override → customer.locale → company default locale → "en".
          *
          *     ``subject`` / ``body`` when supplied replace the template values but still
          *     go through the ``render_email_template`` pipeline (placeholder substitution
@@ -10789,6 +10816,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaymentMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_payment_receipt_email_endpoint_api_v1_payments__payment_id__send_receipt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailLogRead"];
                 };
             };
             /** @description Validation Error */

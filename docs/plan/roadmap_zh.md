@@ -238,9 +238,9 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 
 ### M11.5 · 报价定金与最终发票结算｜单据线扩展
 - **目标**：最终发票尚未生成时，在已接受报价上记录一笔或多笔定金；转换时原子转挂到最终发票；按收款日确认 VAT，并避免最终发票发出时重复申报。
-- **关键内容**：永久保留报价来源的 quote-origin payment；确定性的混合税率 VAT 快照；报价→DRAFT 发票转挂和付款状态重算；最终发票编辑与生命周期守卫；报价阶段非 VAT 收款凭证；最终发票 PDF 逐笔付款；BTW 定金确认与最终发票抵扣；完整的报价/发票/全局付款前端流程。只支持 `NL_DOMESTIC` 定金。详见 `milestones/M11.5_zh.md`（D1–D15，2026-08-27 冻结）。
+- **关键内容**：永久保留报价来源的 quote-origin payment；确定性的混合税率 VAT 快照；报价→DRAFT 发票转挂和付款状态重算；最终发票编辑与生命周期守卫；报价阶段非 VAT 收款凭证；最终发票 PDF 逐笔付款；BTW 定金确认与最终发票抵扣；完整的报价/发票/全局付款前端流程。2026-08-28 walkthrough refinement 增加按 locale 单语显示的收据警示与按来源审计的收据邮件。只支持 `NL_DOMESTIC` 定金。详见 `milestones/M11.5_zh.md`（D1–D15，2026-08-27 冻结）。
 - **边界 / follow-on**：不做正式预付款发票、standalone customer credit、退款/负数/超额付款、改挂无关发票、百分比定金计算器、跨境/reverse-charge/export advance、历史税务快照补建或已申报期间更正工作流。
-- **🟢 部署自测点**：接受一张含税 €8,000 的境内报价；记录 €1,600 和 €4,000 定金并下载明确标注“非 VAT invoice”的报价收款凭证；仅转换一次得到显示已付 €5,600、应付 €2,400 的 DRAFT 发票；验证编辑/删除/再次转换/发出守卫；发出完整发票并收 €2,400 尾款；确认跨季度 BTW 提前确认定金且项目累计只计税一次。
+- **🟢 部署自测点**：接受一张含税 €8,000 的境内报价；记录 €1,600 和 €4,000 定金；下载 EN/ZH 报价收据并分别核对匹配的单语非 VAT 警示；发送本地化收据并查看来源单据的审计日志；仅转换一次得到显示已付 €5,600、应付 €2,400 的 DRAFT 发票；验证编辑/删除/再次转换/发出守卫；发出完整发票并收 €2,400 尾款；确认跨季度 BTW 提前确认定金且项目累计只计税一次。
 
 ### M12 · 收尾 / GA 前体检｜对应 P7
 - **目标**：可长期自托管。
@@ -360,7 +360,7 @@ docs/
 | M9 | PDF（邮件底座在 M1） | 🟢 完成（2026-06-14；orchestrator 8 步逐步盲审收敛，步骤 1/4/5 各 1 轮返工[Content-Disposition RFC6266 filename / 收据标签键 / 集成缺建公司]、步骤 2/3/6/7 零 finding，每步一 commit；WeasyPrint+Jinja，发票/报价/收据 PDF 按 locale 下载[解析链 override>customer>company>en]、公司级可编辑邮件模板+占位符引擎、email_log 发送[附件+抄送, SENT/FAILED 脱敏]、迁移 0022 customer.locale / 0023 email_log、前端下载+发送对话框+Email log；ruff/mypy/默认 760/集成 785/build/i18n EN-ZH 对称 1001/docker build+镜像内中文 PDF 渲染 全绿。**作者人工 walkthrough 通过**，walkthrough 提出并已修[均 Opus 盲审无 finding、各自 commit]：① PDF 应用内预览[`0f75310`，同 commit 含发票/报价版式：删 Description 列+Item 加粗描述下挂+全 2 位小数 money2/pct+`css\|safe` 字体修复] ② SVG logo `<style>` 类内联清洗[`4cfd369`，class-styled logo 不再纯黑，**需重新上传 logo**] ③ 多页每页页脚[`b9090ae`]；改后默认 802/PDF 集成 138 全绿。**顺延**：完整 PDF 抬头模板自定义→§4.y、客户地址自由文本块→§4.z、公开链接/unique_hash、已读回执、收据邮件/多笔汇总收据、PDF 缓存/队列、NL 语言 PDF、VAT 报表→M10、渐变 SVG logo 不支持） |
 | M10 | 报表 / 仪表盘（含 VAT 申报） | 🟢 完成（2026-06-15；orchestrator 5 步逐步盲审收敛 [P/L → ⭐BTW 申报汇总 → ICP → 开支报表 → Dashboard]，每步一 commit `89ab353`→`273ed75`；ruff/mypy/单测 966+集成 788/codegen 无漂移/build/docker build 全绿。**税法决策 2026-06-15 与作者对照官方指南 `docs/insight/btw-aangifte-2026-guide.md`（Opus 通读 41 页）逐条共定冻结**：NL ruleset 按 `company.country_code` 选+其它国 fallback+banner、hoog/laag/zero 税率档位落盘默认 21/9/0、5b 全额抵+私用走 1d（年末按 business% 算）、5a/净应缴为辅助合计（官方只命名 5b、不标 5c）、EU 内采购=4b（非 art.23 进口）、非欧盟进口/境内反向征收/OSS/herziening/KOR 均 N/A v1、报表带免责声明。**作者导入 2026 Q1–Q2 数据人工 walkthrough 通过**，walkthrough 发现并已修 [均 Opus 盲审无 finding、各自 commit]：① Expense 日期选择器 off-by-one [`1a5a94a`] ② 对外单据抬头泄漏客户花名→派生 billing_name [`853f07c`] ③ P/L 月/季粒度换成 MTD/QTD/YTD 周期预设+高亮由区间派生 [`df2ba13`]。详见 `milestones/M10.md` 验收结论。**顺延**：多币种 ICP/3b 列分叉留 FX、Dashboard 死常量/未用键留 M12） |
 | M11 | 里程支出（私人交通工具商用） | 🟢 完成（2026-08-21；orchestrator 步骤 1–5 盲审收敛；完整自动化门禁全绿；作者 walkthrough 验收；两项 walkthrough UX 修复均经零 finding 复审；见 `milestones/M11_zh.md`） |
-| M11.5 | 报价定金与最终发票结算 | 🟡 实现 + 恢复式编排盲审完成（2026-08-27；Step 1–6 与里程碑跨步骤总审均收敛至无 finding；全量门禁通过；作者人工 walkthrough 待执行；无法重建历史逐 Step commits） |
+| M11.5 | 报价定金与最终发票结算 | 🟡 实现 + 恢复式编排盲审完成（2026-08-27；Step 1–6 与里程碑跨步骤总审均收敛至无 finding；2026-08-28 编排式 walkthrough refinement 增加本地化收据邮件与单语警示，经三轮 fixup/复审收敛，并通过 Ruff/mypy/默认 1067/integration 872/migrations 14/codegen 无漂移/build/i18n 1236/Docker；作者人工 walkthrough 待执行；无法重建 base milestone 历史逐 Step commits） |
 | M12 | 收尾 / GA 前体检 | ⬜ |
 
 > 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）

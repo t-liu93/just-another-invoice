@@ -518,7 +518,17 @@ def test_build_payment_receipt_html_amounts_two_decimal() -> None:
     assert "121.000" not in html
 
 
-def test_quote_payment_receipt_is_explicitly_not_a_vat_invoice() -> None:
+@pytest.mark.parametrize(
+    ("locale", "expected", "unexpected"),
+    [
+        ("en", "NOT A VAT INVOICE", "非 VAT 发票"),
+        ("zh", "非 VAT 发票", "NOT A VAT INVOICE"),
+        ("de", "NOT A VAT INVOICE", "非 VAT 发票"),
+    ],
+)
+def test_quote_payment_receipt_is_explicitly_not_a_vat_invoice(
+    locale: str, expected: str, unexpected: str
+) -> None:
     payment = _make_payment(amount="1600.000")
     quote = SimpleNamespace(
         quote_number="Q2026-0042",
@@ -529,7 +539,7 @@ def test_quote_payment_receipt_is_explicitly_not_a_vat_invoice() -> None:
         None,
         _make_company(),
         _make_customer(),
-        "en",
+        locale,
         None,
         quote=quote,
         paid_total=Decimal("5600.000"),
@@ -537,8 +547,8 @@ def test_quote_payment_receipt_is_explicitly_not_a_vat_invoice() -> None:
     )
 
     assert "Q2026-0042" in html
-    assert "NOT A VAT INVOICE" in html
-    assert "非 VAT 发票" in html
+    assert expected in html
+    assert unexpected not in html
     assert "8000.00" in html
     assert "5600.00" in html
     assert "2400.00" in html
@@ -554,3 +564,4 @@ def test_invoice_payment_receipt_has_no_non_vat_warning() -> None:
         None,
     )
     assert "NOT A VAT INVOICE" not in html
+    assert "非 VAT 发票" not in html

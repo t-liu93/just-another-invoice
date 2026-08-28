@@ -175,7 +175,7 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "paid_status": "Paid Status",
         "payments": "Payments received",
         "already_paid": "Already paid",
-        "not_vat_invoice": "NOT A VAT INVOICE · 非 VAT 发票",
+        "not_vat_invoice": "NOT A VAT INVOICE",
     },
     "zh": {
         "invoice": "发票",
@@ -224,7 +224,7 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "paid_status": "收款状态",
         "payments": "已收款明细",
         "already_paid": "已付款",
-        "not_vat_invoice": "非 VAT 发票 · NOT A VAT INVOICE",
+        "not_vat_invoice": "非 VAT 发票",
     },
 }
 

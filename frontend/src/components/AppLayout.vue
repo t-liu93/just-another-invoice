@@ -270,9 +270,12 @@ async function handleLogout() {
           </div>
         </n-layout-header>
 
-        <!-- Page content: single shared router-view -->
+        <!-- Param-only edit navigation must not reuse stale document/customer state.
+             route.path includes the id but deliberately excludes query changes. -->
         <n-layout-content class="app-content">
-          <router-view />
+          <router-view v-slot="{ Component, route }">
+            <component :is="Component" :key="route.path" />
+          </router-view>
         </n-layout-content>
       </n-layout>
     </n-layout>

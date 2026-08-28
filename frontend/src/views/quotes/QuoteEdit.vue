@@ -19,6 +19,7 @@ import { useQuotesStore } from '../../stores/quotes'
 import { useInvoicesStore } from '../../stores/invoices'
 import { get, downloadBlob } from '../../api/http'
 import type { components } from '../../api/schema'
+import { persistedReceiptCustomer } from '../../utils/receiptEmail'
 
 type CustomerRead = components['schemas']['CustomerRead']
 type VatRateRead = components['schemas']['VatRateRead']
@@ -578,6 +579,11 @@ const fmtMoney = (v: string | number) => Number(v).toFixed(2)
 
 // ---- Selected customer for dialog pre-fill ----
 const selectedCustomer = computed(() => customers.value.find(c => c.id === customerId.value) ?? null)
+// Existing payment receipts retain the quote's persisted customer even when
+// this editable form has a different, unsaved customer selection.
+const receiptCustomer = computed(() =>
+  persistedReceiptCustomer(existingQuote.value?.customer_id, customers.value),
+)
 
 // ---- PDF download ----
 const downloadingPdf = ref(false)
@@ -647,6 +653,10 @@ const emailLogPanelRef = ref<InstanceType<typeof EmailLogPanel> | null>(null)
 
 function handleSent(_log: EmailLogRead) {
   emailLogPanelRef.value?.refresh()
+}
+
+function handleReceiptSent(log: EmailLogRead) {
+  if (log.related_type === 'QUOTE') emailLogPanelRef.value?.refresh()
 }
 </script>
 
@@ -1129,6 +1139,9 @@ function handleSent(_log: EmailLogRead) {
               :quote-id="existingQuote.id"
               :quote-status="existingQuote.status"
               :converted-invoice-id="existingQuote.converted_invoice_id"
+              :customer-email="receiptCustomer?.email ?? null"
+              :customer-locale="receiptCustomer?.locale ?? null"
+              @receipt-sent="handleReceiptSent"
             />
 
             <!-- Email log (only for existing quotes) -->

@@ -980,6 +980,9 @@
     "missingInvoiceAggregate": "服务器未返回更新后的发票收款汇总。",
     "missingQuoteAggregate": "服务器未返回更新后的报价收款汇总。",
     "downloadReceipt": "下载收款收据 PDF",
+    "sendReceipt": "发送收据给客户",
+    "receiptAuditOnQuote": "此收据邮件已记录在其来源报价单中。",
+    "openSourceQuoteLog": "打开来源报价单邮件日志",
     "paidStatus": {
       "UNPAID": "未付款",
       "PARTIALLY_PAID": "部分付款",
@@ -1230,6 +1233,8 @@
     "subjectPlaceholder": "留空则使用预设模板",
     "body": "正文",
     "bodyPlaceholder": "留空则使用预设模板。占位符（如 {INVOICE_NUMBER}）将在发送时自动替换。",
+    "receiptSubjectDefault": "{COMPANY_NAME} 的收款收据（{DOCUMENT_NUMBER}）",
+    "receiptBodyDefault": "尊敬的 {CUSTOMER_NAME}：\n\n随信附上 {DOCUMENT_NUMBER} 的收款收据。\n\n此致\n{COMPANY_NAME}",
     "send": "发送",
     "sendSuccess": "邮件已发送。",
     "sendFailed": "发送邮件失败。"

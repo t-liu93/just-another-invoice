@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models.user import User
+from jai.schemas.email_log import DocumentSendRequest, EmailLogRead
 from jai.schemas.payment import (
     InvoicePaymentsResponse,
     PaymentInput,
@@ -236,6 +238,190 @@ async def get_payment_endpoint(
             status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found."
         )
     return p
+
+
+# ---------------------------------------------------------------------------
+# Payment receipt email
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/payments/{payment_id}/send-receipt",
+    response_model=EmailLogRead,
+    status_code=status.HTTP_200_OK,
+)
+async def send_payment_receipt_email_endpoint(
+    payment_id: uuid.UUID,
+    body: DocumentSendRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EmailLogRead:
+    """Send a localized payment-receipt PDF and audit it on its source document.
+
+    Quote-origin payments always use their immutable quote/customer provenance,
+    even after conversion.  Invoice-origin payments use their invoice source.
+    The attachment is rendered by ``render_payment_receipt_pdf`` using the
+    exact resolved locale chosen for the email.  The EmailLog related target
+    likewise remains the source quote or invoice, so existing document email
+    logs remain the complete audit surface.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from jai.models._enums import EmailRelatedType, SettingLevel
+    from jai.models.company import Company
+    from jai.models.customer import Customer
+    from jai.models.invoice import Invoice
+    from jai.models.payment import Payment
+    from jai.models.quote import Quote
+    from jai.schemas.setting import SETTING_KEY_DOCUMENT_DEFAULTS, DocumentDefaultsSetting
+    from jai.services.email import (
+        get_configured_smtp_config,
+        payment_receipt_email_template,
+        send_document_email,
+    )
+    from jai.services.pdf import render_payment_receipt_pdf, resolve_document_locale
+    from jai.services.settings import get_setting
+
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    creator_id = user.id
+
+    payment_result = await session.execute(
+        select(Payment).where(Payment.id == payment_id, Payment.company_id == company_id)
+    )
+    payment = payment_result.scalar_one_or_none()
+    if payment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+    source_quote_id = payment.quote_id
+    source_invoice_id = payment.invoice_id
+
+    # Fail before renderer/receipt locks and before any audit write.  Retain
+    # the validated config so the later SMTP operation performs no DB read.
+    smtp_config = await get_configured_smtp_config(session)
+    if smtp_config is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SMTP is not configured.  Please set up SMTP settings before sending emails.",
+        )
+    await session.rollback()
+
+    # quote_id is permanent provenance.  Never use a converted invoice as the
+    # receipt source for a quote-origin payment.
+    if source_quote_id is not None:
+        source_result = await session.execute(
+            select(Quote)
+            .where(Quote.id == source_quote_id, Quote.company_id == company_id)
+            .options(selectinload(Quote.lines), selectinload(Quote.taxes))
+            .with_for_update(read=True)
+        )
+        source_document = source_result.scalar_one_or_none()
+        related_type = EmailRelatedType.QUOTE
+        not_found_detail = "Quote not found."
+    elif source_invoice_id is not None:
+        source_result = await session.execute(
+            select(Invoice)
+            .where(Invoice.id == source_invoice_id, Invoice.company_id == company_id)
+            .options(selectinload(Invoice.lines), selectinload(Invoice.taxes))
+            .with_for_update(read=True)
+        )
+        source_document = source_result.scalar_one_or_none()
+        related_type = EmailRelatedType.INVOICE
+        not_found_detail = "Invoice not found."
+    else:
+        source_document = None
+        related_type = EmailRelatedType.INVOICE
+        not_found_detail = "Payment document not found."
+    if source_document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail)
+
+    company_result = await session.execute(select(Company).where(Company.id == company_id))
+    company = company_result.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found.")
+
+    customer_result = await session.execute(
+        select(Customer)
+        .where(
+            Customer.id == source_document.customer_id,
+            Customer.company_id == company_id,
+        )
+        .options(selectinload(Customer.addresses))
+    )
+    customer = customer_result.scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found.")
+
+    defaults = await get_setting(
+        session,
+        SETTING_KEY_DOCUMENT_DEFAULTS,
+        level=SettingLevel.COMPANY,
+        scope_id=company_id,
+        value_type=DocumentDefaultsSetting,
+    )
+    company_locale: str | None = defaults.locale if defaults is not None else None
+    resolved_locale = resolve_document_locale(body.locale, customer.locale, company_locale)
+
+    # This is intentionally the same renderer as preview/download.  Passing
+    # the resolved value makes the attachment and the email log locale match.
+    pdf_bytes, filename = await render_payment_receipt_pdf(
+        session=session,
+        payment_id=payment_id,
+        company_id=company_id,
+        locale=resolved_locale,
+    )
+
+    # The renderer's parent FOR SHARE lock and the source lock above define the
+    # receipt snapshot.  Freeze the small set of fields mail rendering needs,
+    # then end this read transaction *before* SMTP network I/O.  Rollback is
+    # intentional for this read-only transaction; get_session uses
+    # expire_on_commit=False, while these plain snapshots also remain immune to
+    # SQLAlchemy rollback expiration.
+    if related_type == EmailRelatedType.INVOICE:
+        assert isinstance(source_document, Invoice)
+        source_snapshot = SimpleNamespace(
+            id=source_document.id,
+            invoice_number=source_document.invoice_number,
+            invoice_date=source_document.invoice_date,
+            due_date=source_document.due_date,
+            currency=source_document.currency,
+            total_incl_vat=source_document.total_incl_vat,
+            due_amount=source_document.due_amount,
+        )
+    else:
+        assert isinstance(source_document, Quote)
+        source_snapshot = SimpleNamespace(
+            id=source_document.id,
+            quote_number=source_document.quote_number,
+            quote_date=source_document.quote_date,
+            valid_until=source_document.valid_until,
+            currency=source_document.currency,
+            total_incl_vat=source_document.total_incl_vat,
+        )
+    company_snapshot = SimpleNamespace(id=company.id, name=company.name)
+    customer_snapshot = SimpleNamespace(name=customer.name)
+    await session.rollback()
+
+    cc = [part.strip() for part in (body.cc or "").split(",") if part.strip()] or None
+    log = await send_document_email(
+        session=session,
+        related_type=related_type,
+        doc=source_snapshot,
+        company=company_snapshot,
+        customer=customer_snapshot,
+        to=str(body.to),
+        cc=cc,
+        locale=resolved_locale,
+        subject=body.subject,
+        body=body.body,
+        pdf_bytes=pdf_bytes,
+        filename=filename,
+        creator_id=creator_id,
+        default_template=payment_receipt_email_template(resolved_locale),
+        smtp_config=smtp_config,
+    )
+    await session.commit()
+    return EmailLogRead.model_validate(log)
 
 
 # ---------------------------------------------------------------------------

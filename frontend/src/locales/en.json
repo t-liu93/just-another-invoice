@@ -980,6 +980,9 @@
     "missingInvoiceAggregate": "The server did not return the updated invoice payment totals.",
     "missingQuoteAggregate": "The server did not return the updated quote payment totals.",
     "downloadReceipt": "Download receipt PDF",
+    "sendReceipt": "Send receipt to customer",
+    "receiptAuditOnQuote": "This receipt email is audited on its source quote.",
+    "openSourceQuoteLog": "Open source quote Email Log",
     "paidStatus": {
       "UNPAID": "Unpaid",
       "PARTIALLY_PAID": "Partially paid",
@@ -1230,6 +1233,8 @@
     "subjectPlaceholder": "Leave blank to use the stored template",
     "body": "Body",
     "bodyPlaceholder": "Leave blank to use the stored template. Placeholders (e.g. {INVOICE_NUMBER}) are filled in at send time.",
+    "receiptSubjectDefault": "Payment receipt for {DOCUMENT_NUMBER} from {COMPANY_NAME}",
+    "receiptBodyDefault": "Dear {CUSTOMER_NAME},\n\nPlease find the payment receipt for {DOCUMENT_NUMBER} attached.\n\nKind regards,\n{COMPANY_NAME}",
     "send": "Send",
     "sendSuccess": "Email sent successfully.",
     "sendFailed": "Failed to send email."

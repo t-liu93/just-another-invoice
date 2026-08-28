@@ -28,7 +28,7 @@ from jai.models._enums import EmailRelatedType, EmailStatus
 
 
 class DocumentSendRequest(BaseModel):
-    """Body for POST /api/v1/invoices/{id}/send and /api/v1/quotes/{id}/send.
+    """Body for document and payment-receipt send endpoints.
 
     ``to`` is mandatory; all other fields are optional overrides.
 
@@ -37,7 +37,7 @@ class DocumentSendRequest(BaseModel):
     layer.
 
     ``locale`` when omitted falls through to the D2 resolution chain:
-      export override → customer.locale → company default locale → "en".
+      request override → customer.locale → company default locale → "en".
 
     ``subject`` / ``body`` when supplied replace the template values but still
     go through the ``render_email_template`` pipeline (placeholder substitution

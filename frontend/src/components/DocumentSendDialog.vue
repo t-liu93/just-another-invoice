@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * DocumentSendDialog – send dialog for Invoice / Quote emails.
+ * DocumentSendDialog – send dialog for Invoice, Quote, and payment-receipt emails.
  *
  * Pre-fills:
  *   - to: customer.email
@@ -23,6 +23,7 @@ import {
 } from 'naive-ui'
 import { get, post } from '../api/http'
 import type { components } from '../api/schema'
+import { useDocumentSendContext } from '../composables/useDocumentSendContext'
 
 type EmailTemplatesRead = components['schemas']['EmailTemplatesRead']
 type DocumentDefaultsRead = components['schemas']['DocumentDefaultsRead']
@@ -31,8 +32,8 @@ type DocumentSendRequest = components['schemas']['DocumentSendRequest']
 
 const props = defineProps<{
   show: boolean
-  /** 'invoice' | 'quote' */
-  docType: 'invoice' | 'quote'
+  /** 'invoice' | 'quote' | 'receipt' */
+  docType: 'invoice' | 'quote' | 'receipt'
   /** document id */
   docId: string
   /** pre-fill to field */
@@ -43,6 +44,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
+  (e: 'update:sending', v: boolean): void
   (e: 'sent', log: EmailLogRead): void
 }>()
 
@@ -53,7 +55,6 @@ const message = useMessage()
 const templates = ref<EmailTemplatesRead | null>(null)
 const companyDefaultLocale = ref<'en' | 'zh'>('en')
 const loading = ref(false)
-const sending = ref(false)
 const sendError = ref<string | null>(null)
 
 // Form fields
@@ -63,22 +64,30 @@ const formLocale = ref<'en' | 'zh'>('en')
 const formSubject = ref('')
 const formBody = ref('')
 
+const receiptDefaults: Record<'en' | 'zh', { subject: string; body: string }> = {
+  en: {
+    subject: 'Payment receipt for {DOCUMENT_NUMBER} from {COMPANY_NAME}',
+    body: 'Dear {CUSTOMER_NAME},\n\nPlease find the payment receipt for {DOCUMENT_NUMBER} attached.\n\nKind regards,\n{COMPANY_NAME}',
+  },
+  zh: {
+    subject: '{COMPANY_NAME} 的收款收据（{DOCUMENT_NUMBER}）',
+    body: '尊敬的 {CUSTOMER_NAME}：\n\n随信附上 {DOCUMENT_NUMBER} 的收款收据。\n\n此致\n{COMPANY_NAME}',
+  },
+}
+
 // ---- locale options ----
 const localeOptions = computed(() => [
   { label: t('pdf.localeEn'), value: 'en' },
   { label: t('pdf.localeZh'), value: 'zh' },
 ])
 
-// ---- compute D2 chain default locale (frontend portion) ----
-function resolveDefaultLocale(): 'en' | 'zh' {
-  if (props.customerLocale === 'en' || props.customerLocale === 'zh') {
-    return props.customerLocale
-  }
-  return companyDefaultLocale.value
-}
-
 // ---- fill subject/body from templates when locale or docType changes ----
 function fillFromTemplate(locale: 'en' | 'zh') {
+  if (props.docType === 'receipt') {
+    formSubject.value = receiptDefaults[locale].subject
+    formBody.value = receiptDefaults[locale].body
+    return
+  }
   if (!templates.value) return
   const tpl = templates.value[props.docType][locale]
   formSubject.value = tpl.subject
@@ -89,33 +98,59 @@ watch(formLocale, (newLocale) => {
   fillFromTemplate(newLocale)
 })
 
-// ---- load templates + defaults when dialog opens ----
-async function loadData() {
-  loading.value = true
+function resetForm() {
+  templates.value = null
+  companyDefaultLocale.value = 'en'
+  formTo.value = ''
+  formCc.value = ''
+  formLocale.value = 'en'
+  formSubject.value = ''
+  formBody.value = ''
   sendError.value = null
+}
+
+// ---- load templates + defaults whenever the visible document context changes ----
+const dialogContext = useDocumentSendContext(
+  () => ({
+    show: props.show,
+    docType: props.docType,
+    docId: props.docId,
+    customerEmail: props.customerEmail,
+    customerLocale: props.customerLocale,
+  }),
+  resetForm,
+  async (context, isCurrent) => {
+  loading.value = true
   try {
     const [tpl, defaults] = await Promise.all([
-      get<EmailTemplatesRead>('/api/v1/settings/email-templates'),
+      context.docType === 'receipt'
+        ? Promise.resolve(null)
+        : get<EmailTemplatesRead>('/api/v1/settings/email-templates'),
       get<DocumentDefaultsRead>('/api/v1/settings/document-defaults'),
     ])
+    if (!isCurrent()) return
     templates.value = tpl
     companyDefaultLocale.value = defaults.locale ?? 'en'
 
     // Pre-fill form
-    formTo.value = props.customerEmail ?? ''
+    formTo.value = context.customerEmail ?? ''
     formCc.value = ''
-    formLocale.value = resolveDefaultLocale()
+    formLocale.value = context.customerLocale === 'en' || context.customerLocale === 'zh'
+      ? context.customerLocale
+      : companyDefaultLocale.value
     fillFromTemplate(formLocale.value)
   } catch (e: unknown) {
-    message.error(e instanceof Error ? e.message : String(e))
+    if (isCurrent()) message.error(e instanceof Error ? e.message : String(e))
   } finally {
-    loading.value = false
+    if (isCurrent()) loading.value = false
   }
-}
+  },
+)
+const { sending } = dialogContext
 
-watch(() => props.show, (v) => {
-  if (v) loadData()
-})
+// The payment panels consume this real state, rather than assuming sends are
+// idle while deciding whether another receipt context may open.
+watch(sending, value => emit('update:sending', value), { flush: 'sync' })
 
 // ---- send ----
 async function handleSend() {
@@ -123,8 +158,10 @@ async function handleSend() {
     message.warning(t('sendDialog.toRequired'))
     return
   }
-  sending.value = true
+  const frozen = dialogContext.beginSend()
+  if (!frozen) return
   sendError.value = null
+  let closeCurrentContext = false
   try {
     const body: DocumentSendRequest = {
       to: formTo.value.trim(),
@@ -133,20 +170,31 @@ async function handleSend() {
       subject: formSubject.value.trim() || undefined,
       body: formBody.value.trim() || undefined,
     }
-    const endpointBase = props.docType === 'invoice' ? '/api/v1/invoices' : '/api/v1/quotes'
-    const log = await post<EmailLogRead>(`${endpointBase}/${props.docId}/send`, body)
+    const endpoint = frozen.context.docType === 'receipt'
+      ? `/api/v1/payments/${frozen.context.docId}/send-receipt`
+      : `${frozen.context.docType === 'invoice' ? '/api/v1/invoices' : '/api/v1/quotes'}/${frozen.context.docId}/send`
+    const log = await post<EmailLogRead>(endpoint, body)
     emit('sent', log)
-    emit('update:show', false)
+    closeCurrentContext = true
     message.success(t('sendDialog.sendSuccess'))
   } catch (e: unknown) {
     sendError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    sending.value = false
+    // A stale completion must not close a replacement document context.
+    if (dialogContext.finishSend(frozen) && closeCurrentContext) {
+      emit('update:show', false)
+    }
   }
 }
 
 function handleClose() {
+  if (sending.value) return
   emit('update:show', false)
+}
+
+function handleModalShow(value: boolean) {
+  if (!value && sending.value) return
+  emit('update:show', value)
 }
 </script>
 
@@ -157,7 +205,7 @@ function handleClose() {
     :title="t('sendDialog.title')"
     style="max-width: 560px"
     :closable="!sending"
-    @update:show="(v: boolean) => emit('update:show', v)"
+    @update:show="handleModalShow"
   >
     <n-spin :show="loading">
       <n-form v-if="!loading" label-placement="top">

@@ -28,6 +28,7 @@ import {
   CreateOutline,
   DownloadOutline,
   EyeOutline,
+  SendOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
 import { downloadBlob, get } from '../api/http'
@@ -41,6 +42,8 @@ import {
   isCurrentQuotePaymentContext,
 } from '../utils/quotePaymentPanelState'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
+import DocumentSendDialog from './DocumentSendDialog.vue'
+import { openReceiptDialog } from '../utils/receiptEmail'
 
 type PaymentMethodRead = components['schemas']['PaymentMethodRead']
 type PaymentMethodListResponse = components['schemas']['PaymentMethodListResponse']
@@ -49,10 +52,13 @@ const props = defineProps<{
   quoteId: string
   quoteStatus: string
   convertedInvoiceId?: string | null
+  customerEmail?: string | null
+  customerLocale?: 'en' | 'zh' | null
 }>()
 
 const emit = defineEmits<{
   (e: 'paymentsChanged', aggregate: QuotePaymentsResponse): void
+  (e: 'receiptSent', log: components['schemas']['EmailLogRead']): void
 }>()
 
 const { t } = useI18n()
@@ -86,6 +92,9 @@ const editAmount = ref<number | null>(null)
 const editMethodId = ref<string | null>(null)
 const editReference = ref<string | null>(null)
 const editNote = ref<string | null>(null)
+const receiptSendPaymentId = ref<string | null>(null)
+const receiptSendShow = ref(false)
+const receiptSending = ref(false)
 
 let contextVersion = 0
 let aggregateRequestVersion = 0
@@ -130,6 +139,17 @@ function isCurrentContext(quoteId: string, version: number): boolean {
 
 function isCurrentPayment(paymentId: string): boolean {
   return hasCurrentQuotePayment(paymentId, aggregateItems.value)
+}
+
+function openReceiptSend(paymentId: string) {
+  const next = openReceiptDialog(paymentId, receiptSendPaymentId.value, receiptSending.value)
+  if (!next) return
+  receiptSendPaymentId.value = next.paymentId
+  receiptSendShow.value = next.show
+}
+
+function handleReceiptSent(log: components['schemas']['EmailLogRead']) {
+  emit('receiptSent', log)
 }
 
 function resetFormState() {
@@ -479,6 +499,16 @@ async function downloadReceipt(key: string) {
                   <template #icon><n-icon><DownloadOutline /></n-icon></template>
                 </n-button>
               </n-dropdown>
+              <n-button
+                size="small"
+                quaternary
+                circle
+                :title="t('payments.sendReceipt')"
+                :disabled="receiptSending"
+                @click="openReceiptSend(payment.id)"
+              >
+                <template #icon><n-icon><SendOutline /></n-icon></template>
+              </n-button>
               <template v-if="quoteAllowsMutations">
                 <n-button size="small" quaternary circle :disabled="!canMutate" @click="openEdit(payment)">
                   <template #icon><n-icon><CreateOutline /></n-icon></template>
@@ -570,6 +600,16 @@ async function downloadReceipt(key: string) {
     v-model:show="receiptPreviewShow"
     :src="receiptPreviewSrc"
     :fallback-filename="receiptPreviewFallback"
+  />
+  <DocumentSendDialog
+    v-if="receiptSendPaymentId"
+    v-model:show="receiptSendShow"
+    v-model:sending="receiptSending"
+    doc-type="receipt"
+    :doc-id="receiptSendPaymentId"
+    :customer-email="customerEmail"
+    :customer-locale="customerLocale"
+    @sent="handleReceiptSent"
   />
 </template>
 

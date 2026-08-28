@@ -19,6 +19,7 @@ import { useInvoicesStore } from '../../stores/invoices'
 import type { InvoicePaymentsResponse } from '../../stores/payments'
 import { get, downloadBlob } from '../../api/http'
 import type { components } from '../../api/schema'
+import { persistedReceiptCustomer, receiptAuditTarget } from '../../utils/receiptEmail'
 
 type CustomerRead = components['schemas']['CustomerRead']
 type VatRateRead = components['schemas']['VatRateRead']
@@ -457,6 +458,12 @@ const showPaymentPanel = computed(() =>
   (existingInvoice.value.status === 'SENT' || existingInvoice.value.status === 'COMPLETED' || existingInvoice.value.status === 'DRAFT' || existingInvoice.value.status === 'CANCELLED'),
 )
 
+// Payment receipts are always addressed from the persisted invoice source,
+// never from a customer choice that is still unsaved in this edit form.
+const receiptCustomer = computed(() =>
+  persistedReceiptCustomer(existingInvoice.value?.customer_id, customers.value),
+)
+
 function handlePaymentsChanged(aggregate: InvoicePaymentsResponse) {
   // Update the displayed invoice status and paid_status from the backend aggregate
   // (the aggregate is authoritative – frontend does not locally compute these)
@@ -537,10 +544,22 @@ function openSendDialog() {
 
 // ---- Email log panel ref ----
 const emailLogPanelRef = ref<InstanceType<typeof EmailLogPanel> | null>(null)
+const receiptQuoteAuditId = ref<string | null>(null)
 
 function handleSent(_log: EmailLogRead) {
   // Refresh email log panel after successful send
   emailLogPanelRef.value?.refresh()
+}
+
+function handleReceiptSent(log: EmailLogRead) {
+  if (!existingInvoice.value) return
+  const target = receiptAuditTarget(existingInvoice.value.id, log)
+  if (target === 'refresh-invoice') {
+    emailLogPanelRef.value?.refresh()
+    receiptQuoteAuditId.value = null
+  } else {
+    receiptQuoteAuditId.value = target.quoteId
+  }
 }
 </script>
 
@@ -982,7 +1001,10 @@ function handleSent(_log: EmailLogRead) {
               v-if="showPaymentPanel && existingInvoice"
               :invoice-id="existingInvoice.id"
               :invoice-status="existingInvoice.status"
+              :customer-email="receiptCustomer?.email ?? null"
+              :customer-locale="receiptCustomer?.locale ?? null"
               @payments-changed="handlePaymentsChanged"
+              @receipt-sent="handleReceiptSent"
             />
 
             <!-- Email log (only for existing invoices) -->
@@ -992,6 +1014,12 @@ function handleSent(_log: EmailLogRead) {
               doc-type="invoice"
               :doc-id="existingInvoice.id"
             />
+            <n-alert v-if="receiptQuoteAuditId" type="info" style="margin-bottom: 16px">
+              {{ t('payments.receiptAuditOnQuote') }}
+              <n-button text type="primary" @click="router.push(`/quotes/${receiptQuoteAuditId}/edit`)">
+                {{ t('payments.openSourceQuoteLog') }}
+              </n-button>
+            </n-alert>
 
             <!-- Action buttons -->
             <n-space justify="end" style="margin-bottom: 24px">

@@ -23,14 +23,16 @@ import {
   NInputNumber, NSelect, NInput, NDatePicker, NAlert, NSpin,
   NDivider, NIcon, NEmpty, NDropdown,
 } from 'naive-ui'
-import { AddOutline, CreateOutline, TrashOutline, DownloadOutline, EyeOutline } from '@vicons/ionicons5'
+import { AddOutline, CreateOutline, TrashOutline, DownloadOutline, EyeOutline, SendOutline } from '@vicons/ionicons5'
 import { usePaymentsStore } from '../stores/payments'
 import type { InvoicePaymentsResponse, PaymentRead } from '../stores/payments'
 import { get, downloadBlob } from '../api/http'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
+import DocumentSendDialog from './DocumentSendDialog.vue'
 import type { components } from '../api/schema'
 import { localDateStr, formatDate } from '../utils/date'
 import { isPaymentMutationBusy } from '../utils/quotePaymentPanelState'
+import { openReceiptDialog } from '../utils/receiptEmail'
 
 type PaymentMethodRead = components['schemas']['PaymentMethodRead']
 type PaymentMethodListResponse = components['schemas']['PaymentMethodListResponse']
@@ -38,10 +40,13 @@ type PaymentMethodListResponse = components['schemas']['PaymentMethodListRespons
 const props = defineProps<{
   invoiceId: string
   invoiceStatus: string
+  customerEmail?: string | null
+  customerLocale?: 'en' | 'zh' | null
 }>()
 
 const emit = defineEmits<{
   (e: 'paymentsChanged', aggregate: InvoicePaymentsResponse): void
+  (e: 'receiptSent', log: components['schemas']['EmailLogRead']): void
 }>()
 
 const { t } = useI18n()
@@ -77,6 +82,9 @@ const deleteSaving = ref<string | null>(null) // stores the payment id being del
 
 // ---- Receipt PDF download ----
 const receiptDownloadingId = ref<string | null>(null)
+const receiptSendPaymentId = ref<string | null>(null)
+const receiptSendShow = ref(false)
+const receiptSending = ref(false)
 
 function receiptPdfLocaleOptions(paymentId: string) {
   return [
@@ -129,6 +137,17 @@ function handleReceiptPreviewLocaleSelect(key: string) {
   } else {
     openReceiptPreview(id, locale as 'en' | 'zh')
   }
+}
+
+function openReceiptSend(paymentId: string) {
+  const next = openReceiptDialog(paymentId, receiptSendPaymentId.value, receiptSending.value)
+  if (!next) return
+  receiptSendPaymentId.value = next.paymentId
+  receiptSendShow.value = next.show
+}
+
+function handleReceiptSent(log: components['schemas']['EmailLogRead']) {
+  emit('receiptSent', log)
 }
 
 // ---- computed ----
@@ -428,6 +447,16 @@ function handleDelete(payment: PaymentRead) {
                     <template #icon><n-icon><EyeOutline /></n-icon></template>
                   </n-button>
                 </n-dropdown>
+                <n-button
+                  size="small"
+                  quaternary
+                  circle
+                  :title="t('payments.sendReceipt')"
+                  :disabled="receiptSending"
+                  @click="openReceiptSend(payment.id)"
+                >
+                  <template #icon><n-icon><SendOutline /></n-icon></template>
+                </n-button>
                 <!-- Receipt PDF download dropdown (always visible, not gated by canRecord) -->
                 <n-dropdown
                   :options="receiptPdfLocaleOptions(payment.id)"
@@ -562,6 +591,17 @@ function handleDelete(payment: PaymentRead) {
     v-model:show="receiptPreviewShow"
     :src="receiptPreviewSrc"
     :fallback-filename="receiptPreviewFallback"
+  />
+
+  <DocumentSendDialog
+    v-if="receiptSendPaymentId"
+    v-model:show="receiptSendShow"
+    v-model:sending="receiptSending"
+    doc-type="receipt"
+    :doc-id="receiptSendPaymentId"
+    :customer-email="customerEmail"
+    :customer-locale="customerLocale"
+    @sent="handleReceiptSent"
   />
 </template>
 
