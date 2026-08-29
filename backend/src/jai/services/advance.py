@@ -5,6 +5,8 @@ integer currency-minor units and is consequently usable by both calculate and
 the locked create/issue paths without frontend money arithmetic.
 """
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import uuid
@@ -143,9 +145,7 @@ class AdvanceBucket:
 _HUNDRED = Decimal("100")
 _MINOR = Decimal("0.01")
 _MAX_PERCENTAGE_DECIMAL_PLACES = 3
-ExactAdvanceCreditProvider = Callable[
-    [AsyncSession, Quote], Awaitable[list[AdvanceBucket]]
-]
+ExactAdvanceCreditProvider = Callable[[AsyncSession, Quote], Awaitable[list[AdvanceBucket]]]
 
 
 def _units(value: Decimal) -> int:
@@ -310,9 +310,7 @@ def subtract_exact_advance_credits(
     credits = {
         (row.vat_rate_id, row.vat_rate_label, row.vat_rate_percent): row for row in exact_credits
     }
-    issued_keys = {
-        (row.vat_rate_id, row.vat_rate_label, row.vat_rate_percent) for row in issued
-    }
+    issued_keys = {(row.vat_rate_id, row.vat_rate_label, row.vat_rate_percent) for row in issued}
     if not set(credits).issubset(issued_keys):
         raise AdvanceStaleError("Exact Advance Credit refers to an unknown source VAT bucket.")
     reopened: list[AdvanceBucket] = []
@@ -373,9 +371,7 @@ async def _issued_advance_buckets(
     return subtract_exact_advance_credits(issued, await provider(session, quote))
 
 
-async def _exact_advance_credit_buckets(
-    session: AsyncSession, quote: Quote
-) -> list[AdvanceBucket]:
+async def _exact_advance_credit_buckets(session: AsyncSession, quote: Quote) -> list[AdvanceBucket]:
     """Step-5 seam for normalized Advance Credit source-bucket reversals.
 
     There is intentionally no fallback to ``invoice.credited_total``: a gross
@@ -505,9 +501,7 @@ async def _locked_quote(session: AsyncSession, company_id: uuid.UUID, quote_id: 
     return quote
 
 
-async def _open_draft(
-    session: AsyncSession, quote_id: uuid.UUID, *, lock: bool
-) -> Invoice | None:
+async def _open_draft(session: AsyncSession, quote_id: uuid.UUID, *, lock: bool) -> Invoice | None:
     stmt = select(Invoice).where(
         Invoice.quote_id == quote_id,
         Invoice.document_kind == InvoiceDocumentKind.ADVANCE,
@@ -516,6 +510,19 @@ async def _open_draft(
     if lock:
         stmt = stmt.with_for_update()
     return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def _has_active_final(session: AsyncSession, quote_id: uuid.UUID) -> bool:
+    return (
+        await session.scalar(
+            select(Invoice.id)
+            .where(
+                Invoice.quote_id == quote_id,
+                Invoice.document_kind == InvoiceDocumentKind.FINAL,
+            )
+            .limit(1)
+        )
+    ) is not None
 
 
 @dataclass(frozen=True)
@@ -555,6 +562,12 @@ async def assess_advance_creation(
         # Create returns its stable competing-draft error before any input
         # capacity validation, and the read projection only needs ``false``.
         return AdvanceCreationAvailability(False, True, ())
+    # D8: a Final DRAFT/issued Final freezes further Formal Advance issue.
+    # Keeping this in the shared predicate also prevents creation of a draft
+    # that could never be legally issued.
+    has_final = await _has_active_final(session, quote.id)
+    if has_final:
+        return AdvanceCreationAvailability(False, False, ())
     remaining_buckets = tuple(await _remaining_buckets(session, quote))
     has_remaining_capacity = any(bucket.gross_amount > 0 for bucket in remaining_buckets)
     return AdvanceCreationAvailability(
@@ -696,6 +709,18 @@ async def _persist_advance(
 async def validate_advance_issue(session: AsyncSession, *, quote: Quote, invoice: Invoice) -> None:
     """Revalidate a DRAFT allocation under the Quote lock immediately before issue."""
     _validate_quote(quote)
+    final_exists = (
+        await session.scalar(
+            select(Invoice.id)
+            .where(
+                Invoice.quote_id == quote.id,
+                Invoice.document_kind == InvoiceDocumentKind.FINAL,
+            )
+            .limit(1)
+        )
+    ) is not None
+    if final_exists:
+        raise AdvanceConflictError("A Final DRAFT or issued Final freezes Advance issue.")
     if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.ADVANCE:
         raise AdvanceConflictError("Only Advance invoices can use Advance issue validation.")
     _validate_advance_dates(invoice.invoice_date, invoice.due_date)
@@ -777,6 +802,8 @@ async def create_advance_draft(
     await set_rls_company(session, company_id)
     try:
         quote = await _locked_quote(session, company_id, quote_id)
+        if await _has_active_final(session, quote.id):
+            raise AdvanceConflictError("A Final DRAFT or issued Final freezes Advance creation.")
         availability = await assess_advance_creation(session, quote, lock_open_draft=True)
         if availability.has_open_draft:
             raise AdvanceConflictError("Only one open Advance DRAFT is allowed per Quote.")
@@ -807,9 +834,7 @@ async def create_advance_draft(
         # The Quote row lock is the friendly serialization path; the partial
         # unique index is still authoritative when another writer bypasses it.
         if is_advance_draft_conflict(exc):
-            raise AdvanceConflictError(
-                "Only one open Advance DRAFT is allowed per Quote."
-            ) from exc
+            raise AdvanceConflictError("Only one open Advance DRAFT is allowed per Quote.") from exc
         raise
     except DBAPIError as exc:
         await session.rollback()

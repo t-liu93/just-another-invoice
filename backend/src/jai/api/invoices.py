@@ -11,6 +11,8 @@ Endpoints:
   GET    /api/v1/invoice-product-options – customer-safe product search
 """
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import uuid
@@ -32,6 +34,7 @@ from jai.schemas.invoice import (
     AdvanceDraftUpdate,
     CreditCalculationRead,
     CreditCalculationRequest,
+    FinalDraftCreate,
     InvoiceCalculationRead,
     InvoiceCalculationRequest,
     InvoiceListResponse,
@@ -49,6 +52,7 @@ from jai.services.advance import (
     update_advance_draft,
 )
 from jai.services.document_chain import ModeConflictError, get_invoice_document_chain
+from jai.services.final import FinalConflictError, FinalValidationError, create_final_draft
 from jai.services.invoice import (
     InvoiceDedicatedUpdateRequiredError,
     InvoiceLifecycleConflictError,
@@ -217,6 +221,37 @@ async def update_advance_endpoint(
 
 
 @router.post(
+    "/quotes/{quote_id}/final-invoice",
+    response_model=InvoiceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_final_endpoint(
+    quote_id: uuid.UUID,
+    body: FinalDraftCreate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceRead:
+    """Create the one editable Final and its frozen Advance applications."""
+    _owner_only(user)
+    try:
+        return await create_final_draft(
+            session,
+            company_id=_require_company_id(user),
+            quote_id=quote_id,
+            body=body,
+            creator_id=user.id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Quote not found.") from exc
+    except ModeConflictError as exc:
+        raise _advance_error(409, exc.code, exc) from exc
+    except (FinalConflictError, AdvanceConflictError) as exc:
+        raise _advance_error(409, getattr(exc, "code", "FINAL_CONFLICT"), exc) from exc
+    except (FinalValidationError, ValueError) as exc:
+        raise _advance_error(422, getattr(exc, "code", "FINAL_INVALID"), exc) from exc
+
+
+@router.post(
     "/invoices/{source_invoice_id}/credit-notes/calculate",
     response_model=CreditCalculationRead,
     status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -355,6 +390,14 @@ async def update_invoice_endpoint(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
+    except FinalConflictError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
+    except FinalValidationError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -412,12 +455,12 @@ async def transition_status_endpoint(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
-    except AdvanceConflictError as exc:
+    except (AdvanceConflictError, FinalConflictError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
-    except AdvanceValidationError as exc:
+    except (AdvanceValidationError, FinalValidationError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": exc.code, "message": str(exc)},

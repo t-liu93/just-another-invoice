@@ -12,6 +12,8 @@ from jai.models.customer import Customer  # noqa: F401
 from jai.models.dictionary import ExpenseCategory, PaymentMethod, Unit  # noqa: F401
 from jai.models.document import (  # noqa: F401
     DocumentChainEvent,
+    FinalAdvanceApplication,
+    FinalAdvanceApplicationTax,
     InvoiceCreditBasisLine,
     InvoicePartySnapshot,
 )

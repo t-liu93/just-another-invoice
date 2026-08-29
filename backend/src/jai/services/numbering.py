@@ -278,7 +278,9 @@ async def _upsert_company_sequence(
         )
         .on_conflict_do_nothing(
             index_elements=["company_id", "document_type"],
-            index_where=NumberSequence.scope == NumberSequenceScope.COMPANY,
+            # PostgreSQL matches a partial ON CONFLICT arbiter against the
+            # literal enum predicate of the index, not a bound parameter.
+            index_where=text("scope = 'COMPANY'"),
         )
     )
     await session.execute(stmt)
@@ -306,7 +308,7 @@ async def _upsert_customer_sequence(
         )
         .on_conflict_do_nothing(
             index_elements=["company_id", "document_type", "customer_id"],
-            index_where=NumberSequence.scope == NumberSequenceScope.CUSTOMER,
+            index_where=text("scope = 'CUSTOMER'"),
         )
     )
     await session.execute(stmt)

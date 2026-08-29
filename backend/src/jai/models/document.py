@@ -1,14 +1,17 @@
 """M12 issue-time document snapshots and immutable credit basis rows."""
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -18,13 +21,94 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jai.db import Base
 from jai.models._enums import DocumentChainEventType, PartySnapshotProvenance
 
 _MONEY = Numeric(18, 3)
 _RATE = Numeric(6, 3)
+
+
+class FinalAdvanceApplication(Base):
+    """Immutable amount of one issued Advance applied to a Final."""
+
+    __tablename__ = "final_advance_application"
+    __table_args__ = (
+        UniqueConstraint(
+            "final_invoice_id", "advance_invoice_id", name="uq_final_advance_application"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    final_invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    advance_invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    advance_invoice_date: Mapped[date] = mapped_column(Date, nullable=False)
+    advance_invoice_number: Mapped[str] = mapped_column(Text, nullable=False)
+    taxable_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_taxable_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    taxes: Mapped[list[FinalAdvanceApplicationTax]] = relationship(
+        "FinalAdvanceApplicationTax",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="FinalAdvanceApplicationTax.sort_order",
+    )
+
+
+class FinalAdvanceApplicationTax(Base):
+    """Immutable per-VAT-bucket snapshot for a Final Advance application."""
+
+    __tablename__ = "final_advance_application_tax"
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id", "source_vat_rate_id", name="uq_final_application_tax_bucket"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("final_advance_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_vat_rate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_vat_rate_label: Mapped[str] = mapped_column(Text, nullable=False)
+    source_vat_rate_percent: Mapped[Decimal] = mapped_column(_RATE, nullable=False)
+    vat_treatment_code: Mapped[str] = mapped_column(Text, nullable=False)
+    vat_treatment_effect: Mapped[str] = mapped_column(Text, nullable=False)
+    vat_treatment_requires_icp: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    taxable_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_taxable_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
 
 
 class InvoicePartySnapshot(Base):

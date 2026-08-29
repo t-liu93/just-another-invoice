@@ -20,6 +20,8 @@ Red-line compliance
 4. Numbering via ``services.numbering.allocate_invoice_number`` (row-locked).
 """
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import uuid
@@ -50,7 +52,12 @@ from jai.models.address import Address
 from jai.models.company import Company
 from jai.models.customer import Customer
 from jai.models.dictionary import Unit
-from jai.models.document import InvoiceCreditBasisLine, InvoicePartySnapshot
+from jai.models.document import (
+    FinalAdvanceApplication,
+    FinalAdvanceApplicationTax,
+    InvoiceCreditBasisLine,
+    InvoicePartySnapshot,
+)
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
 from jai.models.payment import Payment
 from jai.models.product import Product
@@ -58,6 +65,10 @@ from jai.models.quote import Quote as _Quote
 from jai.models.quote import QuoteLine as _QuoteLine
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.invoice import (
+    FinalAdvanceApplicationRead,
+    FinalAdvanceApplicationTaxRead,
+    FinalTotalsRead,
+    FinalVarianceRead,
     InvoiceLineRead,
     InvoiceLineReadTax,
     InvoiceListItem,
@@ -114,6 +125,12 @@ class InvoiceLifecycleConflictError(ValueError):
     """
 
     code = "INVOICE_LIFECYCLE_CONFLICT"
+
+
+class FinalLifecycleConflictError(InvoiceLifecycleConflictError):
+    """Final drafts can only release their Advance freeze by deletion."""
+
+    code = "FINAL_DRAFT_LIFECYCLE_FORBIDDEN"
 
 
 class InvoiceDedicatedUpdateRequiredError(ValueError):
@@ -298,6 +315,11 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
         effect=inv.vat_treatment_effect,
         requires_icp=inv.vat_treatment_requires_icp,
     )
+    original_gross = (
+        Decimal(str(inv.final_original_gross_amount))
+        if inv.final_original_gross_amount is not None
+        else None
+    )
     return InvoiceRead(
         id=inv.id,
         company_id=inv.company_id,
@@ -321,6 +343,64 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
             if (snapshot := inv.__dict__.get("party_snapshot")) is not None
             else None
         ),
+        original_quote_totals=(
+            FinalTotalsRead(
+                taxable_amount=Decimal(str(inv.final_original_taxable_amount)),
+                vat_total=Decimal(str(inv.final_original_vat_amount)),
+                gross_amount=original_gross,
+            )
+            if original_gross is not None
+            else None
+        ),
+        final_totals=(
+            FinalTotalsRead(
+                taxable_amount=Decimal(str(inv.taxable_amount)),
+                vat_total=Decimal(str(inv.vat_total)),
+                gross_amount=Decimal(str(inv.total_incl_vat)),
+            )
+            if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.FINAL
+            else None
+        ),
+        final_variance=(
+            FinalVarianceRead(
+                taxable_amount=Decimal(str(inv.taxable_amount))
+                - Decimal(str(inv.final_original_taxable_amount)),
+                vat_amount=Decimal(str(inv.vat_total))
+                - Decimal(str(inv.final_original_vat_amount)),
+                gross_amount=Decimal(str(inv.total_incl_vat)) - original_gross,
+            )
+            if original_gross is not None
+            else None
+        ),
+        final_advance_applications=[
+            FinalAdvanceApplicationRead(
+                advance_invoice_id=app.advance_invoice_id,
+                advance_invoice_number=app.advance_invoice_number,
+                advance_invoice_date=app.advance_invoice_date,
+                sort_order=app.sort_order,
+                taxable_amount=Decimal(str(app.taxable_amount)),
+                vat_amount=Decimal(str(app.vat_amount)),
+                gross_amount=Decimal(str(app.gross_amount)),
+                base_taxable_amount=Decimal(str(app.base_taxable_amount)),
+                base_vat_amount=Decimal(str(app.base_vat_amount)),
+                base_gross_amount=Decimal(str(app.base_gross_amount)),
+                taxes=[
+                    FinalAdvanceApplicationTaxRead(
+                        source_vat_rate_id=tax.source_vat_rate_id,
+                        source_vat_rate_label=tax.source_vat_rate_label,
+                        source_vat_rate_percent=Decimal(str(tax.source_vat_rate_percent)),
+                        taxable_amount=Decimal(str(tax.taxable_amount)),
+                        vat_amount=Decimal(str(tax.vat_amount)),
+                        gross_amount=Decimal(str(tax.gross_amount)),
+                        base_taxable_amount=Decimal(str(tax.base_taxable_amount)),
+                        base_vat_amount=Decimal(str(tax.base_vat_amount)),
+                        base_gross_amount=Decimal(str(tax.base_gross_amount)),
+                    )
+                    for tax in app.taxes
+                ],
+            )
+            for app in inv.final_advance_applications
+        ],
         currency=inv.currency,
         exchange_rate=Decimal(str(inv.exchange_rate)),
         tax_mode=InvoiceTaxMode(inv.tax_mode),
@@ -432,7 +512,7 @@ def _invoice_to_list_item(inv: Invoice, *, customer_name: str) -> InvoiceListIte
 
 async def _load_invoice_read(session: AsyncSession, inv: Invoice) -> InvoiceRead:
     """Load every response relationship before committing a tenant transaction."""
-    result = await session.execute(
+    statement = (
         select(Invoice)
         .where(Invoice.id == inv.id)
         .options(
@@ -440,8 +520,18 @@ async def _load_invoice_read(session: AsyncSession, inv: Invoice) -> InvoiceRead
             selectinload(Invoice.taxes),
             selectinload(Invoice.party_snapshot),
             selectinload(Invoice.credit_basis_lines),
+            selectinload(Invoice.final_advance_applications).selectinload(
+                FinalAdvanceApplication.taxes
+            ),
         )
     )
+    if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.FINAL:
+        # A Final PUT replaces line/tax children, while Final applications are
+        # intentionally ``noload`` by default.  Refresh the explicit Final
+        # response relationships without changing established Standard/Advance
+        # Decimal serialisation behaviour.
+        statement = statement.execution_options(populate_existing=True)
+    result = await session.execute(statement)
     return _invoice_to_read(result.scalar_one())
 
 
@@ -787,6 +877,68 @@ async def _credit_basis_rows(session: AsyncSession, inv: Invoice) -> list[Invoic
     return rows
 
 
+async def _final_residual_credit_basis_rows(
+    session: AsyncSession, inv: Invoice
+) -> list[InvoiceCreditBasisLine]:
+    """Reduce Final's immutable Credit basis by its frozen applications.
+
+    The displayed Final remains the full edited project.  Credit entitlement is
+    only its residual charge, apportioned deterministically inside each VAT
+    bucket over the persisted line basis; applications are never reread from
+    cash payments.
+    """
+    full_rows = await _credit_basis_rows(session, inv)
+    application_rows = list(
+        (
+            await session.execute(
+                select(FinalAdvanceApplicationTax)
+                .join(FinalAdvanceApplication)
+                .where(FinalAdvanceApplication.final_invoice_id == inv.id)
+            )
+        ).scalars()
+    )
+    applied: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
+    for tax in application_rows:
+        net, vat = applied.get(tax.source_vat_rate_id, (Decimal("0"), Decimal("0")))
+        applied[tax.source_vat_rate_id] = (
+            net + Decimal(str(tax.taxable_amount)),
+            vat + Decimal(str(tax.vat_amount)),
+        )
+    grouped: dict[uuid.UUID | None, list[InvoiceCreditBasisLine]] = {}
+    for row in full_rows:
+        grouped.setdefault(row.vat_rate_id, []).append(row)
+    result: list[InvoiceCreditBasisLine] = []
+    for rate_id, rows in grouped.items():
+        source_net = sum((Decimal(str(row.net_amount)) for row in rows), Decimal("0"))
+        source_vat = sum((Decimal(str(row.vat_amount)) for row in rows), Decimal("0"))
+        app_net, app_vat = (
+            applied.get(rate_id, (Decimal("0"), Decimal("0")))
+            if rate_id is not None
+            else (Decimal("0"), Decimal("0"))
+        )
+        residual_net = source_net - app_net
+        residual_vat = source_vat - app_vat
+        if residual_net < 0 or residual_vat < 0:
+            raise ValueError("Final applications exceed the edited Final credit basis.")
+        net_shares = _allocate_document_vat(
+            [Decimal(str(row.net_amount)) for row in rows], residual_net
+        )
+        vat_shares = _allocate_document_vat(
+            [Decimal(str(row.vat_amount)) for row in rows], residual_vat
+        )
+        for row, net, vat in zip(rows, net_shares, vat_shares, strict=True):
+            if net + vat == 0:
+                continue
+            row.net_amount = net
+            row.vat_amount = vat
+            row.gross_amount = net + vat
+            row.base_net_amount = net
+            row.base_vat_amount = vat
+            row.base_gross_amount = net + vat
+            result.append(row)
+    return result
+
+
 async def _resolved_issue_locale(
     session: AsyncSession, company_id: uuid.UUID, customer: Customer
 ) -> str:
@@ -862,7 +1014,11 @@ async def _create_native_issue_foundation(
     # issue, so merely inserting FK rows would leave its in-memory cached
     # relationship at None while we intentionally build the response precommit.
     inv.party_snapshot = snapshot
-    inv.credit_basis_lines = await _credit_basis_rows(session, inv)
+    inv.credit_basis_lines = (
+        await _final_residual_credit_basis_rows(session, inv)
+        if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.FINAL
+        else await _credit_basis_rows(session, inv)
+    )
     inv.issued_at = datetime.now(UTC)
     inv.issued_by_user_id = issued_by_user_id
     if inv.supply_or_advance_date is None:
@@ -1099,7 +1255,7 @@ async def get_invoice(
     inv = result.scalar_one_or_none()
     if inv is None:
         return None
-    return _invoice_to_read(inv)
+    return await _load_invoice_read(session, inv)
 
 
 async def update_invoice(
@@ -1115,6 +1271,31 @@ async def update_invoice(
     from jai.services.document_chain import append_document_chain_event
 
     await set_rls_company(session, company_id)
+    # Final edits follow the global Quote -> Invoice order.  The unlocked
+    # probe is only used to discover that prefix; identity is checked again
+    # once the Invoice row is locked below.
+    probe = (
+        await session.execute(
+            select(Invoice.document_kind, Invoice.quote_id).where(
+                Invoice.id == invoice_id, Invoice.company_id == company_id
+            )
+        )
+    ).one_or_none()
+    if probe is None:
+        return None
+    locked_final_quote: _Quote | None = None
+    if InvoiceDocumentKind(probe.document_kind) == InvoiceDocumentKind.FINAL:
+        if probe.quote_id is None:
+            raise InvoiceLifecycleConflictError("Final invoice has no Quote provenance.")
+        locked_final_quote = (
+            await session.execute(
+                select(_Quote)
+                .where(_Quote.id == probe.quote_id, _Quote.company_id == company_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if locked_final_quote is None:
+            raise InvoiceLifecycleConflictError("Final Quote no longer exists.")
     stmt = (
         select(Invoice)
         .where(
@@ -1127,7 +1308,47 @@ async def update_invoice(
     inv = result.scalar_one_or_none()
     if inv is None:
         return None
+    if (
+        InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind(probe.document_kind)
+        or inv.quote_id != probe.quote_id
+    ):
+        raise InvoiceLifecycleConflictError(
+            "Invoice changed while acquiring its Quote lock prefix."
+        )
 
+    if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.FINAL:
+        from jai.services.final import update_final_draft
+
+        assert locked_final_quote is not None
+        quote = locked_final_quote
+        if inv.status != InvoiceStatus.DRAFT:
+            raise InvoiceLifecycleConflictError("Only a DRAFT Final can be updated.")
+        # Repricing replaces child line/tax rows.  Keep it inside a savepoint
+        # so an uncovered bucket/date/total rejection leaves the persisted
+        # Final, its applications, and its prior event stream intact even when
+        # a caller keeps using this service session after the exception.
+        async with session.begin_nested():
+            updated = await update_final_draft(
+                session,
+                final=inv,
+                quote=quote,
+                body=body,
+                company_id=company_id,
+                company_currency=company_currency,
+            )
+            await append_document_chain_event(
+                session,
+                company_id=company_id,
+                quote_id=quote.id,
+                invoice_id=updated.id,
+                actor_user_id=actor_user_id,
+                event_type=DocumentChainEventType.INVOICE_UPDATED,
+                metadata={"document_kind": "FINAL"},
+            )
+            await session.flush()
+        read = await _load_invoice_read(session, updated)
+        await session.commit()
+        return read
     if InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD:
         if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.ADVANCE:
             raise InvoiceDedicatedUpdateRequiredError(
@@ -1295,6 +1516,7 @@ async def delete_invoice(
         if InvoiceDocumentKind(inv.document_kind) not in {
             InvoiceDocumentKind.STANDARD,
             InvoiceDocumentKind.ADVANCE,
+            InvoiceDocumentKind.FINAL,
         }:
             raise ValueError(
                 "This document kind cannot be deleted by the generic invoice endpoint."
@@ -1457,9 +1679,10 @@ async def transition_status(
     # dereference ``probe`` or ``inv`` to decide how to map the original error.
     probe_kind = InvoiceDocumentKind(probe.document_kind)
     probe_quote_id = probe.quote_id
-    if probe_kind == InvoiceDocumentKind.ADVANCE:
+    locked_invoices: list[Invoice] = []
+    if probe_kind in {InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL}:
         if probe_quote_id is None:
-            raise InvoiceLifecycleConflictError("Advance invoice has no Quote provenance.")
+            raise InvoiceLifecycleConflictError("Formal invoice has no Quote provenance.")
         try:
             quote = (
                 await session.execute(
@@ -1478,17 +1701,28 @@ async def transition_status(
                 ) from exc
             raise
         if quote is None or quote.settlement_mode.value != "FORMAL_ADVANCE":
-            raise InvoiceLifecycleConflictError("Advance Quote is not in FORMAL_ADVANCE mode.")
-    stmt = (
-        select(Invoice)
-        .where(
-            Invoice.id == invoice_id,
-            Invoice.company_id == company_id,
-        )
-        .with_for_update()
-    )
+            raise InvoiceLifecycleConflictError("Formal Quote is not in FORMAL_ADVANCE mode.")
     try:
-        result = await session.execute(stmt)
+        if probe_kind == InvoiceDocumentKind.FINAL:
+            # The Quote lock is the first prefix.  Lock the whole formal
+            # charge/source set once, in canonical Invoice.id order, before
+            # selecting the target Final from that already locked set.
+            from jai.services.final import lock_formal_charge_invoices
+
+            assert quote is not None
+            locked_invoices = await lock_formal_charge_invoices(session, quote)
+            inv = next((item for item in locked_invoices if item.id == invoice_id), None)
+        else:
+            stmt = (
+                select(Invoice)
+                .where(
+                    Invoice.id == invoice_id,
+                    Invoice.company_id == company_id,
+                )
+                .with_for_update()
+            )
+            result = await session.execute(stmt)
+            inv = result.scalar_one_or_none()
     except DBAPIError as exc:
         await session.rollback()
         from jai.services.advance import AdvanceConflictError, is_retryable_transaction_conflict
@@ -1498,13 +1732,20 @@ async def transition_status(
                 "Concurrent invoice lifecycle mutation; retry the command."
             ) from exc
         raise
-    inv = result.scalar_one_or_none()
     if inv is None:
         return None
+    if (
+        InvoiceDocumentKind(inv.document_kind) != probe_kind
+        or inv.quote_id != probe_quote_id
+    ):
+        raise InvoiceLifecycleConflictError(
+            "Invoice changed while acquiring its Quote lock prefix."
+        )
 
     if probe_kind not in {
         InvoiceDocumentKind.STANDARD,
         InvoiceDocumentKind.ADVANCE,
+        InvoiceDocumentKind.FINAL,
     }:
         raise InvoiceLifecycleConflictError(
             "Generic invoice lifecycle currently supports STANDARD invoices only."
@@ -1512,6 +1753,14 @@ async def transition_status(
 
     current_status = InvoiceStatus(inv.status)
     new_status = body.status
+
+    if probe_kind == InvoiceDocumentKind.FINAL and (
+        (current_status == InvoiceStatus.DRAFT and new_status == InvoiceStatus.CANCELLED)
+        or (current_status == InvoiceStatus.CANCELLED and new_status == InvoiceStatus.DRAFT)
+    ):
+        raise FinalLifecycleConflictError(
+            "Final DRAFT lifecycle is frozen; delete the DRAFT to remove its Advance freeze."
+        )
 
     if (
         probe_kind == InvoiceDocumentKind.ADVANCE
@@ -1592,11 +1841,26 @@ async def transition_status(
                 assert probe_quote_id is not None
                 assert quote is not None
                 await validate_advance_issue(session, quote=quote, invoice=inv)
+            elif probe_kind == InvoiceDocumentKind.FINAL:
+                from jai.services.final import validate_final_issue
+
+                assert quote is not None
+                await validate_final_issue(
+                    session,
+                    quote=quote,
+                    final=inv,
+                    locked_invoices=locked_invoices,
+                )
         inv.status = new_status
         if current_status == InvoiceStatus.DRAFT and new_status == InvoiceStatus.SENT:
+            charge = (
+                Decimal(str(inv.payable_before_payments))
+                if probe_kind == InvoiceDocumentKind.FINAL
+                else Decimal(str(inv.total_incl_vat))
+            )
             payment_state = recompute_payment_state(
-                Decimal(str(inv.total_incl_vat)),
-                Decimal(str(inv.base_total_incl_vat)),
+                charge,
+                charge,
                 payments,
                 InvoiceStatus.SENT,
             )
@@ -1604,9 +1868,9 @@ async def transition_status(
             inv.base_due_amount = payment_state.base_due_amount
             inv.paid_status = payment_state.paid_status
             inv.status = payment_state.new_status
-            inv.payable_before_payments = Decimal(str(inv.total_incl_vat))
+            inv.payable_before_payments = charge
             inv.incoming_payment_total = payment_state.paid_total
-            inv.base_payable_before_payments = Decimal(str(inv.base_total_incl_vat))
+            inv.base_payable_before_payments = charge
             inv.base_incoming_payment_total = payment_state.base_paid_total
             inv.settlement_status = (
                 InvoiceSettlementStatus.SETTLED
@@ -1680,9 +1944,7 @@ async def transition_status(
         if probe_kind == InvoiceDocumentKind.ADVANCE and advance_draft_conflict:
             from jai.services.advance import AdvanceConflictError
 
-            raise AdvanceConflictError(
-                "Only one open Advance DRAFT is allowed per Quote."
-            ) from exc
+            raise AdvanceConflictError("Only one open Advance DRAFT is allowed per Quote.") from exc
         if invoice_number_conflict:
             raise ValueError("Invoice number already exists (concurrent issue).") from exc
         raise

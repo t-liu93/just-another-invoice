@@ -1,5 +1,7 @@
 """Authoritative invoice and quote payment services."""
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import uuid
@@ -47,7 +49,20 @@ from jai.services.document_chain import (
 )
 from jai.services.money import quantize_money, quantize_to_minor_unit
 
-_INCOMING_PAYMENT_KINDS = {InvoiceDocumentKind.STANDARD, InvoiceDocumentKind.ADVANCE}
+_INCOMING_PAYMENT_KINDS = {
+    InvoiceDocumentKind.STANDARD,
+    InvoiceDocumentKind.ADVANCE,
+    InvoiceDocumentKind.FINAL,
+}
+
+
+def _payment_charge(invoice: Invoice) -> Decimal:
+    """Final invoices collect only their frozen application residual."""
+    return (
+        Decimal(str(invoice.payable_before_payments))
+        if InvoiceDocumentKind(invoice.document_kind) == InvoiceDocumentKind.FINAL
+        else Decimal(str(invoice.total_incl_vat))
+    )
 
 
 class _PaymentLike(Protocol):
@@ -412,8 +427,8 @@ async def _build_invoice_response(
 ) -> InvoicePaymentsResponse:
     if state is None:
         state = recompute_payment_state(
-            Decimal(str(invoice.total_incl_vat)),
-            Decimal(str(invoice.base_total_incl_vat)),
+            _payment_charge(invoice),
+            _payment_charge(invoice),
             payments,
             InvoiceStatus(invoice.status),
         )
@@ -607,8 +622,10 @@ def _write_invoice_state(invoice: Invoice, state: PaymentState) -> None:
     invoice.status = state.new_status
     # These M12 columns are persisted caches, not a second settlement path.
     # Keep them in the same transaction as the legacy due/paid state.
-    invoice.payable_before_payments = Decimal(str(invoice.total_incl_vat))
-    invoice.base_payable_before_payments = Decimal(str(invoice.base_total_incl_vat))
+    # Final's payable amount is its residual charge, not the displayed full project.
+    if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.FINAL:
+        invoice.payable_before_payments = Decimal(str(invoice.total_incl_vat))
+        invoice.base_payable_before_payments = Decimal(str(invoice.base_total_incl_vat))
     invoice.incoming_payment_total = state.paid_total
     invoice.base_incoming_payment_total = state.base_paid_total
     invoice.settlement_status = (
@@ -662,12 +679,12 @@ async def record_payment(
     await session.flush()
     payments = await _load_payments_for_invoice(session, invoice.id)
     state = recompute_payment_state(
-        Decimal(str(invoice.total_incl_vat)),
-        Decimal(str(invoice.base_total_incl_vat)),
+        _payment_charge(invoice),
+        _payment_charge(invoice),
         payments,
         InvoiceStatus(invoice.status),
     )
-    if state.paid_total > Decimal(str(invoice.total_incl_vat)):
+    if state.paid_total > _payment_charge(invoice):
         raise ValueError(
             "Payment exceeds the outstanding amount "
             "(cumulative payments would exceed the invoice total)."
@@ -868,12 +885,12 @@ async def update_payment(
             raise ValueError("Incoming payments are supported only for charge invoices.")
         invoice_payments = await _load_payments_for_invoice(session, invoice.id)
         invoice_state = recompute_payment_state(
-            Decimal(str(invoice.total_incl_vat)),
-            Decimal(str(invoice.base_total_incl_vat)),
+            _payment_charge(invoice),
+            _payment_charge(invoice),
             invoice_payments,
             InvoiceStatus(invoice.status),
         )
-        if invoice_state.paid_total > Decimal(str(invoice.total_incl_vat)):
+        if invoice_state.paid_total > _payment_charge(invoice):
             raise ValueError(
                 "Payment exceeds the outstanding amount "
                 "(cumulative payments would exceed the invoice total after this edit)."
@@ -948,8 +965,8 @@ async def delete_payment(
     if invoice is not None:
         invoice_payments = await _load_payments_for_invoice(session, invoice.id)
         invoice_state = recompute_payment_state(
-            Decimal(str(invoice.total_incl_vat)),
-            Decimal(str(invoice.base_total_incl_vat)),
+            _payment_charge(invoice),
+            _payment_charge(invoice),
             invoice_payments,
             InvoiceStatus(invoice.status),
         )

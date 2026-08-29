@@ -21,6 +21,7 @@ from jai.services.advance import (
     requested_advance_gross,
     subtract_exact_advance_credits,
 )
+from jai.services.final import net_advance_application_buckets
 
 
 def _bucket(net: str, vat: str) -> AdvanceBucket:
@@ -99,9 +100,7 @@ def test_mixed_21_9_0_components_close_exactly_after_20_50_30() -> None:
             for source, used in zip(remaining, part, strict=True)
         ]
 
-    assert all(
-        bucket.taxable_amount == bucket.vat_amount == Decimal("0") for bucket in remaining
-    )
+    assert all(bucket.taxable_amount == bucket.vat_amount == Decimal("0") for bucket in remaining)
     for index, source in enumerate(original):
         assert sum((part[index].taxable_amount for part in allocated), Decimal("0")) == (
             source.taxable_amount
@@ -151,9 +150,7 @@ def test_minor_unit_rounded_zero_is_rejected_by_shared_calculation_gate() -> Non
 
 def test_exact_credit_reopens_only_its_real_source_vat_bucket() -> None:
     vat_21 = _bucket("100.00", "21.00")
-    vat_9 = AdvanceBucket(
-        uuid4(), "Reduced", Decimal("9"), Decimal("100.00"), Decimal("9.00")
-    )
+    vat_9 = AdvanceBucket(uuid4(), "Reduced", Decimal("9"), Decimal("100.00"), Decimal("9.00"))
     credit_9 = AdvanceBucket(
         vat_9.vat_rate_id, "Reduced", Decimal("9"), Decimal("20.00"), Decimal("1.80")
     )
@@ -161,6 +158,19 @@ def test_exact_credit_reopens_only_its_real_source_vat_bucket() -> None:
     assert remaining[0] == vat_21
     assert remaining[1].taxable_amount == Decimal("80.00")
     assert remaining[1].vat_amount == Decimal("7.20")
+
+
+def test_final_application_omits_a_fully_pre_final_credited_bucket() -> None:
+    vat_21 = _bucket("100.00", "21.00")
+    vat_9 = AdvanceBucket(uuid4(), "Reduced", Decimal("9"), Decimal("20.00"), Decimal("1.80"))
+    fully_credited = AdvanceBucket(
+        vat_9.vat_rate_id, "Reduced", Decimal("9"), Decimal("20.00"), Decimal("1.80")
+    )
+    net = net_advance_application_buckets([vat_21, vat_9], [fully_credited])
+    assert [(item.taxable_amount, item.vat_amount) for item in net] == [
+        (Decimal("100.00"), Decimal("21.00")),
+        (Decimal("0.00"), Decimal("0.00")),
+    ]
 
 
 def test_open_advance_draft_query_locks_only_for_the_create_path() -> None:

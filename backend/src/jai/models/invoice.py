@@ -14,6 +14,8 @@ Design:
 - All money columns are NUMERIC(18, 3) – same scale as quantize_money().
 """
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import uuid
@@ -50,7 +52,11 @@ from jai.models._enums import (
 )
 
 if TYPE_CHECKING:
-    from jai.models.document import InvoiceCreditBasisLine, InvoicePartySnapshot
+    from jai.models.document import (
+        FinalAdvanceApplication,
+        InvoiceCreditBasisLine,
+        InvoicePartySnapshot,
+    )
 
 # ---------------------------------------------------------------------------
 # Money column type alias for readability
@@ -66,9 +72,7 @@ class Invoice(Base):
 
     __tablename__ = "invoice"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # -- Tenant scoping (red-line 2) ------------------------------------------
     company_id: Mapped[uuid.UUID] = mapped_column(
@@ -94,9 +98,7 @@ class Invoice(Base):
     # enforces uniqueness once a number exists.
     invoice_number: Mapped[str | None] = mapped_column(Text, nullable=True)
     sequence_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    customer_sequence_number: Mapped[int | None] = mapped_column(
-        BigInteger, nullable=True
-    )
+    customer_sequence_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     unique_hash: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="Reserved for M9 public link; not active in M5."
     )
@@ -130,20 +132,19 @@ class Invoice(Base):
     issued_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+    # Original accepted-Quote totals frozen when a Final is created.  They are
+    # presentation/variance snapshots, never a second pricing authority.
+    final_original_taxable_amount: Mapped[object | None] = mapped_column(_MONEY, nullable=True)
+    final_original_vat_amount: Mapped[object | None] = mapped_column(_MONEY, nullable=True)
+    final_original_gross_amount: Mapped[object | None] = mapped_column(_MONEY, nullable=True)
 
     # -- Lifecycle status -----------------------------------------------------
-    status: Mapped[InvoiceStatus] = mapped_column(
-        nullable=False, server_default="DRAFT"
-    )
-    paid_status: Mapped[InvoicePaidStatus] = mapped_column(
-        nullable=False, server_default="UNPAID"
-    )
+    status: Mapped[InvoiceStatus] = mapped_column(nullable=False, server_default="DRAFT")
+    paid_status: Mapped[InvoicePaidStatus] = mapped_column(nullable=False, server_default="UNPAID")
 
     # -- Currency (M5: must equal company.base_currency) ---------------------
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    exchange_rate: Mapped[object] = mapped_column(
-        _FX, nullable=False, server_default=text("1")
-    )
+    exchange_rate: Mapped[object] = mapped_column(_FX, nullable=False, server_default=text("1"))
 
     # -- VAT settings ---------------------------------------------------------
     tax_mode: Mapped[InvoiceTaxMode] = mapped_column(nullable=False)
@@ -167,9 +168,7 @@ class Invoice(Base):
     vat_treatment_requires_icp: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     # -- Discount -------------------------------------------------------------
-    discount_type: Mapped[DiscountType] = mapped_column(
-        nullable=False, server_default="NONE"
-    )
+    discount_type: Mapped[DiscountType] = mapped_column(nullable=False, server_default="NONE")
     discount_value: Mapped[object] = mapped_column(
         Numeric(10, 3), nullable=False, server_default=text("0")
     )
@@ -263,8 +262,19 @@ class Invoice(Base):
         "InvoicePartySnapshot", cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
     credit_basis_lines: Mapped[list[InvoiceCreditBasisLine]] = relationship(
-        "InvoiceCreditBasisLine", cascade="all, delete-orphan", lazy="selectin",
+        "InvoiceCreditBasisLine",
+        cascade="all, delete-orphan",
+        lazy="selectin",
         order_by="InvoiceCreditBasisLine.sort_order",
+    )
+    final_advance_applications: Mapped[list[FinalAdvanceApplication]] = relationship(
+        "FinalAdvanceApplication",
+        foreign_keys="FinalAdvanceApplication.final_invoice_id",
+        cascade="all, delete-orphan",
+        # Only Final reads request this explicitly.  A default select-in here
+        # would add a useless query to every legacy Standard chain projection.
+        lazy="noload",
+        order_by="FinalAdvanceApplication.sort_order",
     )
 
     # -- Table constraints ----------------------------------------------------
@@ -278,9 +288,7 @@ class InvoiceLine(Base):
 
     __tablename__ = "invoice_line"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -310,9 +318,7 @@ class InvoiceLine(Base):
 
     # -- Input fields ---------------------------------------------------------
     unit_price: Mapped[object] = mapped_column(_MONEY, nullable=False)
-    discount_type: Mapped[DiscountType] = mapped_column(
-        nullable=False, server_default="NONE"
-    )
+    discount_type: Mapped[DiscountType] = mapped_column(nullable=False, server_default="NONE")
     discount_value: Mapped[object] = mapped_column(
         Numeric(10, 3), nullable=False, server_default=text("0")
     )
@@ -349,9 +355,7 @@ class InvoiceTax(Base):
 
     __tablename__ = "invoice_tax"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -377,9 +381,7 @@ class InvoiceLineTax(Base):
 
     __tablename__ = "invoice_line_tax"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     invoice_line_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

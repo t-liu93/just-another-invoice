@@ -194,6 +194,55 @@ class AdvanceDraftUpdate(AdvanceCalculationRequest):
     reference_number: str | None = None
 
 
+class FinalDraftCreate(BaseModel):
+    """Create the one editable Final from accepted Quote snapshots."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    invoice_date: date
+    due_date: date | None = None
+    supply_or_advance_date: date | None = None
+    reference_number: str | None = None
+
+
+class FinalAdvanceApplicationTaxRead(BaseModel):
+    source_vat_rate_id: uuid.UUID
+    source_vat_rate_label: str
+    source_vat_rate_percent: Decimal
+    taxable_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+    base_taxable_amount: Decimal
+    base_vat_amount: Decimal
+    base_gross_amount: Decimal
+
+
+class FinalAdvanceApplicationRead(BaseModel):
+    advance_invoice_id: uuid.UUID
+    advance_invoice_number: str
+    advance_invoice_date: date
+    sort_order: int
+    taxable_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+    base_taxable_amount: Decimal
+    base_vat_amount: Decimal
+    base_gross_amount: Decimal
+    taxes: list[FinalAdvanceApplicationTaxRead] = []
+
+
+class FinalTotalsRead(BaseModel):
+    taxable_amount: Decimal
+    vat_total: Decimal
+    gross_amount: Decimal
+
+
+class FinalVarianceRead(BaseModel):
+    taxable_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+
+
 class CreditCalculationLineInput(BaseModel):
     """One source-basis selection for the dedicated future Credit calculator."""
 
@@ -470,6 +519,10 @@ class InvoiceRead(BaseModel):
     source_invoice_id: uuid.UUID | None = None
     replacement_of_credit_note_id: uuid.UUID | None = None
     compensates_credit_note_id: uuid.UUID | None = None
+    original_quote_totals: FinalTotalsRead | None = None
+    final_totals: FinalTotalsRead | None = None
+    final_variance: FinalVarianceRead | None = None
+    final_advance_applications: list[FinalAdvanceApplicationRead] = []
 
     currency: str
     exchange_rate: Decimal

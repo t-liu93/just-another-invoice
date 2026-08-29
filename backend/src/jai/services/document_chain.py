@@ -4,6 +4,8 @@ This module is the only place that derives document-chain totals.  It keeps
 the API and Vue layer from performing settlement arithmetic.
 """
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import uuid
@@ -96,8 +98,10 @@ def _safe_metadata(
     """Validate and JSON-serialise the one closed schema for an event type."""
     try:
         # JSON mode deliberately turns UUID/Decimal into canonical strings.
-        return _EVENT_METADATA_MODELS[event_type].model_validate(metadata or {}).model_dump(
-            mode="json"
+        return (
+            _EVENT_METADATA_MODELS[event_type]
+            .model_validate(metadata or {})
+            .model_dump(mode="json")
         )
     except ValidationError as exc:
         raise ValueError("Invalid document-chain event metadata.") from exc
@@ -344,6 +348,20 @@ async def get_document_chain(
     from jai.services.advance import assess_advance_creation
 
     advance_creation = await assess_advance_creation(session, quote)
+    issued_advance_exists = any(
+        InvoiceDocumentKind(invoice.document_kind) == InvoiceDocumentKind.ADVANCE
+        and InvoiceStatus(invoice.status) in {InvoiceStatus.SENT, InvoiceStatus.COMPLETED}
+        for invoice in invoices
+    )
+    final_exists = any(
+        InvoiceDocumentKind(invoice.document_kind) == InvoiceDocumentKind.FINAL
+        for invoice in invoices
+    )
+    open_advance_exists = any(
+        InvoiceDocumentKind(invoice.document_kind) == InvoiceDocumentKind.ADVANCE
+        and InvoiceStatus(invoice.status) == InvoiceStatus.DRAFT
+        for invoice in invoices
+    )
     actions = [
         DocumentChainAvailableActionRead(
             code="CONVERT_TO_INVOICE",
@@ -360,6 +378,16 @@ async def get_document_chain(
         ),
         DocumentChainAvailableActionRead(
             code="CREATE_ADVANCE", available=advance_creation.available
+        ),
+        DocumentChainAvailableActionRead(
+            code="CREATE_FINAL",
+            available=(
+                mode == QuoteSettlementMode.FORMAL_ADVANCE
+                and QuoteStatus(quote.status) == QuoteStatus.ACCEPTED
+                and issued_advance_exists
+                and not final_exists
+                and not open_advance_exists
+            ),
         ),
         DocumentChainAvailableActionRead(code="CREATE_CREDIT_NOTE", available=False),
     ]

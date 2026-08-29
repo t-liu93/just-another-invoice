@@ -1097,6 +1097,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/{quote_id}/final-invoice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Final Endpoint
+         * @description Create the one editable Final and its frozen Advance applications.
+         */
+        post: operations["create_final_endpoint_api_v1_quotes__quote_id__final_invoice_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{source_invoice_id}/credit-notes/calculate": {
         parameters: {
             query?: never;
@@ -4635,6 +4655,99 @@ export interface components {
              */
             total_non_deductible_net: string;
         };
+        /** FinalAdvanceApplicationRead */
+        FinalAdvanceApplicationRead: {
+            /**
+             * Advance Invoice Id
+             * Format: uuid
+             */
+            advance_invoice_id: string;
+            /** Advance Invoice Number */
+            advance_invoice_number: string;
+            /**
+             * Advance Invoice Date
+             * Format: date
+             */
+            advance_invoice_date: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Taxable Amount */
+            base_taxable_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
+            /**
+             * Taxes
+             * @default []
+             */
+            taxes?: components["schemas"]["FinalAdvanceApplicationTaxRead"][];
+        };
+        /** FinalAdvanceApplicationTaxRead */
+        FinalAdvanceApplicationTaxRead: {
+            /**
+             * Source Vat Rate Id
+             * Format: uuid
+             */
+            source_vat_rate_id: string;
+            /** Source Vat Rate Label */
+            source_vat_rate_label: string;
+            /** Source Vat Rate Percent */
+            source_vat_rate_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Taxable Amount */
+            base_taxable_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
+        };
+        /**
+         * FinalDraftCreate
+         * @description Create the one editable Final from accepted Quote snapshots.
+         */
+        FinalDraftCreate: {
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Due Date */
+            due_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+        };
+        /** FinalTotalsRead */
+        FinalTotalsRead: {
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Gross Amount */
+            gross_amount: string;
+        };
+        /** FinalVarianceRead */
+        FinalVarianceRead: {
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+        };
         /**
          * ForgotPasswordRequest
          * @description Body for ``POST /auth/forgot-password``.
@@ -5263,6 +5376,14 @@ export interface components {
             replacement_of_credit_note_id?: string | null;
             /** Compensates Credit Note Id */
             compensates_credit_note_id?: string | null;
+            original_quote_totals?: components["schemas"]["FinalTotalsRead"] | null;
+            final_totals?: components["schemas"]["FinalTotalsRead"] | null;
+            final_variance?: components["schemas"]["FinalVarianceRead"] | null;
+            /**
+             * Final Advance Applications
+             * @default []
+             */
+            final_advance_applications?: components["schemas"]["FinalAdvanceApplicationRead"][];
             /** Currency */
             currency: string;
             /** Exchange Rate */
@@ -10488,6 +10609,41 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_final_endpoint_api_v1_quotes__quote_id__final_invoice_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalDraftCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
