@@ -21,12 +21,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session, set_rls_company
+from jai.models._enums import InvoiceDocumentKind
 from jai.models.user import User
 from jai.schemas.document_chain import DocumentChainRead
 from jai.schemas.email_log import DocumentSendRequest, EmailLogListResponse, EmailLogRead
 from jai.schemas.invoice import (
     AdvanceCalculationRead,
     AdvanceCalculationRequest,
+    AdvanceDraftCreate,
+    AdvanceDraftUpdate,
     CreditCalculationRead,
     CreditCalculationRequest,
     InvoiceCalculationRead,
@@ -37,8 +40,17 @@ from jai.schemas.invoice import (
     InvoiceWrite,
     ProductInvoiceOptionListResponse,
 )
-from jai.services.document_chain import get_invoice_document_chain
+from jai.services.advance import (
+    AdvanceConflictError,
+    AdvanceStaleError,
+    AdvanceValidationError,
+    calculate_advance,
+    create_advance_draft,
+    update_advance_draft,
+)
+from jai.services.document_chain import ModeConflictError, get_invoice_document_chain
 from jai.services.invoice import (
+    InvoiceDedicatedUpdateRequiredError,
     InvoiceLifecycleConflictError,
     create_invoice,
     delete_invoice,
@@ -56,9 +68,7 @@ router = APIRouter(prefix="/api/v1", tags=["invoices"])
 
 def _owner_only(user: User) -> None:
     if user.role != "owner":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Owner access required."
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner access required.")
 
 
 def _require_company_id(user: User) -> uuid.UUID:
@@ -68,6 +78,10 @@ def _require_company_id(user: User) -> uuid.UUID:
             detail="User has no company associated.",
         )
     return user.company_id
+
+
+def _advance_error(status_code: int, code: str, exc: Exception) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"code": code, "message": str(exc)})
 
 
 async def _require_company(
@@ -121,19 +135,85 @@ async def calculate_invoice_endpoint(
 @router.post(
     "/quotes/{quote_id}/advance-invoices/calculate",
     response_model=AdvanceCalculationRead,
-    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    status_code=status.HTTP_200_OK,
 )
-async def calculate_advance_placeholder(
+async def calculate_advance_endpoint(
     quote_id: uuid.UUID,
     body: AdvanceCalculationRequest,
     user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> AdvanceCalculationRead:
-    """Publish the dedicated M12 intent without silently accepting it in Standard pricing."""
+    """Preview a Formal Advance from immutable accepted-Quote snapshots."""
     _owner_only(user)
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Advance calculation lands in M12 Step 3.",
-    )
+    try:
+        return await calculate_advance(
+            session, company_id=_require_company_id(user), quote_id=quote_id, request=body
+        )
+    except ModeConflictError as exc:
+        raise _advance_error(409, exc.code, exc) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Quote not found.") from exc
+    except (AdvanceStaleError, AdvanceConflictError) as exc:
+        raise _advance_error(409, exc.code, exc) from exc
+    except (AdvanceValidationError, ValueError) as exc:
+        raise _advance_error(422, getattr(exc, "code", "ADVANCE_INVALID"), exc) from exc
+
+
+@router.post(
+    "/quotes/{quote_id}/advance-invoices",
+    response_model=InvoiceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_advance_endpoint(
+    quote_id: uuid.UUID,
+    body: AdvanceDraftCreate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceRead:
+    _owner_only(user)
+    try:
+        return await create_advance_draft(
+            session,
+            company_id=_require_company_id(user),
+            quote_id=quote_id,
+            body=body,
+            creator_id=user.id,
+        )
+    except ModeConflictError as exc:
+        raise _advance_error(409, exc.code, exc) from exc
+    except AdvanceConflictError as exc:
+        raise _advance_error(409, exc.code, exc) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Quote not found.") from exc
+    except (AdvanceValidationError, ValueError) as exc:
+        raise _advance_error(422, getattr(exc, "code", "ADVANCE_INVALID"), exc) from exc
+
+
+@router.put("/advance-invoices/{invoice_id}", response_model=InvoiceRead)
+async def update_advance_endpoint(
+    invoice_id: uuid.UUID,
+    body: AdvanceDraftUpdate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceRead:
+    _owner_only(user)
+    try:
+        result = await update_advance_draft(
+            session,
+            company_id=_require_company_id(user),
+            invoice_id=invoice_id,
+            body=body,
+            actor_user_id=user.id,
+        )
+    except ModeConflictError as exc:
+        raise _advance_error(409, exc.code, exc) from exc
+    except AdvanceConflictError as exc:
+        raise _advance_error(409, exc.code, exc) from exc
+    except (AdvanceValidationError, ValueError) as exc:
+        raise _advance_error(422, getattr(exc, "code", "ADVANCE_INVALID"), exc) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    return result
 
 
 @router.post(
@@ -165,6 +245,7 @@ async def list_invoices_endpoint(
     customer_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     paid_status_filter: str | None = Query(default=None, alias="paid_status"),
+    document_kind: InvoiceDocumentKind | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
@@ -185,6 +266,7 @@ async def list_invoices_endpoint(
         customer_id=customer_id,
         status=status_filter,
         paid_status=paid_status_filter,
+        document_kind=document_kind,
         date_from=date_from,
         date_to=date_to,
         limit=limit,
@@ -231,9 +313,7 @@ async def get_invoice_endpoint(
     company_id = _require_company_id(user)
     inv = await get_invoice(session, invoice_id, company_id)
     if inv is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
     return inv
 
 
@@ -270,15 +350,18 @@ async def update_invoice_endpoint(
             company_currency=base_currency,
             actor_user_id=user.id,
         )
+    except InvoiceDedicatedUpdateRequiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
     if inv is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
     return inv
 
 
@@ -292,15 +375,18 @@ async def delete_invoice_endpoint(
     company_id = _require_company_id(user)
     try:
         deleted = await delete_invoice(session, invoice_id, company_id, actor_user_id=user.id)
+    except (AdvanceConflictError, InvoiceLifecycleConflictError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
 
 
 @router.post("/invoices/{invoice_id}/status", response_model=InvoiceRead)
@@ -326,15 +412,23 @@ async def transition_status_endpoint(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
+    except AdvanceConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except AdvanceValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
     if inv is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
     return inv
 
 
@@ -422,16 +516,11 @@ async def send_invoice_email_endpoint(
     if invoice.invoice_number is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Cannot email an unissued draft invoice; "
-                "issue it (mark as Sent) first."
-            ),
+            detail=("Cannot email an unissued draft invoice; issue it (mark as Sent) first."),
         )
 
     # -- Load company ----------------------------------------------------------
-    company_result = await session.execute(
-        select(Company).where(Company.id == company_id)
-    )
+    company_result = await session.execute(select(Company).where(Company.id == company_id))
     company = company_result.scalar_one_or_none()
     if company is None:
         raise HTTPException(
@@ -464,9 +553,7 @@ async def send_invoice_email_endpoint(
         company_default_setting.locale if company_default_setting is not None else None
     )
     customer_locale: str | None = getattr(customer, "locale", None)
-    resolved_locale = resolve_document_locale(
-        body.locale, customer_locale, company_default_locale
-    )
+    resolved_locale = resolve_document_locale(body.locale, customer_locale, company_default_locale)
 
     # -- Render PDF immediately (D5) -------------------------------------------
     pdf_bytes, filename = await render_invoice_pdf(
@@ -521,9 +608,7 @@ async def list_invoice_emails_endpoint(
 
     # Verify invoice belongs to company (cross-company → 404).
     inv_result = await session.execute(
-        select(Invoice).where(
-            Invoice.id == invoice_id, Invoice.company_id == company_id
-        )
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == company_id)
     )
     if inv_result.scalar_one_or_none() is None:
         raise HTTPException(

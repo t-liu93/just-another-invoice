@@ -47,6 +47,8 @@ from jai.services.document_chain import (
 )
 from jai.services.money import quantize_money, quantize_to_minor_unit
 
+_INCOMING_PAYMENT_KINDS = {InvoiceDocumentKind.STANDARD, InvoiceDocumentKind.ADVANCE}
+
 
 class _PaymentLike(Protocol):
     amount: object
@@ -629,8 +631,8 @@ async def record_payment(
 ) -> InvoicePaymentsResponse:
     await set_rls_company(session, company_id)
     invoice = await _load_invoice(session, invoice_id, company_id, lock=True)
-    if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD:
-        raise ValueError("Generic payment operations currently support STANDARD invoices only.")
+    if InvoiceDocumentKind(invoice.document_kind) not in _INCOMING_PAYMENT_KINDS:
+        raise ValueError("Incoming payments are supported only for charge invoices.")
     if invoice.invoice_number is None:
         raise ValueError(
             "Cannot record a payment on an unissued draft invoice; issue it (mark as Sent) first."
@@ -749,8 +751,8 @@ async def list_invoice_payments(
 ) -> InvoicePaymentsResponse:
     await set_rls_company(session, company_id)
     invoice = await _load_invoice(session, invoice_id, company_id)
-    if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD:
-        raise ValueError("Generic payment operations currently support STANDARD invoices only.")
+    if InvoiceDocumentKind(invoice.document_kind) not in _INCOMING_PAYMENT_KINDS:
+        raise ValueError("Incoming payments are supported only for charge invoices.")
     payments = await _load_payments_for_invoice(session, invoice.id)
     return await _build_invoice_response(session, invoice, payments)
 
@@ -862,8 +864,8 @@ async def update_payment(
     invoice_payments: list[Payment] | None = None
     invoice_state: PaymentState | None = None
     if invoice is not None:
-        if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD:
-            raise ValueError("Generic payment operations currently support STANDARD invoices only.")
+        if InvoiceDocumentKind(invoice.document_kind) not in _INCOMING_PAYMENT_KINDS:
+            raise ValueError("Incoming payments are supported only for charge invoices.")
         invoice_payments = await _load_payments_for_invoice(session, invoice.id)
         invoice_state = recompute_payment_state(
             Decimal(str(invoice.total_incl_vat)),
@@ -893,8 +895,8 @@ async def update_payment(
     if quote is not None:
         quote_payments = await _load_payments_for_quote(session, quote.id)
     if invoice is not None:
-        if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD:
-            raise ValueError("Generic payment operations currently support STANDARD invoices only.")
+        if InvoiceDocumentKind(invoice.document_kind) not in _INCOMING_PAYMENT_KINDS:
+            raise ValueError("Incoming payments are supported only for charge invoices.")
         invoice_payments = await _load_payments_for_invoice(session, invoice.id)
     return PaymentMutationResponse(
         payment_id=payment_id,
@@ -922,10 +924,10 @@ async def delete_payment(
     await set_rls_company(session, company_id)
     payment, quote, invoice = await _lock_payment_context(session, payment_id, company_id)
     if invoice is not None and (
-        InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD
+        InvoiceDocumentKind(invoice.document_kind) not in _INCOMING_PAYMENT_KINDS
     ):
         await session.rollback()
-        raise ValueError("Generic payment operations currently support STANDARD invoices only.")
+        raise ValueError("Incoming payments are supported only for charge invoices.")
     if quote is not None:
         await append_document_chain_event(
             session,

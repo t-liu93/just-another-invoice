@@ -70,7 +70,7 @@ from typing import Literal
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import InvoiceStatus
+from jai.models._enums import InvoiceDocumentKind, InvoiceStatus
 from jai.models.expense import Expense
 from jai.models.invoice import Invoice
 from jai.schemas.report import ProfitLossReport, ProfitLossSeriesItem
@@ -209,6 +209,9 @@ async def compute_profit_loss(
     stmt_inv = select(Invoice).where(
         and_(
             Invoice.company_id == company_id,
+            # Step 3 compatibility boundary: the legacy projection remains
+            # Standard-only until Step 8 adds explicit formal revenue events.
+            Invoice.document_kind == InvoiceDocumentKind.STANDARD,
             Invoice.status.in_(revenue_statuses),
             Invoice.invoice_date >= date_from,
             Invoice.invoice_date <= date_to,

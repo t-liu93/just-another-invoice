@@ -27,7 +27,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import delete, func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -114,6 +114,12 @@ class InvoiceLifecycleConflictError(ValueError):
     """
 
     code = "INVOICE_LIFECYCLE_CONFLICT"
+
+
+class InvoiceDedicatedUpdateRequiredError(ValueError):
+    """Tell callers to use a document-kind-specific draft command."""
+
+    code = "ADVANCE_DEDICATED_UPDATE_REQUIRED"
 
 
 # ---------------------------------------------------------------------------
@@ -1123,6 +1129,10 @@ async def update_invoice(
         return None
 
     if InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD:
+        if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.ADVANCE:
+            raise InvoiceDedicatedUpdateRequiredError(
+                "Advance invoices must be updated through the dedicated Advance endpoint."
+            )
         raise ValueError("Generic invoice update currently supports STANDARD invoices only.")
 
     # Only DRAFT invoices can be fully edited; SENT is a locked formal document.
@@ -1220,66 +1230,101 @@ async def delete_invoice(
     from jai.services.document_chain import append_document_chain_event
 
     await set_rls_company(session, company_id)
-    # Deleting a converted draft makes PostgreSQL SET NULL on both the quote
-    # backlink and its payments. Lock source quotes before the invoice so this
-    # path shares the quote -> invoice order used by quote-payment mutations.
-    source_quote_ids_result = await session.execute(
-        select(Payment.quote_id)
-        .where(
-            Payment.invoice_id == invoice_id,
-            Payment.company_id == company_id,
-            Payment.quote_id.is_not(None),
-        )
-        .distinct()
-    )
-    source_quote_ids = sorted(
-        row.quote_id for row in source_quote_ids_result.all() if row.quote_id is not None
-    )
-    if source_quote_ids:
-        await session.execute(
-            select(_Quote)
-            .where(
-                _Quote.id.in_(source_quote_ids),
-                _Quote.company_id == company_id,
+    try:
+        # All document mutations share Quote -> Invoice ordering.  Probe
+        # without a row lock first, then lock the complete Quote prefix: the
+        # Invoice's own provenance (Formal Advance and converted Standards)
+        # plus M11.5 quote-origin payment provenance.
+        probe = (
+            await session.execute(
+                select(Invoice.document_kind, Invoice.quote_id).where(
+                    Invoice.id == invoice_id,
+                    Invoice.company_id == company_id,
+                )
             )
-            .order_by(_Quote.id)
-            .with_for_update()
+        ).one_or_none()
+        if probe is None:
+            return False
+        source_quote_ids_result = await session.execute(
+            select(Payment.quote_id)
+            .where(
+                Payment.invoice_id == invoice_id,
+                Payment.company_id == company_id,
+                Payment.quote_id.is_not(None),
+            )
+            .distinct()
         )
+        quote_ids = {
+            row.quote_id for row in source_quote_ids_result.all() if row.quote_id is not None
+        }
+        if probe.quote_id is not None:
+            quote_ids.add(probe.quote_id)
+        ordered_quote_ids = sorted(quote_ids)
+        if ordered_quote_ids:
+            await session.execute(
+                select(_Quote)
+                .where(
+                    _Quote.id.in_(ordered_quote_ids),
+                    _Quote.company_id == company_id,
+                )
+                .order_by(_Quote.id)
+                .with_for_update()
+            )
 
-    stmt = (
-        select(Invoice)
-        .where(
-            Invoice.id == invoice_id,
-            Invoice.company_id == company_id,
+        inv = (
+            await session.execute(
+                select(Invoice)
+                .where(
+                    Invoice.id == invoice_id,
+                    Invoice.company_id == company_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if inv is None:
+            return False
+        # The discovery read is deliberately unlocked; never act on it without
+        # rechecking identity/provenance after the Invoice lock is held.
+        if (
+            InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind(probe.document_kind)
+            or inv.quote_id != probe.quote_id
+        ):
+            raise InvoiceLifecycleConflictError(
+                "Invoice changed while acquiring its Quote lock prefix."
+            )
+        if InvoiceDocumentKind(inv.document_kind) not in {
+            InvoiceDocumentKind.STANDARD,
+            InvoiceDocumentKind.ADVANCE,
+        }:
+            raise ValueError(
+                "This document kind cannot be deleted by the generic invoice endpoint."
+            )
+        if inv.status != InvoiceStatus.DRAFT:
+            raise ValueError(
+                f"Cannot delete a {inv.status.value.lower()} invoice. "
+                "Only DRAFT invoices may be deleted."
+            )
+        await append_document_chain_event(
+            session,
+            company_id=company_id,
+            quote_id=inv.quote_id,
+            invoice_id=inv.id,
+            actor_user_id=actor_user_id,
+            event_type=DocumentChainEventType.INVOICE_DELETED,
+            metadata={"document_kind": InvoiceDocumentKind(inv.document_kind).value},
         )
-        .with_for_update()
-    )
-    result = await session.execute(stmt)
-    inv = result.scalar_one_or_none()
-    if inv is None:
-        return False
+        await session.delete(inv)
+        await session.commit()
+        return True
+    except DBAPIError as exc:
+        await session.rollback()
+        from jai.services.advance import AdvanceConflictError, is_retryable_transaction_conflict
 
-    if InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD:
-        raise ValueError("Generic invoice deletion currently supports STANDARD invoices only.")
-
-    if inv.status != InvoiceStatus.DRAFT:
-        raise ValueError(
-            f"Cannot delete a {inv.status.value.lower()} invoice. "
-            "Only DRAFT invoices may be deleted."
-        )
-
-    await append_document_chain_event(
-        session,
-        company_id=company_id,
-        quote_id=inv.quote_id,
-        invoice_id=inv.id,
-        actor_user_id=actor_user_id,
-        event_type=DocumentChainEventType.INVOICE_DELETED,
-        metadata={"document_kind": InvoiceDocumentKind(inv.document_kind).value},
-    )
-    await session.delete(inv)
-    await session.commit()
-    return True
+        if is_retryable_transaction_conflict(exc):
+            raise AdvanceConflictError(
+                "Concurrent Formal Advance mutation; retry the command."
+            ) from exc
+        raise
 
 
 async def list_invoices(
@@ -1290,6 +1335,7 @@ async def list_invoices(
     customer_id: uuid.UUID | None = None,
     status: str | None = None,
     paid_status: str | None = None,
+    document_kind: InvoiceDocumentKind | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     limit: int = 50,
@@ -1320,6 +1366,8 @@ async def list_invoices(
         base = base.where(Invoice.status == status)
     if paid_status:
         base = base.where(Invoice.paid_status == paid_status)
+    if document_kind is not None:
+        base = base.where(Invoice.document_kind == document_kind)
     if date_from:
         base = base.where(Invoice.invoice_date >= date_from)
     if date_to:
@@ -1391,6 +1439,46 @@ async def transition_status(
     from jai.services.document_chain import append_document_chain_event
 
     await set_rls_company(session, company_id)
+    # Discover the quote without locking first.  Formal issue then follows the
+    # global Quote -> Invoice order; Standard documents retain their legacy
+    # direct invoice lock path.
+    probe = (
+        await session.execute(
+            select(Invoice.document_kind, Invoice.quote_id).where(
+                Invoice.id == invoice_id, Invoice.company_id == company_id
+            )
+        )
+    ).one_or_none()
+    if probe is None:
+        return None
+    # These values are deliberately copied before any subsequent await, lock,
+    # or possible autoflush.  A failed flush invalidates ORM state before this
+    # function reaches its IntegrityError handler, so that handler must never
+    # dereference ``probe`` or ``inv`` to decide how to map the original error.
+    probe_kind = InvoiceDocumentKind(probe.document_kind)
+    probe_quote_id = probe.quote_id
+    if probe_kind == InvoiceDocumentKind.ADVANCE:
+        if probe_quote_id is None:
+            raise InvoiceLifecycleConflictError("Advance invoice has no Quote provenance.")
+        try:
+            quote = (
+                await session.execute(
+                    select(_Quote)
+                    .where(_Quote.id == probe_quote_id, _Quote.company_id == company_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+        except DBAPIError as exc:
+            await session.rollback()
+            from jai.services.advance import AdvanceConflictError, is_retryable_transaction_conflict
+
+            if is_retryable_transaction_conflict(exc):
+                raise AdvanceConflictError(
+                    "Concurrent invoice lifecycle mutation; retry the command."
+                ) from exc
+            raise
+        if quote is None or quote.settlement_mode.value != "FORMAL_ADVANCE":
+            raise InvoiceLifecycleConflictError("Advance Quote is not in FORMAL_ADVANCE mode.")
     stmt = (
         select(Invoice)
         .where(
@@ -1399,18 +1487,66 @@ async def transition_status(
         )
         .with_for_update()
     )
-    result = await session.execute(stmt)
+    try:
+        result = await session.execute(stmt)
+    except DBAPIError as exc:
+        await session.rollback()
+        from jai.services.advance import AdvanceConflictError, is_retryable_transaction_conflict
+
+        if is_retryable_transaction_conflict(exc):
+            raise AdvanceConflictError(
+                "Concurrent invoice lifecycle mutation; retry the command."
+            ) from exc
+        raise
     inv = result.scalar_one_or_none()
     if inv is None:
         return None
 
-    if InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD:
+    if probe_kind not in {
+        InvoiceDocumentKind.STANDARD,
+        InvoiceDocumentKind.ADVANCE,
+    }:
         raise InvoiceLifecycleConflictError(
             "Generic invoice lifecycle currently supports STANDARD invoices only."
         )
 
     current_status = InvoiceStatus(inv.status)
     new_status = body.status
+
+    if (
+        probe_kind == InvoiceDocumentKind.ADVANCE
+        and current_status == InvoiceStatus.CANCELLED
+        and new_status == InvoiceStatus.DRAFT
+    ):
+        # The Quote lock acquired above serializes status resurrection with
+        # Advance create/delete/issue.  The partial unique index added in 0034
+        # remains the final protection for direct/concurrent database writes.
+        from jai.services.advance import AdvanceConflictError
+
+        try:
+            other_open_draft = (
+                await session.execute(
+                    select(Invoice.id)
+                    .where(
+                        Invoice.quote_id == probe_quote_id,
+                        Invoice.document_kind == InvoiceDocumentKind.ADVANCE,
+                        Invoice.status == InvoiceStatus.DRAFT,
+                        Invoice.id != inv.id,
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+        except DBAPIError as exc:
+            await session.rollback()
+            from jai.services.advance import AdvanceConflictError, is_retryable_transaction_conflict
+
+            if is_retryable_transaction_conflict(exc):
+                raise AdvanceConflictError(
+                    "Concurrent invoice lifecycle mutation; retry the command."
+                ) from exc
+            raise
+        if other_open_draft is not None:
+            raise AdvanceConflictError("Only one open Advance DRAFT is allowed per Quote.")
 
     payment_result = await session.execute(
         select(Payment)
@@ -1446,6 +1582,16 @@ async def transition_status(
     )
 
     try:
+        if current_status == InvoiceStatus.DRAFT and new_status == InvoiceStatus.SENT:
+            if probe_kind == InvoiceDocumentKind.ADVANCE:
+                # Imported lazily to keep the dedicated Advance service's
+                # serializer dependency acyclic.  The Quote row is already
+                # held above, before this document lock.
+                from jai.services.advance import validate_advance_issue
+
+                assert probe_quote_id is not None
+                assert quote is not None
+                await validate_advance_issue(session, quote=quote, invoice=inv)
         inv.status = new_status
         if current_status == InvoiceStatus.DRAFT and new_status == InvoiceStatus.SENT:
             payment_state = recompute_payment_state(
@@ -1471,10 +1617,7 @@ async def transition_status(
                     else InvoiceSettlementStatus.OPEN
                 )
             )
-            if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.STANDARD:
-                await _create_native_issue_foundation(
-                    session, inv, issued_by_user_id=issued_by_user_id
-                )
+            await _create_native_issue_foundation(session, inv, issued_by_user_id=issued_by_user_id)
         if needs_number:
             numbering_config = await _load_numbering_config(session, company_id)
             cust_stmt = select(Customer).where(
@@ -1503,12 +1646,12 @@ async def transition_status(
         await append_document_chain_event(
             session,
             company_id=company_id,
-            quote_id=inv.quote_id,
+            quote_id=probe_quote_id,
             invoice_id=inv.id,
             actor_user_id=issued_by_user_id,
             event_type=event_type,
             metadata={
-                "document_kind": InvoiceDocumentKind(inv.document_kind).value,
+                "document_kind": probe_kind.value,
                 "status": InvoiceStatus(inv.status).value,
             },
         )
@@ -1525,8 +1668,33 @@ async def transition_status(
         await session.rollback()
         raise
     except IntegrityError as exc:
+        # Capture only ordinary values and exact database classification before
+        # rollback expires ORM attributes.  In particular, a CHECK/FK/NOT NULL
+        # violation must remain its original error rather than masquerading as
+        # the Formal Advance partial-unique conflict.
+        from jai.services.advance import is_advance_draft_conflict, is_invoice_number_conflict
+
+        advance_draft_conflict = is_advance_draft_conflict(exc)
+        invoice_number_conflict = is_invoice_number_conflict(exc)
         await session.rollback()
-        raise ValueError("Invoice number already exists (concurrent issue).") from exc
+        if probe_kind == InvoiceDocumentKind.ADVANCE and advance_draft_conflict:
+            from jai.services.advance import AdvanceConflictError
+
+            raise AdvanceConflictError(
+                "Only one open Advance DRAFT is allowed per Quote."
+            ) from exc
+        if invoice_number_conflict:
+            raise ValueError("Invoice number already exists (concurrent issue).") from exc
+        raise
+    except DBAPIError as exc:
+        await session.rollback()
+        from jai.services.advance import AdvanceConflictError, is_retryable_transaction_conflict
+
+        if is_retryable_transaction_conflict(exc):
+            raise AdvanceConflictError(
+                "Concurrent invoice lifecycle mutation; retry the command."
+            ) from exc
+        raise
 
     return read
 

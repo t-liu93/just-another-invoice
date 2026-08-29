@@ -60,7 +60,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import InvoiceStatus
+from jai.models._enums import InvoiceDocumentKind, InvoiceStatus
 from jai.models.expense import Expense
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment, PaymentTax
@@ -396,6 +396,10 @@ async def compute_vat_return(
     stmt_inv = select(Invoice).where(
         and_(
             Invoice.company_id == company_id,
+            # Step 3 keeps the existing invoice-date projection Standard-only.
+            # M11.5 quote-origin PaymentTax remains independently included
+            # below; Step 8 will add explicit formal tax events.
+            Invoice.document_kind == InvoiceDocumentKind.STANDARD,
             Invoice.status.in_(revenue_statuses),
             Invoice.invoice_date >= date_from,
             Invoice.invoice_date <= date_to,

@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import AddressType, InvoiceStatus
+from jai.models._enums import AddressType, InvoiceDocumentKind, InvoiceStatus
 from jai.models.address import Address
 from jai.models.customer import Customer
 from jai.models.invoice import Invoice
@@ -119,6 +119,9 @@ async def compute_icp(
     stmt_inv = select(Invoice).where(
         and_(
             Invoice.company_id == company_id,
+            # Step 3 compatibility boundary; formal document tax events land
+            # in Step 8 rather than accidentally traversing this legacy path.
+            Invoice.document_kind == InvoiceDocumentKind.STANDARD,
             Invoice.vat_treatment_requires_icp.is_(True),
             Invoice.status.in_(revenue_statuses),
             Invoice.invoice_date >= date_from,

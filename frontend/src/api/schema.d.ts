@@ -1053,10 +1053,44 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Calculate Advance Placeholder
-         * @description Publish the dedicated M12 intent without silently accepting it in Standard pricing.
+         * Calculate Advance Endpoint
+         * @description Preview a Formal Advance from immutable accepted-Quote snapshots.
          */
-        post: operations["calculate_advance_placeholder_api_v1_quotes__quote_id__advance_invoices_calculate_post"];
+        post: operations["calculate_advance_endpoint_api_v1_quotes__quote_id__advance_invoices_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/advance-invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Advance Endpoint */
+        post: operations["create_advance_endpoint_api_v1_quotes__quote_id__advance_invoices_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/advance-invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Advance Endpoint */
+        put: operations["update_advance_endpoint_api_v1_advance_invoices__invoice_id__put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2604,11 +2638,24 @@ export interface components {
         };
         /**
          * AdvanceCalculationRead
-         * @description Reserved authoritative Advance result component; Step 3 implements fields.
+         * @description Authoritative, side-effect-free Formal Advance allocation.
          */
         AdvanceCalculationRead: {
-            /** Detail */
-            detail: string;
+            input_mode: components["schemas"]["AdvanceInputMode"];
+            /** Requested Gross Amount */
+            requested_gross_amount: string;
+            /** Original Quote Gross Amount */
+            original_quote_gross_amount: string;
+            /** Remaining Capacity */
+            remaining_capacity: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Buckets */
+            buckets: components["schemas"]["AdvanceTaxBucketRead"][];
         };
         /**
          * AdvanceCalculationRequest
@@ -2618,8 +2665,67 @@ export interface components {
             input_mode: components["schemas"]["AdvanceInputMode"];
             /** Gross Amount */
             gross_amount?: number | string | null;
-            /** Percentage */
+            /**
+             * Percentage
+             * @description Percentage of the original accepted Quote gross; at most 3 decimal places.
+             */
             percentage?: number | string | null;
+        };
+        /**
+         * AdvanceDraftCreate
+         * @description Create the one open Formal Advance draft for an accepted Quote.
+         */
+        AdvanceDraftCreate: {
+            input_mode: components["schemas"]["AdvanceInputMode"];
+            /** Gross Amount */
+            gross_amount?: number | string | null;
+            /**
+             * Percentage
+             * @description Percentage of the original accepted Quote gross; at most 3 decimal places.
+             */
+            percentage?: number | string | null;
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /**
+             * Due Date
+             * @description Optional due date. When supplied it must not precede invoice_date.
+             */
+            due_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+        };
+        /**
+         * AdvanceDraftUpdate
+         * @description Replace a DRAFT Advance's immutable-snapshot allocation intent.
+         */
+        AdvanceDraftUpdate: {
+            input_mode: components["schemas"]["AdvanceInputMode"];
+            /** Gross Amount */
+            gross_amount?: number | string | null;
+            /**
+             * Percentage
+             * @description Percentage of the original accepted Quote gross; at most 3 decimal places.
+             */
+            percentage?: number | string | null;
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /**
+             * Due Date
+             * @description Optional due date. When supplied it must not precede invoice_date.
+             */
+            due_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
         };
         /**
          * AdvanceInputMode
@@ -2627,6 +2733,27 @@ export interface components {
          * @enum {string}
          */
         AdvanceInputMode: "GROSS_AMOUNT" | "PERCENTAGE";
+        /**
+         * AdvanceTaxBucketRead
+         * @description One persisted VAT bucket selected from accepted Quote snapshots.
+         */
+        AdvanceTaxBucketRead: {
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+        };
         /**
          * AiSettingsRead
          * @description AI settings as returned by the API – ``api_key`` is desensitised.
@@ -10274,7 +10401,7 @@ export interface operations {
             };
         };
     };
-    calculate_advance_placeholder_api_v1_quotes__quote_id__advance_invoices_calculate_post: {
+    calculate_advance_endpoint_api_v1_quotes__quote_id__advance_invoices_calculate_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -10289,6 +10416,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdvanceCalculationRead"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -10298,13 +10434,74 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+        };
+    };
+    create_advance_endpoint_api_v1_quotes__quote_id__advance_invoices_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdvanceDraftCreate"];
+            };
+        };
+        responses: {
             /** @description Successful Response */
-            501: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdvanceCalculationRead"];
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_advance_endpoint_api_v1_advance_invoices__invoice_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdvanceDraftUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -10351,6 +10548,7 @@ export interface operations {
                 customer_id?: string | null;
                 status?: string | null;
                 paid_status?: string | null;
+                document_kind?: components["schemas"]["InvoiceDocumentKind"] | null;
                 date_from?: string | null;
                 date_to?: string | null;
                 limit?: number;

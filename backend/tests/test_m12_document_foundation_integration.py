@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jai.config import get_settings
 from jai.db import reset_rls, set_rls_company
 from jai.models._enums import NumberSequenceScope
 from jai.schemas.setting import CreditNumberingConfig, InvoiceNumberingConfig, SmtpSettings
@@ -356,7 +357,7 @@ async def test_runtime_role_rls_is_safe_after_commit_rollback_and_reset(
         # This is the application URL injected into FastAPI above, not an
         # owner connection with SET ROLE.  Keep a one-connection pool so the
         # fresh/commit/rollback/RESET assertions also exercise reuse.
-        assert await session.scalar(text("SELECT current_user")) == "jai_app"
+        assert await session.scalar(text("SELECT current_user")) == get_settings().postgres_app_user
         flags = await session.execute(
             text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
         )
@@ -739,7 +740,7 @@ async def test_generic_calculator_rejects_m12_intent_and_dedicated_components_ar
         "/api/v1/quotes/00000000-0000-0000-0000-000000000000/advance-invoices/calculate",
         json={"input_mode": "PERCENTAGE", "percentage": "20"},
     )
-    assert advance.status_code == 501
+    assert advance.status_code == 404
     credit = await db_client.post(
         "/api/v1/invoices/00000000-0000-0000-0000-000000000000/credit-notes/calculate",
         json={"full_remaining": True},

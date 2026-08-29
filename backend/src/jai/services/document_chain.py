@@ -338,6 +338,12 @@ async def get_document_chain(
                 )
             )
     mode = QuoteSettlementMode(quote.settlement_mode)
+    # Delayed import keeps the Advance command's event/mode helpers acyclic
+    # while making this projection use the exact same structural predicate as
+    # the create command.  It intentionally excludes amount/date input checks.
+    from jai.services.advance import assess_advance_creation
+
+    advance_creation = await assess_advance_creation(session, quote)
     actions = [
         DocumentChainAvailableActionRead(
             code="CONVERT_TO_INVOICE",
@@ -352,7 +358,9 @@ async def get_document_chain(
                 and not invoices
             ),
         ),
-        DocumentChainAvailableActionRead(code="CREATE_ADVANCE", available=False),
+        DocumentChainAvailableActionRead(
+            code="CREATE_ADVANCE", available=advance_creation.available
+        ),
         DocumentChainAvailableActionRead(code="CREATE_CREDIT_NOTE", available=False),
     ]
     return DocumentChainRead(

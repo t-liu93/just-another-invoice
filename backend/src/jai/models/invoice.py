@@ -39,6 +39,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jai.db import Base
 from jai.models._enums import (
+    AdvanceInputMode,
     DiscountType,
     InvoiceCreditStatus,
     InvoiceDocumentKind,
@@ -116,6 +117,15 @@ class Invoice(Base):
         index=True,
         comment="M12 authoritative quote provenance; converted_invoice_id remains compatible.",
     )
+    # Formal Advance command provenance. Gross intent is stored after frozen
+    # minor-unit normalization; percentage is exact up to its explicit 3-dp
+    # command limit, so issue can replay the allocator without DB rounding.
+    # These columns deliberately remain nullable for safely-upgraded legacy
+    # rows; an old Advance DRAFT without provenance is rejected at issue rather
+    # than being reconstructed from rounded line snapshots.
+    advance_input_mode: Mapped[AdvanceInputMode | None] = mapped_column(Text, nullable=True)
+    advance_gross_amount: Mapped[object | None] = mapped_column(Numeric(18, 3), nullable=True)
+    advance_percentage: Mapped[object | None] = mapped_column(Numeric(6, 3), nullable=True)
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     issued_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True

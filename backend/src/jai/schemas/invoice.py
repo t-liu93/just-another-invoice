@@ -122,7 +122,12 @@ class AdvanceCalculationRequest(BaseModel):
 
     input_mode: AdvanceInputMode
     gross_amount: Decimal | None = Field(default=None, gt=0)
-    percentage: Decimal | None = Field(default=None, gt=0, le=100)
+    percentage: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=100,
+        description="Percentage of the original accepted Quote gross; at most 3 decimal places.",
+    )
 
     @model_validator(mode="after")
     def validate_mode_payload(self) -> AdvanceCalculationRequest:
@@ -142,9 +147,51 @@ class AdvanceCalculationRequest(BaseModel):
 
 
 class AdvanceCalculationRead(BaseModel):
-    """Reserved authoritative Advance result component; Step 3 implements fields."""
+    """Authoritative, side-effect-free Formal Advance allocation."""
 
-    detail: str
+    input_mode: AdvanceInputMode
+    requested_gross_amount: Decimal
+    original_quote_gross_amount: Decimal
+    remaining_capacity: Decimal
+    taxable_amount: Decimal
+    vat_total: Decimal
+    gross_amount: Decimal
+    buckets: list[AdvanceTaxBucketRead]
+
+
+class AdvanceTaxBucketRead(BaseModel):
+    """One persisted VAT bucket selected from accepted Quote snapshots."""
+
+    vat_rate_id: uuid.UUID
+    vat_rate_label: str
+    vat_rate_percent: Decimal
+    taxable_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+
+
+class AdvanceDraftCreate(AdvanceCalculationRequest):
+    """Create the one open Formal Advance draft for an accepted Quote."""
+
+    invoice_date: date
+    due_date: date | None = Field(
+        default=None,
+        description="Optional due date. When supplied it must not precede invoice_date.",
+    )
+    supply_or_advance_date: date | None = None
+    reference_number: str | None = None
+
+
+class AdvanceDraftUpdate(AdvanceCalculationRequest):
+    """Replace a DRAFT Advance's immutable-snapshot allocation intent."""
+
+    invoice_date: date
+    due_date: date | None = Field(
+        default=None,
+        description="Optional due date. When supplied it must not precede invoice_date.",
+    )
+    supply_or_advance_date: date | None = None
+    reference_number: str | None = None
 
 
 class CreditCalculationLineInput(BaseModel):
