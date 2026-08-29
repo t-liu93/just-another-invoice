@@ -343,6 +343,11 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
             if (snapshot := inv.__dict__.get("party_snapshot")) is not None
             else None
         ),
+        source_invoice_id=(
+            correction.source_invoice_id
+            if (correction := inv.__dict__.get("correction")) is not None
+            else None
+        ),
         original_quote_totals=(
             FinalTotalsRead(
                 taxable_amount=Decimal(str(inv.final_original_taxable_amount)),
@@ -481,6 +486,11 @@ def _invoice_to_list_item(inv: Invoice, *, customer_name: str) -> InvoiceListIte
             if (snapshot := inv.__dict__.get("party_snapshot")) is not None
             else None
         ),
+        source_invoice_id=(
+            correction.source_invoice_id
+            if (correction := inv.__dict__.get("correction")) is not None
+            else None
+        ),
         settlement_status=InvoiceSettlementStatus(inv.settlement_status),
         credit_status=InvoiceCreditStatus(inv.credit_status),
         currency=inv.currency,
@@ -520,6 +530,7 @@ async def _load_invoice_read(session: AsyncSession, inv: Invoice) -> InvoiceRead
             selectinload(Invoice.taxes),
             selectinload(Invoice.party_snapshot),
             selectinload(Invoice.credit_basis_lines),
+            selectinload(Invoice.correction),
             selectinload(Invoice.final_advance_applications).selectinload(
                 FinalAdvanceApplication.taxes
             ),
@@ -824,6 +835,16 @@ async def _credit_basis_rows(session: AsyncSession, inv: Invoice) -> list[Invoic
     taxes = list(
         (await session.execute(select(InvoiceTax).where(InvoiceTax.invoice_id == inv.id))).scalars()
     )
+    line_taxes = list(
+        (
+            await session.execute(
+                select(InvoiceLineTax).join(
+                    InvoiceLine, InvoiceLineTax.invoice_line_id == InvoiceLine.id
+                ).where(InvoiceLine.invoice_id == inv.id)
+            )
+        ).scalars()
+    )
+    line_tax_by_line_id = {tax.invoice_line_id: tax for tax in line_taxes}
     document_tax: InvoiceTax | None = None
     if InvoiceTaxMode(inv.tax_mode) == InvoiceTaxMode.DOCUMENT:
         if len(taxes) != 1:
@@ -860,6 +881,15 @@ async def _credit_basis_rows(session: AsyncSession, inv: Invoice) -> list[Invoic
                     else (
                         Decimal(str(line.vat_rate_percent))
                         if line.vat_rate_percent is not None
+                        else None
+                    )
+                ),
+                effective_vat_percent=(
+                    Decimal(str(document_tax.effective_vat_percent))
+                    if document_tax is not None
+                    else (
+                        Decimal(str(line_tax_by_line_id[line.id].effective_vat_percent))
+                        if line.id in line_tax_by_line_id
                         else None
                     )
                 ),
@@ -1517,6 +1547,7 @@ async def delete_invoice(
             InvoiceDocumentKind.STANDARD,
             InvoiceDocumentKind.ADVANCE,
             InvoiceDocumentKind.FINAL,
+            InvoiceDocumentKind.CREDIT_NOTE,
         }:
             raise ValueError(
                 "This document kind cannot be deleted by the generic invoice endpoint."
@@ -1608,7 +1639,7 @@ async def list_invoices(
     }.get(sort_by, Invoice.invoice_date)
 
     data_stmt = (
-        base.options(selectinload(Invoice.party_snapshot))
+        base.options(selectinload(Invoice.party_snapshot), selectinload(Invoice.correction))
         .order_by(sort_col.desc())
         .limit(limit)
         .offset(offset)
@@ -1679,6 +1710,11 @@ async def transition_status(
     # dereference ``probe`` or ``inv`` to decide how to map the original error.
     probe_kind = InvoiceDocumentKind(probe.document_kind)
     probe_quote_id = probe.quote_id
+    if probe_kind == InvoiceDocumentKind.CREDIT_NOTE:
+        return await _transition_credit_status(
+            session, invoice_id=invoice_id, company_id=company_id, body=body,
+            issued_by_user_id=issued_by_user_id,
+        )
     locked_invoices: list[Invoice] = []
     if probe_kind in {InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL}:
         if probe_quote_id is None:
@@ -1948,6 +1984,87 @@ async def transition_status(
         if invoice_number_conflict:
             raise ValueError("Invoice number already exists (concurrent issue).") from exc
         raise
+    return read
+
+
+async def _transition_credit_status(
+    session: AsyncSession,
+    *,
+    invoice_id: uuid.UUID,
+    company_id: uuid.UUID,
+    body: InvoiceStatusWrite,
+    issued_by_user_id: uuid.UUID | None,
+) -> InvoiceRead | None:
+    """Issue a Credit in global source -> Credit -> numbering lock order."""
+    from jai.models.document import InvoiceCorrection
+    from jai.services.credit import CreditConflictError, _lock_credit_source_context, issue_credit
+    from jai.services.document_chain import append_document_chain_event
+
+    source_id = await session.scalar(
+        select(InvoiceCorrection.source_invoice_id)
+        .join(Invoice, Invoice.id == InvoiceCorrection.credit_note_id)
+        .where(Invoice.id == invoice_id, Invoice.company_id == company_id)
+    )
+    if source_id is None:
+        return None
+    try:
+        # Quote -> sorted formal charge/source Invoices is the mandatory
+        # prefix; only then acquire the sorted Credit Note suffix.
+        await _lock_credit_source_context(
+            session, company_id=company_id, source_id=source_id
+        )
+        credits = list(
+            (
+                await session.execute(
+                    select(Invoice)
+                    .join(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
+                    .where(InvoiceCorrection.source_invoice_id == source_id)
+                    .order_by(Invoice.id)
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        credit = next((item for item in credits if item.id == invoice_id), None)
+        if credit is None:
+            return None
+        current_status = InvoiceStatus(credit.status)
+        if current_status == InvoiceStatus.DRAFT and body.status == InvoiceStatus.SENT:
+            await issue_credit(
+                session, credit=credit, company_id=company_id, actor_user_id=issued_by_user_id
+            )
+        elif (current_status, body.status) in {
+            (InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED),
+            (InvoiceStatus.CANCELLED, InvoiceStatus.DRAFT),
+        }:
+            credit.status = body.status
+            await append_document_chain_event(
+                session,
+                company_id=company_id,
+                quote_id=credit.quote_id,
+                invoice_id=credit.id,
+                actor_user_id=issued_by_user_id,
+                event_type=DocumentChainEventType.INVOICE_STATUS_CHANGED,
+                metadata={
+                    "document_kind": InvoiceDocumentKind.CREDIT_NOTE.value,
+                    "status": body.status.value,
+                },
+            )
+        else:
+            raise InvoiceLifecycleConflictError(
+                "Credit Notes permit only DRAFT -> SENT and DRAFT <-> CANCELLED."
+            )
+        read = await _load_invoice_read(session, credit)
+        await session.commit()
+        return read
+    except CreditConflictError:
+        await session.rollback()
+        raise
+    except NumberSequenceExhaustedError:
+        await session.rollback()
+        raise
+    except IntegrityError:
+        await session.rollback()
+        raise CreditConflictError("Concurrent Credit issue conflict; retry.") from None
     except DBAPIError as exc:
         await session.rollback()
         from jai.services.advance import AdvanceConflictError, is_retryable_transaction_conflict
@@ -1957,9 +2074,6 @@ async def transition_status(
                 "Concurrent invoice lifecycle mutation; retry the command."
             ) from exc
         raise
-
-    return read
-
 
 async def list_invoice_product_options(
     session: AsyncSession,

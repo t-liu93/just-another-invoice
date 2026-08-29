@@ -24,7 +24,7 @@ from jai.models._enums import (
     QuoteSettlementMode,
     QuoteStatus,
 )
-from jai.models.document import DocumentChainEvent
+from jai.models.document import DocumentChainEvent, InvoiceCorrection
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment
 from jai.models.quote import Quote
@@ -233,15 +233,15 @@ async def get_document_chain(
     ).scalar_one_or_none()
     if quote is None:
         return None
-    invoices = list(
-        (
-            await session.execute(
-                select(Invoice)
-                .where(Invoice.company_id == company_id, Invoice.quote_id == quote.id)
-                .order_by(Invoice.created_at, Invoice.id)
-            )
-        ).scalars()
-    )
+    invoice_rows = (
+        await session.execute(
+            select(Invoice, InvoiceCorrection.source_invoice_id)
+            .outerjoin(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
+            .where(Invoice.company_id == company_id, Invoice.quote_id == quote.id)
+            .order_by(Invoice.created_at, Invoice.id)
+        )
+    ).all()
+    invoices = [invoice for invoice, _ in invoice_rows]
     invoice_ids = [invoice.id for invoice in invoices]
     payments = list(
         (
@@ -326,6 +326,19 @@ async def get_document_chain(
         )
         for invoice in invoices
     ]
+    credit_sources = {
+        invoice.id: source_id
+        for invoice, source_id in invoice_rows
+        if source_id is not None
+    }
+    relations.extend(
+        DocumentChainRelationRead(
+            relation_type="INVOICE_TO_CREDIT_NOTE",
+            from_node_id=source_id,
+            to_node_id=credit_id,
+        )
+        for credit_id, source_id in credit_sources.items()
+    )
     for payment in payments:
         if payment.quote_id == quote.id:
             relations.append(
@@ -428,11 +441,48 @@ async def get_invoice_document_chain(
     if invoice is None:
         return None
     if invoice.quote_id is None:
+        # A direct Standard has no Quote root.  When the requested document is
+        # its Credit Note, promote the immutable correction source to the
+        # small direct-chain root so the projection does not hide provenance.
+        root_id = invoice.id
+        if InvoiceDocumentKind(invoice.document_kind) == InvoiceDocumentKind.CREDIT_NOTE:
+            source_id = await session.scalar(
+                select(InvoiceCorrection.source_invoice_id).where(
+                    InvoiceCorrection.credit_note_id == invoice.id
+                )
+            )
+            if source_id is not None:
+                root_id = source_id
+        credit_ids = list(
+            (
+                await session.execute(
+                    select(InvoiceCorrection.credit_note_id)
+                    .where(InvoiceCorrection.source_invoice_id == root_id)
+                    .order_by(InvoiceCorrection.credit_note_id)
+                )
+            ).scalars()
+        )
+        direct_invoices = list(
+            (
+                await session.execute(
+                    select(Invoice)
+                    .where(
+                        Invoice.company_id == company_id,
+                        Invoice.id.in_([root_id, *credit_ids]),
+                    )
+                    .order_by(Invoice.id)
+                )
+            ).scalars()
+        )
+        direct_invoice_ids = [item.id for item in direct_invoices]
         payments = list(
             (
                 await session.execute(
-                    select(Payment)
-                    .where(Payment.company_id == company_id, Payment.invoice_id == invoice.id)
+                select(Payment)
+                    .where(
+                        Payment.company_id == company_id,
+                        Payment.invoice_id.in_(direct_invoice_ids),
+                    )
                     .order_by(Payment.created_at, Payment.id)
                 )
             ).scalars()
@@ -443,27 +493,30 @@ async def get_invoice_document_chain(
                     select(DocumentChainEvent)
                     .where(
                         DocumentChainEvent.company_id == company_id,
-                        DocumentChainEvent.invoice_id == invoice.id,
+                        DocumentChainEvent.invoice_id.in_(direct_invoice_ids),
                     )
                     .order_by(DocumentChainEvent.event_order)
                 )
             ).scalars()
         )
         nodes = [
-            DocumentChainNodeRead(
-                id=invoice.id,
-                node_type="INVOICE",
-                document_kind=InvoiceDocumentKind(invoice.document_kind),
-                number=invoice.invoice_number,
-                status=invoice.status,
-                occurred_on=invoice.invoice_date,
-                charge_amount=Decimal(str(invoice.payable_before_payments)),
-                credit_amount=Decimal(str(invoice.credited_total)),
-                incoming_payment_amount=Decimal(str(invoice.incoming_payment_total)),
-                refund_amount=Decimal(str(invoice.refunded_total)),
-                due_amount=Decimal(str(invoice.due_amount)),
-                refund_due_amount=Decimal(str(invoice.refund_due_amount)),
-            ),
+            *[
+                DocumentChainNodeRead(
+                    id=item.id,
+                    node_type="INVOICE",
+                    document_kind=InvoiceDocumentKind(item.document_kind),
+                    number=item.invoice_number,
+                    status=item.status,
+                    occurred_on=item.invoice_date,
+                    charge_amount=Decimal(str(item.payable_before_payments)),
+                    credit_amount=Decimal(str(item.credited_total)),
+                    incoming_payment_amount=Decimal(str(item.incoming_payment_total)),
+                    refund_amount=Decimal(str(item.refunded_total)),
+                    due_amount=Decimal(str(item.due_amount)),
+                    refund_due_amount=Decimal(str(item.refund_due_amount)),
+                )
+                for item in direct_invoices
+            ],
             *[
                 DocumentChainNodeRead(
                     id=payment.id,
@@ -481,10 +534,19 @@ async def get_invoice_document_chain(
             relations=[
                 DocumentChainRelationRead(
                     relation_type="INVOICE_TO_PAYMENT",
-                    from_node_id=invoice.id,
+                    from_node_id=payment.invoice_id,
                     to_node_id=payment.id,
                 )
                 for payment in payments
+                if payment.invoice_id is not None
+            ]
+            + [
+                DocumentChainRelationRead(
+                    relation_type="INVOICE_TO_CREDIT_NOTE",
+                    from_node_id=root_id,
+                    to_node_id=credit_id,
+                )
+                for credit_id in credit_ids
             ],
             events=[
                 DocumentChainEventRead(
@@ -498,7 +560,7 @@ async def get_invoice_document_chain(
                 )
                 for event in events
             ],
-            totals=_totals([invoice], []),
+            totals=_totals(direct_invoices, []),
             available_actions=[
                 DocumentChainAvailableActionRead(code="CREATE_ADVANCE", available=False),
                 DocumentChainAvailableActionRead(code="CREATE_CREDIT_NOTE", available=False),

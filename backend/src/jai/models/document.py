@@ -188,9 +188,76 @@ class InvoiceCreditBasisLine(Base):
     vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     vat_rate_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     vat_rate_percent: Mapped[Decimal | None] = mapped_column(_RATE, nullable=True)
+    # The nominal rate is not necessarily the applied rate (for example a
+    # reverse-charge invoice has a 21% nominal rate but a frozen 0% effect).
+    # Credit Notes must replay this source snapshot rather than infer it.
+    effective_vat_percent: Mapped[Decimal | None] = mapped_column(_RATE, nullable=True)
     vat_treatment_code: Mapped[str] = mapped_column(Text, nullable=False)
     vat_treatment_effect: Mapped[str] = mapped_column(Text, nullable=False)
     vat_treatment_requires_icp: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    net_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_net_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    base_gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+
+
+class InvoiceCorrection(Base):
+    """One source-bound Credit Note correction.
+
+    Selection rows are deliberately persisted while the Credit Note is a
+    DRAFT, but the aggregate and ``affects_revenue`` values are populated only
+    at issue.  This makes a draft reviewable without accidentally reserving
+    coverage or creating a reporting event.
+    """
+
+    __tablename__ = "invoice_correction"
+    __table_args__ = (UniqueConstraint("credit_note_id", name="uq_invoice_correction_credit"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    credit_note_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    issued_net_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
+    issued_vat_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
+    issued_gross_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
+    issued_base_net_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
+    issued_base_vat_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
+    issued_base_gross_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
+    affects_revenue: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    lines: Mapped[list[InvoiceCorrectionLine]] = relationship(
+        "InvoiceCorrectionLine", cascade="all, delete-orphan", lazy="selectin", order_by="InvoiceCorrectionLine.sort_order"
+    )
+
+
+class InvoiceCorrectionLine(Base):
+    """A frozen Credit selection derived exclusively from a source basis row."""
+
+    __tablename__ = "invoice_correction_line"
+    __table_args__ = (UniqueConstraint("correction_id", "source_basis_line_id", name="uq_correction_basis"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    correction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoice_correction.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_basis_line_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoice_credit_basis_line.id", ondelete="RESTRICT"), nullable=False
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    input_quantity: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
+    input_gross_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     net_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)

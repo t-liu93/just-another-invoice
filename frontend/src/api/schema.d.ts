@@ -1126,11 +1126,42 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Calculate Credit Placeholder
-         * @description Publish the dedicated M12 intent without silently accepting it in Standard pricing.
-         */
-        post: operations["calculate_credit_placeholder_api_v1_invoices__source_invoice_id__credit_notes_calculate_post"];
+        /** Calculate Credit Endpoint */
+        post: operations["calculate_credit_endpoint_api_v1_invoices__source_invoice_id__credit_notes_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{source_invoice_id}/credit-notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Credit Endpoint */
+        post: operations["create_credit_endpoint_api_v1_invoices__source_invoice_id__credit_notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-notes/{credit_note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Credit Endpoint */
+        put: operations["update_credit_endpoint_api_v1_credit_notes__credit_note_id__put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3052,13 +3083,71 @@ export interface components {
             /** Gross Amount */
             gross_amount?: number | string | null;
         };
+        /** CreditCalculationLineRead */
+        CreditCalculationLineRead: {
+            /**
+             * Source Basis Line Id
+             * Format: uuid
+             */
+            source_basis_line_id: string;
+            /**
+             * Source Invoice Line Id
+             * Format: uuid
+             */
+            source_invoice_line_id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Unit Name */
+            unit_name?: string | null;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Vat Rate Label */
+            vat_rate_label?: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent?: string | null;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Net Amount */
+            base_net_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
+        };
         /**
          * CreditCalculationRead
-         * @description Reserved authoritative Credit result component; Step 5 implements fields.
+         * @description Authoritative source-basis allocation for a Credit DRAFT.
          */
         CreditCalculationRead: {
-            /** Detail */
-            detail: string;
+            /**
+             * Source Invoice Id
+             * Format: uuid
+             */
+            source_invoice_id: string;
+            /** Remaining Gross Amount */
+            remaining_gross_amount: string;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Net Amount */
+            base_net_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
+            /** Lines */
+            lines: components["schemas"]["CreditCalculationLineRead"][];
         };
         /**
          * CreditCalculationRequest
@@ -3072,6 +3161,48 @@ export interface components {
             full_remaining?: boolean;
             /** Lines */
             lines?: components["schemas"]["CreditCalculationLineInput"][];
+        };
+        /** CreditDraftCreate */
+        CreditDraftCreate: {
+            /**
+             * Full Remaining
+             * @default false
+             */
+            full_remaining?: boolean;
+            /** Lines */
+            lines?: components["schemas"]["CreditCalculationLineInput"][];
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Due Date */
+            due_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+        };
+        /** CreditDraftUpdate */
+        CreditDraftUpdate: {
+            /**
+             * Full Remaining
+             * @default false
+             */
+            full_remaining?: boolean;
+            /** Lines */
+            lines?: components["schemas"]["CreditCalculationLineInput"][];
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Due Date */
+            due_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
         };
         /**
          * CreditLineInputMode
@@ -10662,7 +10793,7 @@ export interface operations {
             };
         };
     };
-    calculate_credit_placeholder_api_v1_invoices__source_invoice_id__credit_notes_calculate_post: {
+    calculate_credit_endpoint_api_v1_invoices__source_invoice_id__credit_notes_calculate_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -10677,6 +10808,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditCalculationRead"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -10686,13 +10826,74 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+        };
+    };
+    create_credit_endpoint_api_v1_invoices__source_invoice_id__credit_notes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditDraftCreate"];
+            };
+        };
+        responses: {
             /** @description Successful Response */
-            501: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CreditCalculationRead"];
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_credit_endpoint_api_v1_credit_notes__credit_note_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credit_note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditDraftUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

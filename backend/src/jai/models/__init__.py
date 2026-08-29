@@ -14,6 +14,8 @@ from jai.models.document import (  # noqa: F401
     DocumentChainEvent,
     FinalAdvanceApplication,
     FinalAdvanceApplicationTax,
+    InvoiceCorrection,
+    InvoiceCorrectionLine,
     InvoiceCreditBasisLine,
     InvoicePartySnapshot,
 )

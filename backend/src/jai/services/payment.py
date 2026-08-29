@@ -65,6 +65,18 @@ def _payment_charge(invoice: Invoice) -> Decimal:
     )
 
 
+def _remaining_payment_charge(invoice: Invoice) -> Decimal:
+    """Cash capacity after issued Credits, without treating cash as a Credit.
+
+    ``paid_status`` continues to describe incoming cash against the original
+    charge; settlement/due are the independent M12 projection and subtract
+    issued Credits exactly once.
+    """
+    return max(
+        _payment_charge(invoice) - Decimal(str(invoice.credited_total)), Decimal("0")
+    )
+
+
 class _PaymentLike(Protocol):
     amount: object
     base_amount: object
@@ -616,8 +628,6 @@ async def validate_invoice_tax_coverage(
 
 
 def _write_invoice_state(invoice: Invoice, state: PaymentState) -> None:
-    invoice.due_amount = state.due_amount
-    invoice.base_due_amount = state.base_due_amount
     invoice.paid_status = state.paid_status
     invoice.status = state.new_status
     # These M12 columns are persisted caches, not a second settlement path.
@@ -628,13 +638,25 @@ def _write_invoice_state(invoice: Invoice, state: PaymentState) -> None:
         invoice.base_payable_before_payments = Decimal(str(invoice.base_total_incl_vat))
     invoice.incoming_payment_total = state.paid_total
     invoice.base_incoming_payment_total = state.base_paid_total
+    charge = Decimal(str(invoice.payable_before_payments)) - Decimal(str(invoice.credited_total))
+    base_charge = Decimal(str(invoice.base_payable_before_payments)) - Decimal(
+        str(invoice.base_credited_total)
+    )
+    invoice.due_amount = max(charge - state.paid_total, Decimal("0"))
+    invoice.base_due_amount = max(base_charge - state.base_paid_total, Decimal("0"))
+    invoice.refund_due_amount = max(state.paid_total - charge, Decimal("0"))
+    invoice.base_refund_due_amount = max(state.base_paid_total - base_charge, Decimal("0"))
     invoice.settlement_status = (
-        InvoiceSettlementStatus.SETTLED
-        if state.paid_status == InvoicePaidStatus.PAID
+        InvoiceSettlementStatus.REFUND_DUE
+        if invoice.refund_due_amount > Decimal("0")
         else (
-            InvoiceSettlementStatus.PARTIALLY_SETTLED
-            if state.paid_status == InvoicePaidStatus.PARTIALLY_PAID
-            else InvoiceSettlementStatus.OPEN
+            InvoiceSettlementStatus.SETTLED
+            if invoice.due_amount == Decimal("0")
+            else (
+                InvoiceSettlementStatus.PARTIALLY_SETTLED
+                if state.paid_total > Decimal("0")
+                else InvoiceSettlementStatus.OPEN
+            )
         )
     )
 
@@ -684,7 +706,7 @@ async def record_payment(
         payments,
         InvoiceStatus(invoice.status),
     )
-    if state.paid_total > _payment_charge(invoice):
+    if state.paid_total > _remaining_payment_charge(invoice):
         raise ValueError(
             "Payment exceeds the outstanding amount "
             "(cumulative payments would exceed the invoice total)."
@@ -843,6 +865,7 @@ async def update_payment(
 ) -> PaymentMutationResponse:
     await set_rls_company(session, company_id)
     payment, quote, invoice = await _lock_payment_context(session, payment_id, company_id)
+    previous_amount = Decimal(str(payment.amount))
     amount = (
         quantize_to_minor_unit(body.amount) if quote is not None else quantize_money(body.amount)
     )
@@ -890,7 +913,13 @@ async def update_payment(
             invoice_payments,
             InvoiceStatus(invoice.status),
         )
-        if invoice_state.paid_total > _payment_charge(invoice):
+        # A Credit issued after a lawful incoming payment can make the source
+        # REFUND_DUE.  Metadata edits, reductions and deletion of that
+        # historical cash remain legal; only a new net increase must fit the
+        # normal outstanding-capacity guard.
+        previous_paid_total = invoice_state.paid_total - amount + previous_amount
+        allowed_paid_total = max(_remaining_payment_charge(invoice), previous_paid_total)
+        if invoice_state.paid_total > allowed_paid_total:
             raise ValueError(
                 "Payment exceeds the outstanding amount "
                 "(cumulative payments would exceed the invoice total after this edit)."

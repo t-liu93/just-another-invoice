@@ -250,8 +250,8 @@ class CreditCalculationLineInput(BaseModel):
 
     source_basis_line_id: uuid.UUID
     input_mode: CreditLineInputMode
-    quantity: Decimal | None = Field(default=None, gt=0)
-    gross_amount: Decimal | None = Field(default=None, gt=0)
+    quantity: Decimal | None = Field(default=None, gt=0, decimal_places=3)
+    gross_amount: Decimal | None = Field(default=None, gt=0, multiple_of=0.01)
 
     @model_validator(mode="after")
     def validate_mode_payload(self) -> CreditCalculationLineInput:
@@ -281,14 +281,60 @@ class CreditCalculationRequest(BaseModel):
     @model_validator(mode="after")
     def validate_selection(self) -> CreditCalculationRequest:
         if self.full_remaining != bool(self.lines):
-            return self
+            if len({line.source_basis_line_id for line in self.lines}) == len(self.lines):
+                return self
+            raise ValueError("Each source basis line may be selected only once.")
         raise ValueError("Select exactly one of full_remaining=true or non-empty lines.")
 
 
 class CreditCalculationRead(BaseModel):
-    """Reserved authoritative Credit result component; Step 5 implements fields."""
+    """Authoritative source-basis allocation for a Credit DRAFT."""
 
-    detail: str
+    source_invoice_id: uuid.UUID
+    remaining_gross_amount: Decimal
+    net_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+    base_net_amount: Decimal
+    base_vat_amount: Decimal
+    base_gross_amount: Decimal
+    lines: list[CreditCalculationLineRead]
+
+
+class CreditCalculationLineRead(BaseModel):
+    source_basis_line_id: uuid.UUID
+    source_invoice_line_id: uuid.UUID
+    name: str
+    description: str | None = None
+    quantity: Decimal
+    unit_name: str | None = None
+    vat_rate_id: uuid.UUID | None = None
+    vat_rate_label: str | None = None
+    vat_rate_percent: Decimal | None = None
+    net_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+    base_net_amount: Decimal
+    base_vat_amount: Decimal
+    base_gross_amount: Decimal
+
+
+class CreditDraftCreate(CreditCalculationRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    invoice_date: date
+    due_date: date | None = None
+    supply_or_advance_date: date | None = None
+    reference_number: str | None = None
+
+
+class CreditDraftUpdate(CreditCalculationRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    invoice_date: date
+    due_date: date | None = None
+    supply_or_advance_date: date | None = None
+    reference_number: str | None = None
 
 
 # ---------------------------------------------------------------------------

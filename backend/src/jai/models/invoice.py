@@ -54,6 +54,7 @@ from jai.models._enums import (
 if TYPE_CHECKING:
     from jai.models.document import (
         FinalAdvanceApplication,
+        InvoiceCorrection,
         InvoiceCreditBasisLine,
         InvoicePartySnapshot,
     )
@@ -275,6 +276,17 @@ class Invoice(Base):
         # would add a useless query to every legacy Standard chain projection.
         lazy="noload",
         order_by="FinalAdvanceApplication.sort_order",
+    )
+    correction: Mapped[InvoiceCorrection | None] = relationship(
+        "InvoiceCorrection",
+        foreign_keys="InvoiceCorrection.credit_note_id",
+        cascade="all, delete-orphan",
+        uselist=False,
+        # Read/list serializers opt in explicitly.  A chain projection does
+        # not serialize correction rows, so eager loading here would add a
+        # query to every historical Standard-only chain.  ``raise`` rather
+        # than ``noload`` leaves the explicit selectinload path usable.
+        lazy="raise",
     )
 
     # -- Table constraints ----------------------------------------------------

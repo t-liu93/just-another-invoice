@@ -60,6 +60,43 @@ def test_dedicated_command_shapes_forbid_frontend_money_fields() -> None:
         CreditCalculationRequest.model_validate({"full_remaining": True, "net_amount": "999"})
 
 
+def test_credit_selection_is_strict_xor_and_cannot_repeat_a_basis_line() -> None:
+    basis_id = uuid.uuid4()
+    with pytest.raises(ValidationError):
+        CreditCalculationRequest.model_validate({"full_remaining": False, "lines": []})
+    with pytest.raises(ValidationError):
+        CreditCalculationRequest.model_validate(
+            {
+                "full_remaining": True,
+                "lines": [
+                    {
+                        "source_basis_line_id": str(basis_id),
+                        "input_mode": "QUANTITY",
+                        "quantity": "1",
+                    }
+                ],
+            }
+        )
+    with pytest.raises(ValidationError):
+        CreditCalculationRequest.model_validate(
+            {
+                "full_remaining": False,
+                "lines": [
+                    {
+                        "source_basis_line_id": str(basis_id),
+                        "input_mode": "GROSS_AMOUNT",
+                        "gross_amount": "1",
+                    },
+                    {
+                        "source_basis_line_id": str(basis_id),
+                        "input_mode": "GROSS_AMOUNT",
+                        "gross_amount": "1",
+                    },
+                ],
+            }
+        )
+
+
 @pytest.mark.parametrize("config", [InvoiceNumberingConfig, CreditNumberingConfig])
 def test_numbering_settings_reject_postgres_bigint_overflow(
     config: type[InvoiceNumberingConfig],
@@ -74,9 +111,9 @@ def test_chain_event_metadata_is_closed_typed_and_non_renderable() -> None:
         DocumentChainEventType.INVOICE_PAYMENT_CREATED,
         {"payment_id": payment_id, "amount": Decimal("12.340")},
     ) == {"payment_id": str(payment_id), "amount": "12.340"}
-    assert _safe_metadata(
-        DocumentChainEventType.MODE_LOCKED, {"mode": "DIRECT_INVOICE"}
-    ) == {"mode": "DIRECT_INVOICE"}
+    assert _safe_metadata(DocumentChainEventType.MODE_LOCKED, {"mode": "DIRECT_INVOICE"}) == {
+        "mode": "DIRECT_INVOICE"
+    }
     assert _safe_metadata(
         DocumentChainEventType.INVOICE_ISSUED,
         {"document_kind": "STANDARD", "status": "SENT"},

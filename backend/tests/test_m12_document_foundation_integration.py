@@ -745,7 +745,9 @@ async def test_generic_calculator_rejects_m12_intent_and_dedicated_components_ar
         "/api/v1/invoices/00000000-0000-0000-0000-000000000000/credit-notes/calculate",
         json={"full_remaining": True},
     )
-    assert credit.status_code == 501
+    # Step 5 implements the dedicated Credit calculator.  Its normal missing
+    # source response is now the same non-enumerating 404 as Advance.
+    assert credit.status_code == 404
 
 
 async def test_wrong_m12_command_intent_is_422_without_standard_side_effects(

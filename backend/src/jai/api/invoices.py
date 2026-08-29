@@ -34,6 +34,8 @@ from jai.schemas.invoice import (
     AdvanceDraftUpdate,
     CreditCalculationRead,
     CreditCalculationRequest,
+    CreditDraftCreate,
+    CreditDraftUpdate,
     FinalDraftCreate,
     InvoiceCalculationRead,
     InvoiceCalculationRequest,
@@ -50,6 +52,13 @@ from jai.services.advance import (
     calculate_advance,
     create_advance_draft,
     update_advance_draft,
+)
+from jai.services.credit import (
+    CreditConflictError,
+    CreditValidationError,
+    calculate_credit,
+    create_credit_draft,
+    update_credit_draft,
 )
 from jai.services.document_chain import ModeConflictError, get_invoice_document_chain
 from jai.services.final import FinalConflictError, FinalValidationError, create_final_draft
@@ -254,19 +263,50 @@ async def create_final_endpoint(
 @router.post(
     "/invoices/{source_invoice_id}/credit-notes/calculate",
     response_model=CreditCalculationRead,
-    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    status_code=status.HTTP_200_OK,
 )
-async def calculate_credit_placeholder(
+async def calculate_credit_endpoint(
     source_invoice_id: uuid.UUID,
     body: CreditCalculationRequest,
     user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
 ) -> CreditCalculationRead:
-    """Publish the dedicated M12 intent without silently accepting it in Standard pricing."""
     _owner_only(user)
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Credit calculation lands in M12 Step 5.",
-    )
+    try:
+        return await calculate_credit(session, company_id=_require_company_id(user), source_id=source_invoice_id, request=body)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Source invoice not found.") from exc
+    except CreditConflictError as exc:
+        raise _advance_error(409, getattr(exc, "code", "CREDIT_CONFLICT"), exc) from exc
+    except CreditValidationError as exc:
+        raise _advance_error(422, exc.code, exc) from exc
+
+
+@router.post("/invoices/{source_invoice_id}/credit-notes", response_model=InvoiceRead, status_code=status.HTTP_201_CREATED)
+async def create_credit_endpoint(source_invoice_id: uuid.UUID, body: CreditDraftCreate, user: User = Depends(current_mfa_user), session: AsyncSession = Depends(get_session)) -> InvoiceRead:
+    _owner_only(user)
+    try:
+        return await create_credit_draft(session, company_id=_require_company_id(user), source_id=source_invoice_id, body=body, creator_id=user.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Source invoice not found.") from exc
+    except CreditConflictError as exc:
+        raise _advance_error(409, getattr(exc, "code", "CREDIT_CONFLICT"), exc) from exc
+    except CreditValidationError as exc:
+        raise _advance_error(422, exc.code, exc) from exc
+
+
+@router.put("/credit-notes/{credit_note_id}", response_model=InvoiceRead)
+async def update_credit_endpoint(credit_note_id: uuid.UUID, body: CreditDraftUpdate, user: User = Depends(current_mfa_user), session: AsyncSession = Depends(get_session)) -> InvoiceRead:
+    _owner_only(user)
+    try:
+        result = await update_credit_draft(session, company_id=_require_company_id(user), credit_id=credit_note_id, body=body, actor_user_id=user.id)
+    except CreditConflictError as exc:
+        raise _advance_error(409, getattr(exc, "code", "CREDIT_CONFLICT"), exc) from exc
+    except CreditValidationError as exc:
+        raise _advance_error(422, exc.code, exc) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Credit Note not found.")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +494,11 @@ async def transition_status_endpoint(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except CreditConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": getattr(exc, "code", "CREDIT_CONFLICT"), "message": str(exc)},
         ) from exc
     except (AdvanceConflictError, FinalConflictError) as exc:
         raise HTTPException(

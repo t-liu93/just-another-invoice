@@ -865,7 +865,8 @@ class TestMigrations:
             self.url,
             "SELECT set_config('jai.company_id', CAST(:company_id AS text), true); "
             "SELECT net_amount, vat_amount, gross_amount, base_net_amount, base_vat_amount, "
-            "base_gross_amount FROM invoice_credit_basis_line WHERE invoice_line_id = :line_id",
+            "base_gross_amount, effective_vat_percent FROM invoice_credit_basis_line "
+            "WHERE invoice_line_id = :line_id",
             {"company_id": str(company_id), "line_id": line_id},
         ) == [
             {
@@ -875,6 +876,7 @@ class TestMigrations:
                 "base_net_amount": Decimal("100.001"),
                 "base_vat_amount": Decimal("21.005"),
                 "base_gross_amount": Decimal("121.006"),
+                "effective_vat_percent": Decimal("21.000"),
             }
         ]
         # The production-shaped fixture deliberately contains both legacy tax
@@ -929,7 +931,7 @@ class TestMigrations:
             self.url,
             "SELECT set_config('jai.company_id', CAST(:company_id AS text), true); "
             "SELECT invoice_line_id, sort_order, net_amount, vat_amount, gross_amount, "
-            "base_net_amount, base_vat_amount, base_gross_amount "
+            "base_net_amount, base_vat_amount, base_gross_amount, effective_vat_percent "
             "FROM invoice_credit_basis_line WHERE invoice_id = :invoice_id ORDER BY sort_order",
             {"company_id": str(company_id), "invoice_id": document_invoice_id},
         ) == [
@@ -942,6 +944,7 @@ class TestMigrations:
                 "base_net_amount": Decimal("123.400"),
                 "base_vat_amount": Decimal("25.920"),
                 "base_gross_amount": Decimal("149.320"),
+                "effective_vat_percent": Decimal("21.000"),
             },
             {
                 "invoice_line_id": document_line_two_id,
@@ -952,6 +955,7 @@ class TestMigrations:
                 "base_net_amount": Decimal("234.460"),
                 "base_vat_amount": Decimal("49.247"),
                 "base_gross_amount": Decimal("283.707"),
+                "effective_vat_percent": Decimal("21.000"),
             },
         ]
 
