@@ -3,6 +3,13 @@
     "title": "Yet Another Ledger",
     "subtitle": "Self-hosted invoicing & business management"
   },
+  "chain": {
+    "billingMode": "Billing mode",
+    "readOnly": "Document-chain timeline (read-only)",
+    "initialLoadFailed": "Could not load the document chain.",
+    "paymentRefreshFailed": "Could not refresh the document chain. Your payment was saved.",
+    "retry": "Retry"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "customers": "Customers",

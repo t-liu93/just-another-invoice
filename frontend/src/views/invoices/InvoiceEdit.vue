@@ -18,6 +18,10 @@ import EmailLogPanel from '../../components/EmailLogPanel.vue'
 import { useInvoicesStore } from '../../stores/invoices'
 import type { InvoicePaymentsResponse } from '../../stores/payments'
 import { get, downloadBlob } from '../../api/http'
+import {
+  createDocumentChainPaymentChangeHandler,
+  useDocumentChainRefresh,
+} from '../../composables/useDocumentChainRefresh'
 import type { components } from '../../api/schema'
 import { persistedReceiptCustomer, receiptAuditTarget } from '../../utils/receiptEmail'
 import { invoiceDocumentKindLabelKey } from '../../utils/documentKind'
@@ -29,6 +33,7 @@ type ProductInvoiceOptionRead = components['schemas']['ProductInvoiceOptionRead'
 type InvoiceCalculationRead = components['schemas']['InvoiceCalculationRead']
 type InvoiceWrite = components['schemas']['InvoiceWrite']
 type InvoiceRead = components['schemas']['InvoiceRead']
+type DocumentChainRead = components['schemas']['DocumentChainRead']
 type DocumentTemplateRead = components['schemas']['DocumentTemplateRead']
 type ContentBlockRead = components['schemas']['ContentBlockRead']
 type NoteTemplateRead = components['schemas']['NoteTemplateRead']
@@ -73,6 +78,18 @@ const pageLoading = ref(false)
 const saving = ref(false)
 const pageError = ref<string | null>(null)
 const existingInvoice = ref<InvoiceRead | null>(null)
+const {
+  documentChain,
+  chainRefreshing,
+  initialChainError,
+  paymentRefreshError,
+  loadInitialDocumentChain,
+  refreshAfterPayment,
+} = useDocumentChainRefresh<DocumentChainRead>(async () => {
+  const invoiceId = existingInvoice.value?.id
+  if (!invoiceId) throw new Error('Invoice document chain is unavailable')
+  return get<DocumentChainRead>(`/api/v1/invoices/${invoiceId}/document-chain`)
+})
 
 // Invoice header fields.
 const customerId = ref<string | null>(null)
@@ -435,6 +452,7 @@ onMounted(async () => {
       isEdit.value = true
       const inv = await store.fetchInvoice(id)
       populateFromInvoice(inv)
+      await loadInitialDocumentChain()
       // Ensure the selected customer is in the list even if not returned by the initial search.
       if (!customers.value.find(c => c.id === inv.customer_id)) {
         const custRes = await get<CustomerRead>(`/api/v1/customers/${inv.customer_id}`)
@@ -465,7 +483,9 @@ const receiptCustomer = computed(() =>
   persistedReceiptCustomer(existingInvoice.value?.customer_id, customers.value),
 )
 
-function handlePaymentsChanged(aggregate: InvoicePaymentsResponse) {
+const handlePaymentsChanged = createDocumentChainPaymentChangeHandler<InvoicePaymentsResponse>(
+  refreshAfterPayment,
+  (aggregate) => {
   // Update the displayed invoice status and paid_status from the backend aggregate
   // (the aggregate is authoritative – frontend does not locally compute these)
   if (existingInvoice.value) {
@@ -476,7 +496,8 @@ function handlePaymentsChanged(aggregate: InvoicePaymentsResponse) {
       due_amount: aggregate.due_amount,
     }
   }
-}
+  },
+)
 
 const fmtMoney = (v: string | number) => Number(v).toFixed(2)
 
@@ -639,6 +660,31 @@ function handleReceiptSent(log: EmailLogRead) {
                 </template>
               </n-space>
             </div>
+
+            <n-card v-if="documentChain || chainRefreshing || initialChainError || paymentRefreshError" size="small" class="chain-card">
+              <n-space vertical size="small">
+                <n-text v-if="documentChain" strong>{{ t('chain.billingMode') }}: {{ documentChain.settlement_mode }}</n-text>
+                <n-text depth="3">{{ t('chain.readOnly') }}</n-text>
+                <n-spin v-if="chainRefreshing" size="small" />
+                <n-alert v-if="initialChainError" type="error">
+                  {{ t('chain.initialLoadFailed') }}
+                </n-alert>
+                <n-button v-if="initialChainError" text type="primary" :loading="chainRefreshing" @click="loadInitialDocumentChain">
+                  {{ t('chain.retry') }}
+                </n-button>
+                <n-alert v-if="paymentRefreshError" type="error">
+                  {{ t('chain.paymentRefreshFailed') }}
+                </n-alert>
+                <n-button v-if="paymentRefreshError" text type="primary" :loading="chainRefreshing" @click="refreshAfterPayment">
+                  {{ t('chain.retry') }}
+                </n-button>
+                <n-list v-if="documentChain" bordered>
+                  <n-list-item v-for="event in documentChain.events" :key="event.id">
+                    {{ event.event_type }} · {{ event.occurred_at }}
+                  </n-list-item>
+                </n-list>
+              </n-space>
+            </n-card>
 
             <n-alert v-if="pageError" type="error" style="margin-bottom: 16px">
               {{ pageError }}

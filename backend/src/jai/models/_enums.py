@@ -2,6 +2,7 @@
 
 This module will grow as business entities are introduced (M1+).
 """
+
 from __future__ import annotations
 
 import enum
@@ -76,6 +77,23 @@ class QuoteSettlementMode(enum.StrEnum):
     DIRECT_INVOICE = "DIRECT_INVOICE"
     RECEIPT_ONLY = "RECEIPT_ONLY"
     FORMAL_ADVANCE = "FORMAL_ADVANCE"
+
+
+class DocumentChainEventType(enum.StrEnum):
+    """Append-only, safe-to-display lifecycle facts for a document chain."""
+
+    MODE_LOCKED = "MODE_LOCKED"
+    INVOICE_CREATED = "INVOICE_CREATED"
+    QUOTE_PAYMENT_CREATED = "QUOTE_PAYMENT_CREATED"
+    QUOTE_PAYMENT_UPDATED = "QUOTE_PAYMENT_UPDATED"
+    QUOTE_PAYMENT_DELETED = "QUOTE_PAYMENT_DELETED"
+    INVOICE_DELETED = "INVOICE_DELETED"
+    INVOICE_UPDATED = "INVOICE_UPDATED"
+    INVOICE_ISSUED = "INVOICE_ISSUED"
+    INVOICE_STATUS_CHANGED = "INVOICE_STATUS_CHANGED"
+    INVOICE_PAYMENT_CREATED = "INVOICE_PAYMENT_CREATED"
+    INVOICE_PAYMENT_UPDATED = "INVOICE_PAYMENT_UPDATED"
+    INVOICE_PAYMENT_DELETED = "INVOICE_PAYMENT_DELETED"
 
 
 class PaymentDirection(enum.StrEnum):

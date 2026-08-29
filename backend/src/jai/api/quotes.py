@@ -25,6 +25,7 @@ from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models._enums import QuoteStatus
 from jai.models.user import User
+from jai.schemas.document_chain import DocumentChainRead
 from jai.schemas.email_log import DocumentSendRequest, EmailLogListResponse, EmailLogRead
 from jai.schemas.invoice import InvoiceCalculationRead, InvoiceRead
 from jai.schemas.quote import (
@@ -37,8 +38,10 @@ from jai.schemas.quote import (
     QuoteWrite,
 )
 from jai.services import company as company_svc
+from jai.services.document_chain import ModeConflictError, get_document_chain
 from jai.services.pricing import calculate_quote
 from jai.services.quote import (
+    ConversionConflictError,
     convert_to_invoice,
     create_quote,
     delete_quote,
@@ -187,6 +190,22 @@ async def get_quote_endpoint(
     return result
 
 
+@router.get("/quotes/{quote_id}/document-chain", response_model=DocumentChainRead)
+async def get_quote_document_chain_endpoint(
+    quote_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentChainRead:
+    """Return the read-only authoritative chain rooted at this Quote."""
+    _owner_only(user)
+    result = await get_document_chain(
+        session, company_id=_require_company_id(user), quote_id=quote_id
+    )
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")
+    return result
+
+
 @router.put("/quotes/{quote_id}", response_model=QuoteRead)
 async def update_quote_endpoint(
     quote_id: uuid.UUID,
@@ -286,10 +305,18 @@ async def convert_quote_endpoint(
     company_id = _require_company_id(user)
     try:
         result = await convert_to_invoice(session, quote_id, company_id, creator_id=user.id)
+    except ModeConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except ConversionConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except ValueError as exc:
         msg = str(exc)
-        if "already been converted" in msg:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg) from exc
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=msg
         ) from exc

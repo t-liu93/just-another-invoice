@@ -3,6 +3,13 @@
     "title": "Yet Another Ledger",
     "subtitle": "自托管发票与业务管理"
   },
+  "chain": {
+    "billingMode": "结算模式",
+    "readOnly": "单据链时间线（只读）",
+    "initialLoadFailed": "无法读取单据链。",
+    "paymentRefreshFailed": "无法刷新单据链。付款已保存。",
+    "retry": "重试"
+  },
   "nav": {
     "dashboard": "仪表盘",
     "customers": "客户",

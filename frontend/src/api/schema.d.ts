@@ -1123,6 +1123,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/{invoice_id}/document-chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Invoice Document Chain Endpoint */
+        get: operations["get_invoice_document_chain_endpoint_api_v1_invoices__invoice_id__document_chain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/status": {
         parameters: {
             query?: never;
@@ -1363,6 +1380,26 @@ export interface paths {
          * @description Delete a quote (cascade removes lines/taxes). Number is not recycled.
          */
         delete: operations["delete_quote_endpoint_api_v1_quotes__quote_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/document-chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quote Document Chain Endpoint
+         * @description Return the read-only authoritative chain rooted at this Quote.
+         */
+        get: operations["get_quote_document_chain_endpoint_api_v1_quotes__quote_id__document_chain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3173,6 +3210,144 @@ export interface components {
          * @enum {string}
          */
         DiscountType: "NONE" | "PERCENTAGE" | "FIXED";
+        /** DocumentChainAvailableActionRead */
+        DocumentChainAvailableActionRead: {
+            /** Code */
+            code: string;
+            /** Available */
+            available: boolean;
+        };
+        /** DocumentChainEventRead */
+        DocumentChainEventRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            event_type: components["schemas"]["DocumentChainEventType"];
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Quote Id */
+            quote_id?: string | null;
+            /** Invoice Id */
+            invoice_id?: string | null;
+            /** Actor User Id */
+            actor_user_id?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * DocumentChainEventType
+         * @description Append-only, safe-to-display lifecycle facts for a document chain.
+         * @enum {string}
+         */
+        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED";
+        /**
+         * DocumentChainNodeRead
+         * @description A Quote, formal document or cash row in stable chain order.
+         */
+        DocumentChainNodeRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Node Type */
+            node_type: string;
+            document_kind?: components["schemas"]["InvoiceDocumentKind"] | null;
+            /** Number */
+            number?: string | null;
+            status?: components["schemas"]["InvoiceStatus"] | null;
+            /**
+             * Occurred On
+             * Format: date
+             */
+            occurred_on: string;
+            /**
+             * Charge Amount
+             * @default 0
+             */
+            charge_amount?: string;
+            /**
+             * Credit Amount
+             * @default 0
+             */
+            credit_amount?: string;
+            /**
+             * Incoming Payment Amount
+             * @default 0
+             */
+            incoming_payment_amount?: string;
+            /**
+             * Refund Amount
+             * @default 0
+             */
+            refund_amount?: string;
+            /**
+             * Due Amount
+             * @default 0
+             */
+            due_amount?: string;
+            /**
+             * Refund Due Amount
+             * @default 0
+             */
+            refund_due_amount?: string;
+        };
+        /**
+         * DocumentChainRead
+         * @description Read-only aggregate; all totals are calculated in services.
+         */
+        DocumentChainRead: {
+            /** Quote Id */
+            quote_id?: string | null;
+            /** Quote Number */
+            quote_number?: string | null;
+            settlement_mode: components["schemas"]["QuoteSettlementMode"];
+            /** Settlement Mode Locked At */
+            settlement_mode_locked_at?: string | null;
+            /** Nodes */
+            nodes: components["schemas"]["DocumentChainNodeRead"][];
+            /** Relations */
+            relations: components["schemas"]["DocumentChainRelationRead"][];
+            /** Events */
+            events: components["schemas"]["DocumentChainEventRead"][];
+            totals: components["schemas"]["DocumentChainTotals"];
+            /**
+             * Quote Total
+             * @default 0
+             */
+            quote_total?: string;
+            /** Final Total */
+            final_total?: string | null;
+            /** Quote Final Variance */
+            quote_final_variance?: string | null;
+            /** Available Actions */
+            available_actions: components["schemas"]["DocumentChainAvailableActionRead"][];
+        };
+        /**
+         * DocumentChainRelationRead
+         * @description A typed authoritative provenance edge, never a UI-derived backlink.
+         */
+        DocumentChainRelationRead: {
+            /** Relation Type */
+            relation_type: string;
+            /**
+             * From Node Id
+             * Format: uuid
+             */
+            from_node_id: string;
+            /**
+             * To Node Id
+             * Format: uuid
+             */
+            to_node_id: string;
+        };
         /**
          * DocumentChainTotals
          * @description Compact, backend-authoritative settlement projection for one Quote chain.
@@ -10336,6 +10511,37 @@ export interface operations {
             };
         };
     };
+    get_invoice_document_chain_endpoint_api_v1_invoices__invoice_id__document_chain_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentChainRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     transition_status_endpoint_api_v1_invoices__invoice_id__status_post: {
         parameters: {
             query?: never;
@@ -10759,6 +10965,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quote_document_chain_endpoint_api_v1_quotes__quote_id__document_chain_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentChainRead"];
+                };
             };
             /** @description Validation Error */
             422: {

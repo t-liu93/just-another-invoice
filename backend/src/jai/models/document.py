@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -20,7 +21,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from jai.db import Base
-from jai.models._enums import PartySnapshotProvenance
+from jai.models._enums import DocumentChainEventType, PartySnapshotProvenance
 
 _MONEY = Numeric(18, 3)
 _RATE = Numeric(6, 3)
@@ -31,9 +32,7 @@ class InvoicePartySnapshot(Base):
 
     __tablename__ = "invoice_party_snapshot"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("company.id", ondelete="RESTRICT"),
@@ -77,13 +76,9 @@ class InvoiceCreditBasisLine(Base):
     """Immutable issued charge basis used by later source-bound Credit Notes."""
 
     __tablename__ = "invoice_credit_basis_line"
-    __table_args__ = (
-        UniqueConstraint("invoice_line_id", name="uq_credit_basis_invoice_line"),
-    )
+    __table_args__ = (UniqueConstraint("invoice_line_id", name="uq_credit_basis_invoice_line"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("company.id", ondelete="RESTRICT"),
@@ -118,3 +113,42 @@ class InvoiceCreditBasisLine(Base):
     base_net_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     base_vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     base_gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+
+
+class DocumentChainEvent(Base):
+    """An immutable, safe projection fact written with a chain mutation.
+
+    Metadata deliberately stores only stable IDs, enum codes and money/date
+    snapshots.  It must never be used as a general request/audit payload.
+    """
+
+    __tablename__ = "document_chain_event"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[DocumentChainEventType] = mapped_column(nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"), index=True
+    )
+    # Stable sequence order avoids transaction-timestamp/UUID tie ambiguity.
+    event_order: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        unique=True,
+        server_default=text("nextval('document_chain_event_order_seq')"),
+    )
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)

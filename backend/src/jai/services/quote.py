@@ -31,10 +31,13 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jai.db import set_rls_company
 from jai.models._enums import (
     DiscountType,
+    DocumentChainEventType,
     InvoiceStatus,
     InvoiceTaxMode,
+    QuoteSettlementMode,
     QuoteStatus,
     SettingLevel,
     VatTreatmentEffect,
@@ -68,6 +71,12 @@ from jai.schemas.setting import (
     SETTING_KEY_QUOTE_NUMBERING,
     QuoteDefaultValidDaysRead,
     QuoteNumberingConfig,
+)
+from jai.services.document_chain import (
+    append_document_chain_event,
+    conversion_is_available,
+    lock_quote_mode,
+    quote_has_converted_invoice,
 )
 from jai.services.invoice import clone_quote_to_invoice, get_invoice
 from jai.services.money import quantize_to_minor_unit
@@ -143,9 +152,7 @@ async def _resolve_treatment(
         result = await session.execute(stmt)
         treatment = result.scalar_one_or_none()
         if treatment is None:
-            raise ValueError(
-                "VAT treatment not found, inactive, or not a sales treatment."
-            )
+            raise ValueError("VAT treatment not found, inactive, or not a sales treatment.")
         return treatment
 
     treatment = await _derive_treatment_from_customer(session, company_id, customer)
@@ -168,9 +175,7 @@ async def _load_vat_rates(
     if body.tax_mode == InvoiceTaxMode.LINE:
         for line in body.lines:
             if line.vat_rate_id is None:
-                raise ValueError(
-                    f"Line '{line.name}': vat_rate_id is required in LINE tax mode."
-                )
+                raise ValueError(f"Line '{line.name}': vat_rate_id is required in LINE tax mode.")
             required_ids.add(line.vat_rate_id)
     else:
         if body.document_vat_rate_id is None:
@@ -213,9 +218,7 @@ async def _validate_line_fks(
         )
         found = (await session.execute(count_stmt)).scalar_one()
         if found != len(product_ids):
-            raise ValueError(
-                "One or more product IDs not found or do not belong to this company."
-            )
+            raise ValueError("One or more product IDs not found or do not belong to this company.")
 
     if unit_ids:
         count_stmt = select(func.count()).where(
@@ -224,9 +227,7 @@ async def _validate_line_fks(
         )
         found = (await session.execute(count_stmt)).scalar_one()
         if found != len(unit_ids):
-            raise ValueError(
-                "One or more unit IDs not found or do not belong to this company."
-            )
+            raise ValueError("One or more unit IDs not found or do not belong to this company.")
 
 
 def _line_to_read(line: QuoteLine) -> QuoteLineRead:
@@ -406,12 +407,17 @@ async def _quote_chain_totals(session: AsyncSession, quote: Quote) -> DocumentCh
     base_net_charge = base_charge - base_credit
     base_net_cash = base_incoming - base_refund
     return DocumentChainTotals(
-        charge_total=charge, credit_total=credit, incoming_payment_total=incoming,
-        refund_total=refund, application_total=Decimal("0"),
+        charge_total=charge,
+        credit_total=credit,
+        incoming_payment_total=incoming,
+        refund_total=refund,
+        application_total=Decimal("0"),
         due_amount=max(net_charge - net_cash, Decimal("0")),
         refund_due_amount=max(net_cash - net_charge, Decimal("0")),
-        base_charge_total=base_charge, base_credit_total=base_credit,
-        base_incoming_payment_total=base_incoming, base_refund_total=base_refund,
+        base_charge_total=base_charge,
+        base_credit_total=base_credit,
+        base_incoming_payment_total=base_incoming,
+        base_refund_total=base_refund,
         base_application_total=Decimal("0"),
         base_due_amount=max(base_net_charge - base_net_cash, Decimal("0")),
         base_refund_due_amount=max(base_net_cash - base_net_charge, Decimal("0")),
@@ -506,15 +512,13 @@ async def _build_and_persist_quote(
 
     if quote_number is None:
         numbering_config = await _load_numbering_config(session, company_id)
-        quote_number, sequence_number, customer_sequence_number = (
-            await allocate_quote_number(
-                session,
-                company_id,
-                customer.id,
-                body.quote_date,
-                numbering_config=numbering_config,
-                customer_invoice_prefix=customer.invoice_prefix,
-            )
+        quote_number, sequence_number, customer_sequence_number = await allocate_quote_number(
+            session,
+            company_id,
+            customer.id,
+            body.quote_date,
+            numbering_config=numbering_config,
+            customer_invoice_prefix=customer.invoice_prefix,
         )
 
     total_incl_vat = quantize_to_minor_unit(calc.total_incl_vat)
@@ -532,12 +536,8 @@ async def _build_and_persist_quote(
 
     if existing_quote is not None:
         q = existing_quote
-        await session.execute(
-            delete(QuoteLine).where(QuoteLine.quote_id == q.id)
-        )
-        await session.execute(
-            delete(QuoteTax).where(QuoteTax.quote_id == q.id)
-        )
+        await session.execute(delete(QuoteLine).where(QuoteLine.quote_id == q.id))
+        await session.execute(delete(QuoteTax).where(QuoteTax.quote_id == q.id))
     else:
         q = Quote()
         q.company_id = company_id
@@ -864,9 +864,7 @@ async def delete_quote(
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
-        raise ValueError(
-            "Cannot delete a quote that has payment history."
-        ) from exc
+        raise ValueError("Cannot delete a quote that has payment history.") from exc
     return True
 
 
@@ -957,6 +955,12 @@ _CONVERTIBLE_STATUSES: frozenset[QuoteStatus] = frozenset(
 )
 
 
+class ConversionConflictError(ValueError):
+    """A stable conflict for a duplicate conversion command."""
+
+    code = "ALREADY_CONVERTED"
+
+
 async def convert_to_invoice(
     session: AsyncSession,
     quote_id: uuid.UUID,
@@ -970,6 +974,7 @@ async def convert_to_invoice(
     - Quote is set to ACCEPTED + ``converted_invoice_id`` as a single commit.
     Returns None if the quote is not found.
     """
+    await set_rls_company(session, company_id)
     # Row-lock the quote so concurrent Convert requests serialise and the
     # second sees converted_invoice_id != NULL (preventing duplicate invoices).
     stmt = (
@@ -996,10 +1001,30 @@ async def convert_to_invoice(
             f"this quote is {q.status.value}."
         )
 
-    if q.converted_invoice_id is not None:
-        raise ValueError(
-            "This quote has already been converted to an invoice "
-            f"({q.converted_invoice_id})."
+    if await quote_has_converted_invoice(session, company_id=company_id, quote_id=q.id):
+        raise ConversionConflictError("Quote already has an authoritative converted invoice.")
+
+    # A mode mismatch is never reported as a conversion-state conflict.  This
+    # preserves an actionable, stable contract for FORMAL and other branches.
+    if QuoteSettlementMode(q.settlement_mode) not in {
+        QuoteSettlementMode.UNSET,
+        QuoteSettlementMode.DIRECT_INVOICE,
+        QuoteSettlementMode.RECEIPT_ONLY,
+    }:
+        await lock_quote_mode(
+            session, q, QuoteSettlementMode.DIRECT_INVOICE, actor_user_id=creator_id
+        )
+    if not await conversion_is_available(session, q):
+        raise ConversionConflictError("Quote already has an authoritative converted invoice.")
+
+    # The branch lock and conversion belong to the same outer quote-locked
+    # transaction.  A later failure/rollback therefore leaves UNSET intact.
+    # M11.5 receipt-only conversion remains its established continuation:
+    # quote-origin cash becomes attached to the one final Standard invoice.
+    # Only an UNSET quote selects the direct branch here.
+    if QuoteSettlementMode(q.settlement_mode) != QuoteSettlementMode.RECEIPT_ONLY:
+        await lock_quote_mode(
+            session, q, QuoteSettlementMode.DIRECT_INVOICE, actor_user_id=creator_id
         )
 
     inv_read = await clone_quote_to_invoice(
@@ -1016,9 +1041,7 @@ async def convert_to_invoice(
         .with_for_update()
     )
     payments = list(payment_result.scalars().all())
-    invoice_result = await session.execute(
-        select(Invoice).where(Invoice.id == inv_read.id)
-    )
+    invoice_result = await session.execute(select(Invoice).where(Invoice.id == inv_read.id))
     invoice = invoice_result.scalar_one()
     for payment in payments:
         payment.invoice_id = invoice.id
@@ -1039,6 +1062,15 @@ async def convert_to_invoice(
 
     q.status = QuoteStatus.ACCEPTED
     q.converted_invoice_id = inv_read.id
+    await append_document_chain_event(
+        session,
+        company_id=company_id,
+        quote_id=q.id,
+        invoice_id=inv_read.id,
+        actor_user_id=creator_id,
+        event_type=DocumentChainEventType.INVOICE_CREATED,
+        metadata={"document_kind": "STANDARD"},
+    )
 
     try:
         await session.commit()
@@ -1072,17 +1104,13 @@ async def reactivate(
         return None
 
     if QuoteStatus(q.status) != QuoteStatus.EXPIRED:
-        raise ValueError(
-            f"Only EXPIRED quotes can be reactivated; this quote is {q.status.value}."
-        )
+        raise ValueError(f"Only EXPIRED quotes can be reactivated; this quote is {q.status.value}.")
 
     q.status = QuoteStatus.SENT
 
     if body.valid_until is not None:
         if body.valid_until < date.today():
-            raise ValueError(
-                f"valid_until must be today or a future date; got {body.valid_until}."
-            )
+            raise ValueError(f"valid_until must be today or a future date; got {body.valid_until}.")
         q.valid_until = body.valid_until
     else:
         days = await _load_default_valid_days(session, company_id)

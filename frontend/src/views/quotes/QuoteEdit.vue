@@ -18,6 +18,10 @@ import QuotePaymentPanel from '../../components/QuotePaymentPanel.vue'
 import { useQuotesStore } from '../../stores/quotes'
 import { useInvoicesStore } from '../../stores/invoices'
 import { get, downloadBlob } from '../../api/http'
+import {
+  createDocumentChainPaymentChangeHandler,
+  useDocumentChainRefresh,
+} from '../../composables/useDocumentChainRefresh'
 import type { components } from '../../api/schema'
 import { persistedReceiptCustomer } from '../../utils/receiptEmail'
 
@@ -28,6 +32,7 @@ type ProductInvoiceOptionRead = components['schemas']['ProductInvoiceOptionRead'
 type QuoteCalculationRead = components['schemas']['QuoteCalculationRead']
 type QuoteWrite = components['schemas']['QuoteWrite']
 type QuoteRead = components['schemas']['QuoteRead']
+type DocumentChainRead = components['schemas']['DocumentChainRead']
 type DocumentTemplateRead = components['schemas']['DocumentTemplateRead']
 type ContentBlockRead = components['schemas']['ContentBlockRead']
 type NoteTemplateRead = components['schemas']['NoteTemplateRead']
@@ -74,6 +79,18 @@ const pageLoading = ref(false)
 const saving = ref(false)
 const pageError = ref<string | null>(null)
 const existingQuote = ref<QuoteRead | null>(null)
+const {
+  documentChain,
+  chainRefreshing,
+  initialChainError,
+  paymentRefreshError,
+  loadInitialDocumentChain,
+  refreshAfterPayment,
+} = useDocumentChainRefresh<DocumentChainRead>(async () => {
+  const quoteId = existingQuote.value?.id
+  if (!quoteId) throw new Error('Quote document chain is unavailable')
+  return get<DocumentChainRead>(`/api/v1/quotes/${quoteId}/document-chain`)
+})
 
 // Quote header fields
 const customerId = ref<string | null>(null)
@@ -547,6 +564,7 @@ onMounted(async () => {
       isEdit.value = true
       const q = await store.fetchQuote(id)
       populateFromQuote(q)
+      await loadInitialDocumentChain()
       if (!customers.value.find(c => c.id === q.customer_id)) {
         const custRes = await get<CustomerRead>(`/api/v1/customers/${q.customer_id}`)
         customers.value = [custRes, ...customers.value]
@@ -584,6 +602,8 @@ const selectedCustomer = computed(() => customers.value.find(c => c.id === custo
 const receiptCustomer = computed(() =>
   persistedReceiptCustomer(existingQuote.value?.customer_id, customers.value),
 )
+
+const handlePaymentsChanged = createDocumentChainPaymentChangeHandler(refreshAfterPayment)
 
 // ---- PDF download ----
 const downloadingPdf = ref(false)
@@ -774,6 +794,31 @@ function handleReceiptSent(log: EmailLogRead) {
                 </template>
               </n-space>
             </div>
+
+            <n-card v-if="documentChain || chainRefreshing || initialChainError || paymentRefreshError" size="small" class="chain-card">
+              <n-space vertical size="small">
+                <n-text v-if="documentChain" strong>{{ t('chain.billingMode') }}: {{ documentChain.settlement_mode }}</n-text>
+                <n-text depth="3">{{ t('chain.readOnly') }}</n-text>
+                <n-spin v-if="chainRefreshing" size="small" />
+                <n-alert v-if="initialChainError" type="error">
+                  {{ t('chain.initialLoadFailed') }}
+                </n-alert>
+                <n-button v-if="initialChainError" text type="primary" :loading="chainRefreshing" @click="loadInitialDocumentChain">
+                  {{ t('chain.retry') }}
+                </n-button>
+                <n-alert v-if="paymentRefreshError" type="error">
+                  {{ t('chain.paymentRefreshFailed') }}
+                </n-alert>
+                <n-button v-if="paymentRefreshError" text type="primary" :loading="chainRefreshing" @click="refreshAfterPayment">
+                  {{ t('chain.retry') }}
+                </n-button>
+                <n-list v-if="documentChain" bordered>
+                  <n-list-item v-for="event in documentChain.events" :key="event.id">
+                    {{ event.event_type }} · {{ event.occurred_at }}
+                  </n-list-item>
+                </n-list>
+              </n-space>
+            </n-card>
 
             <n-alert v-if="pageError" type="error" style="margin-bottom: 16px">
               {{ pageError }}
@@ -1141,6 +1186,7 @@ function handleReceiptSent(log: EmailLogRead) {
               :converted-invoice-id="existingQuote.converted_invoice_id"
               :customer-email="receiptCustomer?.email ?? null"
               :customer-locale="receiptCustomer?.locale ?? null"
+              @payments-changed="handlePaymentsChanged"
               @receipt-sent="handleReceiptSent"
             />
 

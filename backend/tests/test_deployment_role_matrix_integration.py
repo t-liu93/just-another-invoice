@@ -54,9 +54,12 @@ def _run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None)
 
 def _docker_is_available() -> bool:
     try:
-        return subprocess.run(
-            ("docker", "info"), text=True, capture_output=True, check=False, timeout=5
-        ).returncode == 0
+        return (
+            subprocess.run(
+                ("docker", "info"), text=True, capture_output=True, check=False, timeout=5
+            ).returncode
+            == 0
+        )
     except subprocess.TimeoutExpired:
         return False
 
@@ -317,14 +320,18 @@ def _role_flags(url: str) -> dict[str, Any]:
         try:
             async with engine.connect() as conn:
                 row = (
-                    await conn.execute(
-                        text(
-                            "SELECT current_user AS current_user, r.rolsuper, r.rolbypassrls, "
-                            "has_schema_privilege(current_user, 'public', 'CREATE') AS can_ddl "
-                            "FROM pg_roles r WHERE r.rolname = current_user"
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT current_user AS current_user, r.rolsuper, r.rolbypassrls, "
+                                "has_schema_privilege(current_user, 'public', 'CREATE') AS can_ddl "
+                                "FROM pg_roles r WHERE r.rolname = current_user"
+                            )
                         )
                     )
-                ).mappings().one()
+                    .mappings()
+                    .one()
+                )
                 return dict(row)
         finally:
             await engine.dispose()
@@ -446,19 +453,24 @@ def _expected_runtime_privilege_flags() -> dict[str, bool]:
 
 def _connection_identity(url: str) -> dict[str, Any]:
     """Return the authenticated role and actual PostgreSQL target instance."""
+
     async def query() -> dict[str, Any]:
         engine = create_async_engine(url)
         try:
             async with engine.connect() as conn:
                 row = (
-                    await conn.execute(
-                        text(
-                            "SELECT current_user, current_database() AS database, "
-                            "inet_server_addr()::text AS server_address, "
-                            "inet_server_port() AS server_port"
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT current_user, current_database() AS database, "
+                                "inet_server_addr()::text AS server_address, "
+                                "inet_server_port() AS server_port"
+                            )
                         )
                     )
-                ).mappings().one()
+                    .mappings()
+                    .one()
+                )
                 return dict(row)
         finally:
             await engine.dispose()
@@ -648,9 +660,7 @@ def test_deployment_role_matrix_uses_external_urls_legacy_volumes_and_dev_isolat
             POSTGRES_DB=fresh.database,
         )
     )
-    migration_environment = _test_env(
-        **_service_environment(external_compose, "db-migration")
-    )
+    migration_environment = _test_env(**_service_environment(external_compose, "db-migration"))
     app_environment = _test_env(**_service_environment(external_compose, "app"))
     assert migration_environment["DATABASE_URL"] == migration_url
     assert migration_environment["DATABASE_MIGRATION_URL"] == migration_url
@@ -761,7 +771,9 @@ def test_deployment_role_matrix_uses_external_urls_legacy_volumes_and_dev_isolat
         """
     ).strip()
     assert _only_migration_owner(companions, migration_user)
-    legacy_migration = f"postgresql+asyncpg://{migration_user}:migration-secret@127.0.0.1:{legacy.port}/jai"
+    legacy_migration = (
+        f"postgresql+asyncpg://{migration_user}:migration-secret@127.0.0.1:{legacy.port}/jai"
+    )
     legacy_runtime = f"postgresql+asyncpg://{app_user}:runtime-secret@127.0.0.1:{legacy.port}/jai"
     # Recreate the old provisioner's sequence UPDATE ACL after the legacy
     # ownership transfer.  0030's additive GRANT leaves it in place; 0031
@@ -818,6 +830,19 @@ def test_deployment_role_matrix_uses_external_urls_legacy_volumes_and_dev_isolat
     assert _runtime_privilege_flags(legacy_runtime) == _expected_runtime_privilege_flags()
     _assert_runtime_sequence_behavior(legacy_runtime)
     assert _role_flags(legacy_runtime)["can_ddl"] is False
+    # The runtime smoke must exercise the current app/schema contract.  The
+    # preceding 0031 assertions intentionally pin an older schema only long
+    # enough to verify its ACL migration; M12's later heads correctly refuse
+    # to boot against it.
+    _upgrade_host(
+        legacy_migration,
+        _test_env(
+            POSTGRES_APP_USER=app_user,
+            POSTGRES_APP_PASSWORD="runtime-secret",
+            POSTGRES_MIGRATION_USER=migration_user,
+            POSTGRES_MIGRATION_PASSWORD="migration-secret",
+        ),
+    )
     _runtime_smoke(
         _test_env(
             POSTGRES_HOST="127.0.0.1",
@@ -888,9 +913,7 @@ def test_deployment_role_matrix_uses_external_urls_legacy_volumes_and_dev_isolat
         dev_env = _test_env(POSTGRES_DEV_PORT="5433")
         _run(*compose_args, "up", "-d", "postgres", cwd=REPO_ROOT, env=dev_env)
         _wait_for_postgres(container, "jai_admin")
-        port_output = _run(
-            *compose_args, "port", "postgres", "5432", cwd=REPO_ROOT, env=dev_env
-        )
+        port_output = _run(*compose_args, "port", "postgres", "5432", cwd=REPO_ROOT, env=dev_env)
         dev_port = int(port_output.strip().rsplit(":", 1)[1])
         dev_migration = f"postgresql+asyncpg://jai_migrator:jai_migrator@127.0.0.1:{dev_port}/jai"
         dev_runtime = f"postgresql+asyncpg://jai_app:jai_app@127.0.0.1:{dev_port}/jai"

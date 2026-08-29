@@ -31,6 +31,7 @@ from jai.schemas.payment import (
     PaymentRead,
     QuotePaymentsResponse,
 )
+from jai.services.document_chain import ModeConflictError
 from jai.services.payment import (
     delete_payment,
     get_payment,
@@ -120,6 +121,11 @@ async def record_quote_payment_endpoint(
             body=body,
             creator_id=user.id,
         )
+    except ModeConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
@@ -445,7 +451,7 @@ async def update_payment_endpoint(
     _owner_only(user)
     company_id = _require_company_id(user)
     try:
-        return await update_payment(session, payment_id, company_id, body)
+        return await update_payment(session, payment_id, company_id, body, actor_user_id=user.id)
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
@@ -475,7 +481,7 @@ async def delete_payment_endpoint(
     _owner_only(user)
     company_id = _require_company_id(user)
     try:
-        return await delete_payment(session, payment_id, company_id)
+        return await delete_payment(session, payment_id, company_id, actor_user_id=user.id)
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)

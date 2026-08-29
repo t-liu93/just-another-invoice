@@ -15,12 +15,14 @@ from sqlalchemy.orm import selectinload
 
 from jai.db import set_rls_company
 from jai.models._enums import (
+    DocumentChainEventType,
     InvoiceDocumentKind,
     InvoicePaidStatus,
     InvoiceSettlementStatus,
     InvoiceStatus,
     InvoiceTaxMode,
     PaymentDirection,
+    QuoteSettlementMode,
     QuoteStatus,
 )
 from jai.models.customer import Customer
@@ -37,6 +39,11 @@ from jai.schemas.payment import (
     PaymentRead,
     PaymentTaxRead,
     QuotePaymentsResponse,
+)
+from jai.services.document_chain import (
+    append_document_chain_event,
+    lock_quote_mode,
+    quote_has_converted_invoice,
 )
 from jai.services.money import quantize_money, quantize_to_minor_unit
 
@@ -64,9 +71,7 @@ def recompute_payment_state(
 ) -> PaymentState:
     """Pure invoice payment-state engine."""
     paid_total = sum((Decimal(str(p.amount)) for p in payments), Decimal("0"))
-    base_paid_total = sum(
-        (Decimal(str(p.base_amount)) for p in payments), Decimal("0")
-    )
+    base_paid_total = sum((Decimal(str(p.base_amount)) for p in payments), Decimal("0"))
     due_amount = total_incl_vat - paid_total
     base_due_amount = base_total_incl_vat - base_paid_total
     if due_amount == Decimal("0"):
@@ -79,10 +84,7 @@ def recompute_payment_state(
     new_status = current_status
     if paid_status == InvoicePaidStatus.PAID and current_status == InvoiceStatus.SENT:
         new_status = InvoiceStatus.COMPLETED
-    elif (
-        paid_status != InvoicePaidStatus.PAID
-        and current_status == InvoiceStatus.COMPLETED
-    ):
+    elif paid_status != InvoicePaidStatus.PAID and current_status == InvoiceStatus.COMPLETED:
         new_status = InvoiceStatus.SENT
     return PaymentState(
         paid_total=quantize_money(paid_total),
@@ -127,10 +129,7 @@ def tax_bucket_key(
     The nullable VAT-rate FK is deliberately excluded: dictionary deletion may
     set it to NULL, but must never change the identity of tax already recognised.
     """
-    return (
-        f"{treatment_code}|{treatment_effect}|{int(treatment_requires_icp)}|"
-        f"{vat_rate_percent}"
-    )
+    return f"{treatment_code}|{treatment_effect}|{int(treatment_requires_icp)}|{vat_rate_percent}"
 
 
 def _minor_units(value: Decimal) -> int:
@@ -178,9 +177,7 @@ def allocate_quote_payment_taxes(
             shares.append(base)
             remainders.append((remainder, index))
         leftover = payment_units - sum(shares)
-        for _, index in sorted(remainders, key=lambda item: (-item[0], item[1]))[
-            :leftover
-        ]:
+        for _, index in sorted(remainders, key=lambda item: (-item[0], item[1]))[:leftover]:
             shares[index] += 1
 
         rows: list[AllocatedTaxBucket] = []
@@ -227,9 +224,7 @@ def aggregate_quote_tax_buckets(quote: Quote) -> list[TaxBucketSnapshot]:
             quote.vat_treatment_effect,
             quote.vat_treatment_requires_icp,
         )
-        current_taxable, current_vat = aggregates.get(
-            key, (Decimal("0"), Decimal("0"))
-        )
+        current_taxable, current_vat = aggregates.get(key, (Decimal("0"), Decimal("0")))
         aggregates[key] = (
             current_taxable + Decimal(str(row.taxable_amount)),
             current_vat + Decimal(str(row.tax_amount)),
@@ -272,9 +267,7 @@ async def _load_invoice(
     *,
     lock: bool = False,
 ) -> Invoice:
-    stmt = select(Invoice).where(
-        Invoice.id == invoice_id, Invoice.company_id == company_id
-    )
+    stmt = select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == company_id)
     if lock:
         stmt = stmt.with_for_update()
     result = await session.execute(stmt)
@@ -308,9 +301,7 @@ async def _load_quote(
     return quote
 
 
-async def _load_payments_for_invoice(
-    session: AsyncSession, invoice_id: uuid.UUID
-) -> list[Payment]:
+async def _load_payments_for_invoice(session: AsyncSession, invoice_id: uuid.UUID) -> list[Payment]:
     result = await session.execute(
         select(Payment)
         .where(Payment.invoice_id == invoice_id)
@@ -344,9 +335,7 @@ async def _document_number_maps(
     quote_map: dict[uuid.UUID, str] = {}
     if invoice_ids:
         result = await session.execute(
-            select(Invoice.id, Invoice.invoice_number).where(
-                Invoice.id.in_(invoice_ids)
-            )
+            select(Invoice.id, Invoice.invoice_number).where(Invoice.id.in_(invoice_ids))
         )
         invoice_map = {row.id: row.invoice_number for row in result.all()}
     if quote_ids:
@@ -397,22 +386,16 @@ def _payment_to_read(
     )
 
 
-async def _payment_reads(
-    session: AsyncSession, payments: list[Payment]
-) -> list[PaymentRead]:
+async def _payment_reads(session: AsyncSession, payments: list[Payment]) -> list[PaymentRead]:
     invoice_map, quote_map = await _document_number_maps(session, payments)
     return [
         _payment_to_read(
             payment,
             invoice_number=(
-                invoice_map.get(payment.invoice_id)
-                if payment.invoice_id is not None
-                else None
+                invoice_map.get(payment.invoice_id) if payment.invoice_id is not None else None
             ),
             quote_number=(
-                quote_map.get(payment.quote_id)
-                if payment.quote_id is not None
-                else None
+                quote_map.get(payment.quote_id) if payment.quote_id is not None else None
             ),
         )
         for payment in payments
@@ -450,9 +433,7 @@ async def _build_invoice_response(
 async def _build_quote_response(
     session: AsyncSession, quote: Quote, payments: list[Payment]
 ) -> QuotePaymentsResponse:
-    paid_total = quantize_money(
-        sum((Decimal(str(p.amount)) for p in payments), Decimal("0"))
-    )
+    paid_total = quantize_money(sum((Decimal(str(p.amount)) for p in payments), Decimal("0")))
     total = Decimal(str(quote.total_incl_vat))
     return QuotePaymentsResponse(
         quote_id=quote.id,
@@ -496,9 +477,7 @@ async def recompute_quote_payment_taxes(
     if quantize_to_minor_unit(gross_total) != quantize_to_minor_unit(
         Decimal(str(quote.total_incl_vat))
     ):
-        raise ValueError(
-            "Persisted quote VAT snapshots do not balance to the quote total."
-        )
+        raise ValueError("Persisted quote VAT snapshots do not balance to the quote total.")
     allocations = allocate_quote_payment_taxes(
         buckets, [Decimal(str(payment.amount)) for payment in payments]
     )
@@ -511,9 +490,7 @@ async def recompute_quote_payment_taxes(
                 vat_rate_percent=allocation.bucket.vat_rate_percent,
                 vat_treatment_code=allocation.bucket.vat_treatment_code,
                 vat_treatment_effect=allocation.bucket.vat_treatment_effect,
-                vat_treatment_requires_icp=(
-                    allocation.bucket.vat_treatment_requires_icp
-                ),
+                vat_treatment_requires_icp=(allocation.bucket.vat_treatment_requires_icp),
                 taxable_amount=allocation.taxable_amount,
                 vat_amount=allocation.vat_amount,
                 gross_amount=allocation.gross_amount,
@@ -656,8 +633,7 @@ async def record_payment(
         raise ValueError("Generic payment operations currently support STANDARD invoices only.")
     if invoice.invoice_number is None:
         raise ValueError(
-            "Cannot record a payment on an unissued draft invoice; "
-            "issue it (mark as Sent) first."
+            "Cannot record a payment on an unissued draft invoice; issue it (mark as Sent) first."
         )
     if invoice.status not in (InvoiceStatus.SENT, InvoiceStatus.COMPLETED):
         raise ValueError(
@@ -675,9 +651,7 @@ async def record_payment(
         currency=invoice.currency,
         exchange_rate=Decimal("1"),
         payment_method_id=body.payment_method_id,
-        payment_method_name=await _payment_method_name(
-            session, company_id, body.payment_method_id
-        ),
+        payment_method_name=await _payment_method_name(session, company_id, body.payment_method_id),
         reference=body.reference,
         note=body.note,
         creator_id=creator_id,
@@ -697,6 +671,14 @@ async def record_payment(
             "(cumulative payments would exceed the invoice total)."
         )
     _write_invoice_state(invoice, state)
+    await append_document_chain_event(
+        session,
+        company_id=company_id,
+        invoice_id=invoice.id,
+        actor_user_id=creator_id,
+        event_type=DocumentChainEventType.INVOICE_PAYMENT_CREATED,
+        metadata={"payment_id": str(payment.id), "amount": Decimal(str(payment.amount))},
+    )
     await session.commit()
     await set_rls_company(session, company_id)
     payments = await _load_payments_for_invoice(session, invoice.id)
@@ -714,14 +696,13 @@ async def record_quote_payment(
     quote = await _load_quote(session, quote_id, company_id, lock=True)
     if QuoteStatus(quote.status) != QuoteStatus.ACCEPTED:
         raise ValueError("Quote must be ACCEPTED before recording a payment.")
+    await lock_quote_mode(
+        session, quote, QuoteSettlementMode.RECEIPT_ONLY, actor_user_id=creator_id
+    )
     if quote.vat_treatment_code != "NL_DOMESTIC":
-        raise ValueError(
-            "Quote deposits are supported only for NL_DOMESTIC VAT treatment."
-        )
-    if quote.converted_invoice_id is not None:
-        raise ValueError(
-            "Cannot record a quote payment after the quote has been converted."
-        )
+        raise ValueError("Quote deposits are supported only for NL_DOMESTIC VAT treatment.")
+    if await quote_has_converted_invoice(session, company_id=company_id, quote_id=quote.id):
+        raise ValueError("Cannot record a quote payment after the quote has been converted.")
     amount = quantize_to_minor_unit(body.amount)
     existing = await _load_payments_for_quote(session, quote.id, lock=True)
     paid_before = sum((Decimal(str(p.amount)) for p in existing), Decimal("0"))
@@ -740,15 +721,21 @@ async def record_quote_payment(
         currency=quote.currency,
         exchange_rate=Decimal("1"),
         payment_method_id=body.payment_method_id,
-        payment_method_name=await _payment_method_name(
-            session, company_id, body.payment_method_id
-        ),
+        payment_method_name=await _payment_method_name(session, company_id, body.payment_method_id),
         reference=body.reference,
         note=body.note,
         creator_id=creator_id,
     )
     session.add(payment)
     await session.flush()
+    await append_document_chain_event(
+        session,
+        company_id=company_id,
+        quote_id=quote.id,
+        actor_user_id=creator_id,
+        event_type=DocumentChainEventType.QUOTE_PAYMENT_CREATED,
+        metadata={"payment_id": str(payment.id), "amount": Decimal(str(payment.amount))},
+    )
     payments = await _load_payments_for_quote(session, quote.id, lock=True)
     await recompute_quote_payment_taxes(session, quote, payments)
     await session.commit()
@@ -809,9 +796,7 @@ async def _lock_payment_context(
     if seed.quote_id is not None:
         quote = await _load_quote(session, seed.quote_id, company_id, lock=True)
     elif seed.invoice_id is not None:
-        invoice = await _load_invoice(
-            session, seed.invoice_id, company_id, lock=True
-        )
+        invoice = await _load_invoice(session, seed.invoice_id, company_id, lock=True)
 
     payment_result = await session.execute(
         select(Payment)
@@ -825,9 +810,7 @@ async def _lock_payment_context(
     if payment.quote_id is not None and quote is None:
         quote = await _load_quote(session, payment.quote_id, company_id, lock=True)
     if payment.invoice_id is not None and invoice is None:
-        invoice = await _load_invoice(
-            session, payment.invoice_id, company_id, lock=True
-        )
+        invoice = await _load_invoice(session, payment.invoice_id, company_id, lock=True)
     return payment, quote, invoice
 
 
@@ -836,20 +819,16 @@ async def update_payment(
     payment_id: uuid.UUID,
     company_id: uuid.UUID,
     body: PaymentInput,
+    *,
+    actor_user_id: uuid.UUID | None = None,
 ) -> PaymentMutationResponse:
     await set_rls_company(session, company_id)
-    payment, quote, invoice = await _lock_payment_context(
-        session, payment_id, company_id
-    )
+    payment, quote, invoice = await _lock_payment_context(session, payment_id, company_id)
     amount = (
-        quantize_to_minor_unit(body.amount)
-        if quote is not None
-        else quantize_money(body.amount)
+        quantize_to_minor_unit(body.amount) if quote is not None else quantize_money(body.amount)
     )
     if quote is not None and invoice is not None and body.payment_date > invoice.invoice_date:
-        raise ValueError(
-            "A quote-origin payment date cannot be later than the final invoice date."
-        )
+        raise ValueError("A quote-origin payment date cannot be later than the final invoice date.")
     payment.payment_date = body.payment_date
     payment.amount = amount
     payment.base_amount = amount
@@ -864,15 +843,21 @@ async def update_payment(
     quote_payments: list[Payment] | None = None
     if quote is not None:
         quote_payments = await _load_payments_for_quote(session, quote.id, lock=True)
-        quote_paid = sum(
-            (Decimal(str(item.amount)) for item in quote_payments), Decimal("0")
-        )
+        quote_paid = sum((Decimal(str(item.amount)) for item in quote_payments), Decimal("0"))
         if quote_paid > Decimal(str(quote.total_incl_vat)):
             raise ValueError(
                 "Payment exceeds the outstanding amount "
                 "(cumulative payments would exceed the quote total after this edit)."
             )
         await recompute_quote_payment_taxes(session, quote, quote_payments)
+        await append_document_chain_event(
+            session,
+            company_id=company_id,
+            quote_id=quote.id,
+            actor_user_id=actor_user_id,
+            event_type=DocumentChainEventType.QUOTE_PAYMENT_UPDATED,
+            metadata={"payment_id": str(payment.id), "amount": Decimal(str(payment.amount))},
+        )
 
     invoice_payments: list[Payment] | None = None
     invoice_state: PaymentState | None = None
@@ -894,6 +879,15 @@ async def update_payment(
         if quote is not None:
             await validate_invoice_tax_coverage(session, invoice)
         _write_invoice_state(invoice, invoice_state)
+        await append_document_chain_event(
+            session,
+            company_id=company_id,
+            quote_id=quote.id if quote is not None else None,
+            invoice_id=invoice.id,
+            actor_user_id=actor_user_id,
+            event_type=DocumentChainEventType.INVOICE_PAYMENT_UPDATED,
+            metadata={"payment_id": str(payment.id), "amount": Decimal(str(payment.amount))},
+        )
     await session.commit()
     await set_rls_company(session, company_id)
     if quote is not None:
@@ -911,9 +905,7 @@ async def update_payment(
             else None
         ),
         invoice=(
-            await _build_invoice_response(
-                session, invoice, invoice_payments or [], invoice_state
-            )
+            await _build_invoice_response(session, invoice, invoice_payments or [], invoice_state)
             if invoice is not None
             else None
         ),
@@ -921,17 +913,28 @@ async def update_payment(
 
 
 async def delete_payment(
-    session: AsyncSession, payment_id: uuid.UUID, company_id: uuid.UUID
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    company_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID | None = None,
 ) -> PaymentMutationResponse:
     await set_rls_company(session, company_id)
-    payment, quote, invoice = await _lock_payment_context(
-        session, payment_id, company_id
-    )
+    payment, quote, invoice = await _lock_payment_context(session, payment_id, company_id)
     if invoice is not None and (
         InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.STANDARD
     ):
         await session.rollback()
         raise ValueError("Generic payment operations currently support STANDARD invoices only.")
+    if quote is not None:
+        await append_document_chain_event(
+            session,
+            company_id=company_id,
+            quote_id=quote.id,
+            actor_user_id=actor_user_id,
+            event_type=DocumentChainEventType.QUOTE_PAYMENT_DELETED,
+            metadata={"payment_id": str(payment.id), "amount": Decimal(str(payment.amount))},
+        )
     await session.delete(payment)
     await session.flush()
     quote_payments: list[Payment] | None = None
@@ -949,6 +952,15 @@ async def delete_payment(
             InvoiceStatus(invoice.status),
         )
         _write_invoice_state(invoice, invoice_state)
+        await append_document_chain_event(
+            session,
+            company_id=company_id,
+            quote_id=quote.id if quote is not None else None,
+            invoice_id=invoice.id,
+            actor_user_id=actor_user_id,
+            event_type=DocumentChainEventType.INVOICE_PAYMENT_DELETED,
+            metadata={"payment_id": str(payment.id), "amount": Decimal(str(payment.amount))},
+        )
     await session.commit()
     await set_rls_company(session, company_id)
     if quote is not None:
@@ -964,9 +976,7 @@ async def delete_payment(
             else None
         ),
         invoice=(
-            await _build_invoice_response(
-                session, invoice, invoice_payments or [], invoice_state
-            )
+            await _build_invoice_response(session, invoice, invoice_payments or [], invoice_state)
             if invoice is not None
             else None
         ),
@@ -1018,9 +1028,7 @@ async def list_payments(
         base = base.where(Payment.payment_date >= date_from)
     if date_to is not None:
         base = base.where(Payment.payment_date <= date_to)
-    count_result = await session.execute(
-        select(func.count()).select_from(base.subquery())
-    )
+    count_result = await session.execute(select(func.count()).select_from(base.subquery()))
     total = count_result.scalar_one()
     order = (
         (
@@ -1036,10 +1044,7 @@ async def list_payments(
         )
     )
     result = await session.execute(
-        base.options(selectinload(Payment.taxes))
-        .order_by(*order)
-        .limit(limit)
-        .offset(offset)
+        base.options(selectinload(Payment.taxes)).order_by(*order).limit(limit).offset(offset)
     )
     payments = list(result.scalars().all())
     if not payments:
@@ -1052,9 +1057,7 @@ async def list_payments(
     customer_by_quote: dict[uuid.UUID, uuid.UUID] = {}
     if invoice_ids:
         rows = await session.execute(
-            select(Invoice.id, Invoice.customer_id).where(
-                Invoice.id.in_(invoice_ids)
-            )
+            select(Invoice.id, Invoice.customer_id).where(Invoice.id.in_(invoice_ids))
         )
         customer_by_invoice = {row.id: row.customer_id for row in rows.all()}
     if quote_ids:
@@ -1062,9 +1065,7 @@ async def list_payments(
             select(Quote.id, Quote.customer_id).where(Quote.id.in_(quote_ids))
         )
         customer_by_quote = {row.id: row.customer_id for row in rows.all()}
-    customer_ids = set(customer_by_invoice.values()) | set(
-        customer_by_quote.values()
-    )
+    customer_ids = set(customer_by_invoice.values()) | set(customer_by_quote.values())
     customer_rows = await session.execute(
         select(Customer.id, Customer.name).where(Customer.id.in_(customer_ids))
     )
@@ -1073,14 +1074,8 @@ async def list_payments(
     items: list[PaymentListItem] = []
     for payment in payments:
         linked_customer_id = (
-            customer_by_invoice.get(payment.invoice_id)
-            if payment.invoice_id is not None
-            else None
-        ) or (
-            customer_by_quote.get(payment.quote_id)
-            if payment.quote_id is not None
-            else None
-        )
+            customer_by_invoice.get(payment.invoice_id) if payment.invoice_id is not None else None
+        ) or (customer_by_quote.get(payment.quote_id) if payment.quote_id is not None else None)
         if linked_customer_id is None:
             continue
         items.append(
@@ -1089,15 +1084,11 @@ async def list_payments(
                 origin_type="QUOTE" if payment.quote_id is not None else "INVOICE",
                 invoice_id=payment.invoice_id,
                 invoice_number=(
-                    invoice_map.get(payment.invoice_id)
-                    if payment.invoice_id is not None
-                    else None
+                    invoice_map.get(payment.invoice_id) if payment.invoice_id is not None else None
                 ),
                 quote_id=payment.quote_id,
                 quote_number=(
-                    quote_map.get(payment.quote_id)
-                    if payment.quote_id is not None
-                    else None
+                    quote_map.get(payment.quote_id) if payment.quote_id is not None else None
                 ),
                 customer_id=linked_customer_id,
                 customer_name=customer_map.get(linked_customer_id, ""),

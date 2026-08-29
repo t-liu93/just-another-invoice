@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
 
+from jai.models._enums import DocumentChainEventType
 from jai.schemas.invoice import (
     AdvanceCalculationRequest,
     CreditCalculationLineInput,
@@ -16,6 +18,7 @@ from jai.schemas.invoice import (
 )
 from jai.schemas.payment import PaymentInput
 from jai.schemas.setting import CreditNumberingConfig, InvoiceNumberingConfig
+from jai.services.document_chain import _safe_metadata
 
 
 def test_generic_command_shapes_forbid_m12_intent() -> None:
@@ -63,3 +66,35 @@ def test_numbering_settings_reject_postgres_bigint_overflow(
 ) -> None:
     with pytest.raises(ValidationError):
         config(sequence_start=9_223_372_036_854_775_808)
+
+
+def test_chain_event_metadata_is_closed_typed_and_non_renderable() -> None:
+    payment_id = uuid.uuid4()
+    assert _safe_metadata(
+        DocumentChainEventType.INVOICE_PAYMENT_CREATED,
+        {"payment_id": payment_id, "amount": Decimal("12.340")},
+    ) == {"payment_id": str(payment_id), "amount": "12.340"}
+    assert _safe_metadata(
+        DocumentChainEventType.MODE_LOCKED, {"mode": "DIRECT_INVOICE"}
+    ) == {"mode": "DIRECT_INVOICE"}
+    assert _safe_metadata(
+        DocumentChainEventType.INVOICE_ISSUED,
+        {"document_kind": "STANDARD", "status": "SENT"},
+    ) == {"document_kind": "STANDARD", "status": "SENT"}
+    for metadata in (
+        {"smtp_password": "not-allowed"},
+        {"payment_id": "<b>unsafe</b>", "amount": Decimal("1")},
+        {"payment_id": str(uuid.uuid4()), "amount": {"nested": "no"}},  # type: ignore[dict-item]
+        {"payment_id": "x" * 129, "amount": Decimal("1")},
+        {"payment_id": 7, "amount": "not-a-decimal"},
+        {"payment_id": str(uuid.uuid4()), "amount": Decimal("NaN")},
+    ):
+        with pytest.raises(ValueError):
+            _safe_metadata(DocumentChainEventType.INVOICE_PAYMENT_CREATED, metadata)
+    for event_type, metadata in (
+        (DocumentChainEventType.MODE_LOCKED, {"mode": "NOT_A_MODE"}),
+        (DocumentChainEventType.INVOICE_ISSUED, {}),
+        (DocumentChainEventType.INVOICE_CREATED, {"document_kind": "STANDARD", "html": "<b>x</b>"}),
+    ):
+        with pytest.raises(ValueError):
+            _safe_metadata(event_type, metadata)

@@ -34,6 +34,7 @@ from sqlalchemy.orm import selectinload
 from jai.db import set_rls_company
 from jai.models._enums import (
     DiscountType,
+    DocumentChainEventType,
     InvoiceCreditStatus,
     InvoiceDocumentKind,
     InvoicePaidStatus,
@@ -152,9 +153,7 @@ async def _resolve_treatment(
         result = await session.execute(stmt)
         treatment = result.scalar_one_or_none()
         if treatment is None:
-            raise ValueError(
-                "VAT treatment not found, inactive, or not a sales treatment."
-            )
+            raise ValueError("VAT treatment not found, inactive, or not a sales treatment.")
         return treatment
 
     treatment = await _derive_treatment_from_customer(session, company_id, customer)
@@ -184,9 +183,7 @@ async def _load_vat_rates(
     if body.tax_mode == InvoiceTaxMode.LINE:
         for line in body.lines:
             if line.vat_rate_id is None:
-                raise ValueError(
-                    f"Line '{line.name}': vat_rate_id is required in LINE tax mode."
-                )
+                raise ValueError(f"Line '{line.name}': vat_rate_id is required in LINE tax mode.")
             required_ids.add(line.vat_rate_id)
     else:
         if body.document_vat_rate_id is None:
@@ -235,9 +232,7 @@ async def _validate_line_fks(
         )
         found = (await session.execute(count_stmt)).scalar_one()
         if found != len(product_ids):
-            raise ValueError(
-                "One or more product IDs not found or do not belong to this company."
-            )
+            raise ValueError("One or more product IDs not found or do not belong to this company.")
 
     if unit_ids:
         count_stmt = select(func.count()).where(
@@ -246,9 +241,7 @@ async def _validate_line_fks(
         )
         found = (await session.execute(count_stmt)).scalar_one()
         if found != len(unit_ids):
-            raise ValueError(
-                "One or more unit IDs not found or do not belong to this company."
-            )
+            raise ValueError("One or more unit IDs not found or do not belong to this company.")
 
 
 def _line_to_read(line: InvoiceLine) -> InvoiceLineRead:
@@ -530,12 +523,8 @@ async def _build_and_persist_invoice(
         inv = existing_invoice
         # Replace sub-tables: delete old lines (DB CASCADE removes line_taxes)
         # and old document taxes via explicit DELETE (avoids ORM selectin load).
-        await session.execute(
-            delete(InvoiceLine).where(InvoiceLine.invoice_id == inv.id)
-        )
-        await session.execute(
-            delete(InvoiceTax).where(InvoiceTax.invoice_id == inv.id)
-        )
+        await session.execute(delete(InvoiceLine).where(InvoiceLine.invoice_id == inv.id))
+        await session.execute(delete(InvoiceTax).where(InvoiceTax.invoice_id == inv.id))
     else:
         inv = Invoice()
         inv.company_id = company_id
@@ -644,9 +633,7 @@ async def _build_and_persist_invoice(
         line_row.subtotal_excl_vat = quantize_to_minor_unit(line_calc.subtotal_excl_vat)
         line_row.subtotal_incl_vat = quantize_to_minor_unit(line_calc.subtotal_incl_vat)
         line_row.line_discount_amount = quantize_to_minor_unit(line_calc.line_discount_amount)
-        line_row.document_discount_share = quantize_to_minor_unit(
-            line_calc.document_discount_share
-        )
+        line_row.document_discount_share = quantize_to_minor_unit(line_calc.document_discount_share)
         line_row.taxable_amount = quantize_to_minor_unit(line_calc.taxable_amount)
         line_row.vat_total = quantize_to_minor_unit(line_calc.vat_total)
         line_row.total_incl_vat = quantize_to_minor_unit(line_calc.total_incl_vat)
@@ -727,9 +714,7 @@ def _allocate_document_vat(line_nets: list[Decimal], total_vat: Decimal) -> list
     return [Decimal(amount) / Decimal("100") for amount in allocated]
 
 
-async def _credit_basis_rows(
-    session: AsyncSession, inv: Invoice
-) -> list[InvoiceCreditBasisLine]:
+async def _credit_basis_rows(session: AsyncSession, inv: Invoice) -> list[InvoiceCreditBasisLine]:
     """Build immutable basis rows from persisted invoice snapshots only."""
     lines = list(
         (
@@ -979,9 +964,7 @@ async def clone_quote_to_invoice(
         inv_line.vat_rate_id = q_line.vat_rate_id
         inv_line.vat_rate_label = q_line.vat_rate_label
         inv_line.vat_rate_percent = (
-            Decimal(str(q_line.vat_rate_percent))
-            if q_line.vat_rate_percent is not None
-            else None
+            Decimal(str(q_line.vat_rate_percent)) if q_line.vat_rate_percent is not None else None
         )
         inv_line.subtotal_excl_vat = Decimal(str(q_line.subtotal_excl_vat))
         inv_line.subtotal_incl_vat = Decimal(str(q_line.subtotal_incl_vat))
@@ -1049,6 +1032,8 @@ async def create_invoice(
     No number is allocated at create; the legal number is assigned at the
     DRAFT -> SENT issue transition (see ``transition_status``).
     """
+    from jai.services.document_chain import append_document_chain_event
+
     await set_rls_company(session, company_id)
     # Validate customer belongs to this company
     cust_stmt = select(Customer).where(
@@ -1060,9 +1045,7 @@ async def create_invoice(
     if customer is None:
         raise ValueError("Customer not found or does not belong to this company.")
 
-    treatment = await _resolve_treatment(
-        session, company_id, customer, body.vat_treatment_id
-    )
+    treatment = await _resolve_treatment(session, company_id, customer, body.vat_treatment_id)
     vat_rates = await _load_vat_rates(session, company_id, body)
     await _validate_line_fks(session, company_id, body)
 
@@ -1075,6 +1058,14 @@ async def create_invoice(
         customer=customer,
         treatment=treatment,
         vat_rates=vat_rates,
+    )
+    await append_document_chain_event(
+        session,
+        company_id=company_id,
+        invoice_id=inv.id,
+        actor_user_id=creator_id,
+        event_type=DocumentChainEventType.INVOICE_CREATED,
+        metadata={"document_kind": InvoiceDocumentKind(inv.document_kind).value},
     )
 
     try:
@@ -1111,8 +1102,12 @@ async def update_invoice(
     body: InvoiceWrite,
     company_id: uuid.UUID,
     company_currency: str,
+    *,
+    actor_user_id: uuid.UUID | None = None,
 ) -> InvoiceRead | None:
     """Update an existing invoice: preserve number, recalculate, replace sub-tables."""
+    from jai.services.document_chain import append_document_chain_event
+
     await set_rls_company(session, company_id)
     stmt = (
         select(Invoice)
@@ -1137,21 +1132,15 @@ async def update_invoice(
             "Only DRAFT invoices may be modified."
         )
 
-    payment_result = await session.execute(
-        select(Payment).where(Payment.invoice_id == inv.id)
-    )
+    payment_result = await session.execute(select(Payment).where(Payment.invoice_id == inv.id))
     payments = list(payment_result.scalars().all())
     quote_origin_payments = [p for p in payments if p.quote_id is not None]
     if quote_origin_payments:
         if body.customer_id != inv.customer_id:
-            raise ValueError(
-                "Cannot change the customer on a draft with quote-origin payments."
-            )
+            raise ValueError("Cannot change the customer on a draft with quote-origin payments.")
         request_currency = body.currency or company_currency
         if request_currency != inv.currency:
-            raise ValueError(
-                "Cannot change the currency on a draft with quote-origin payments."
-            )
+            raise ValueError("Cannot change the currency on a draft with quote-origin payments.")
         latest_payment_date = max(p.payment_date for p in quote_origin_payments)
         if body.invoice_date < latest_payment_date:
             raise ValueError(
@@ -1168,9 +1157,7 @@ async def update_invoice(
     if customer is None:
         raise ValueError("Customer not found or does not belong to this company.")
 
-    treatment = await _resolve_treatment(
-        session, company_id, customer, body.vat_treatment_id
-    )
+    treatment = await _resolve_treatment(session, company_id, customer, body.vat_treatment_id)
     vat_rates = await _load_vat_rates(session, company_id, body)
     await _validate_line_fks(session, company_id, body)
 
@@ -1197,14 +1184,22 @@ async def update_invoice(
     )
     if payments:
         if payment_state.paid_total > Decimal(str(updated.total_incl_vat)):
-            raise ValueError(
-                "Final invoice total cannot be lower than its associated payments."
-            )
+            raise ValueError("Final invoice total cannot be lower than its associated payments.")
     _write_invoice_state(updated, payment_state)
     updated.status = InvoiceStatus.DRAFT
 
     if quote_origin_payments:
         await validate_invoice_tax_coverage(session, updated)
+
+    await append_document_chain_event(
+        session,
+        company_id=company_id,
+        quote_id=updated.quote_id,
+        invoice_id=updated.id,
+        actor_user_id=actor_user_id,
+        event_type=DocumentChainEventType.INVOICE_UPDATED,
+        metadata={"document_kind": InvoiceDocumentKind(updated.document_kind).value},
+    )
 
     await session.commit()
     await session.refresh(updated)
@@ -1215,11 +1210,15 @@ async def delete_invoice(
     session: AsyncSession,
     invoice_id: uuid.UUID,
     company_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID | None = None,
 ) -> bool:
     """Delete an invoice; returns True if deleted, False if not found.
 
     Only DRAFT invoices may be deleted.  Raises ValueError for any other status.
     """
+    from jai.services.document_chain import append_document_chain_event
+
     await set_rls_company(session, company_id)
     # Deleting a converted draft makes PostgreSQL SET NULL on both the quote
     # backlink and its payments. Lock source quotes before the invoice so this
@@ -1234,9 +1233,7 @@ async def delete_invoice(
         .distinct()
     )
     source_quote_ids = sorted(
-        row.quote_id
-        for row in source_quote_ids_result.all()
-        if row.quote_id is not None
+        row.quote_id for row in source_quote_ids_result.all() if row.quote_id is not None
     )
     if source_quote_ids:
         await session.execute(
@@ -1271,6 +1268,15 @@ async def delete_invoice(
             "Only DRAFT invoices may be deleted."
         )
 
+    await append_document_chain_event(
+        session,
+        company_id=company_id,
+        quote_id=inv.quote_id,
+        invoice_id=inv.id,
+        actor_user_id=actor_user_id,
+        event_type=DocumentChainEventType.INVOICE_DELETED,
+        metadata={"document_kind": InvoiceDocumentKind(inv.document_kind).value},
+    )
     await session.delete(inv)
     await session.commit()
     return True
@@ -1382,6 +1388,8 @@ async def transition_status(
     already carries a number (e.g. re-issued after CANCELLED -> DRAFT) is never
     re-numbered.
     """
+    from jai.services.document_chain import append_document_chain_event
+
     await set_rls_company(session, company_id)
     stmt = (
         select(Invoice)
@@ -1411,11 +1419,7 @@ async def transition_status(
     )
     payments = list(payment_result.scalars().all())
 
-    if (
-        current_status == InvoiceStatus.DRAFT
-        and new_status == InvoiceStatus.CANCELLED
-        and payments
-    ):
+    if current_status == InvoiceStatus.DRAFT and new_status == InvoiceStatus.CANCELLED and payments:
         raise InvoiceLifecycleConflictError(
             "Cannot cancel a draft invoice that has payments. Delete the draft "
             "to return quote-origin payments, or handle the payments first."
@@ -1491,6 +1495,23 @@ async def transition_status(
                 numbering_config=numbering_config,
                 customer_invoice_prefix=customer.invoice_prefix,
             )
+        event_type = (
+            DocumentChainEventType.INVOICE_ISSUED
+            if current_status == InvoiceStatus.DRAFT and new_status == InvoiceStatus.SENT
+            else DocumentChainEventType.INVOICE_STATUS_CHANGED
+        )
+        await append_document_chain_event(
+            session,
+            company_id=company_id,
+            quote_id=inv.quote_id,
+            invoice_id=inv.id,
+            actor_user_id=issued_by_user_id,
+            event_type=event_type,
+            metadata={
+                "document_kind": InvoiceDocumentKind(inv.document_kind).value,
+                "status": InvoiceStatus(inv.status).value,
+            },
+        )
         # Build the response while this transaction still carries the RLS GUC.
         # A post-commit refresh would begin a new transaction with an empty
         # setting and can turn a successful legal issue into a client 500.

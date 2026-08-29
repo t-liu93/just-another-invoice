@@ -476,7 +476,7 @@ class TestQuotePaymentCrud:
                 f"/api/v1/quotes/{quote_id}/payments",
                 json={"payment_date": "2026-01-15", "amount": "10.00"},
             )
-            assert response.status_code == 422, response.text
+            assert response.status_code in (409, 422), response.text
 
         draft = await _create_quote(db_client, customer_id, rate_21)
         await assert_rejected(draft["id"])
@@ -1359,7 +1359,7 @@ class TestQuotePaymentConversion:
             f"/api/v1/invoices/{invoice['id']}/status",
             json={"status": "CANCELLED"},
         )
-        assert response.status_code == 422
+        assert response.status_code == 409
 
         response = await db_client.delete(f"/api/v1/invoices/{invoice['id']}")
         assert response.status_code == 204, response.text

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session, set_rls_company
 from jai.models.user import User
+from jai.schemas.document_chain import DocumentChainRead
 from jai.schemas.email_log import DocumentSendRequest, EmailLogListResponse, EmailLogRead
 from jai.schemas.invoice import (
     AdvanceCalculationRead,
@@ -36,6 +37,7 @@ from jai.schemas.invoice import (
     InvoiceWrite,
     ProductInvoiceOptionListResponse,
 )
+from jai.services.document_chain import get_invoice_document_chain
 from jai.services.invoice import (
     InvoiceLifecycleConflictError,
     create_invoice,
@@ -235,6 +237,21 @@ async def get_invoice_endpoint(
     return inv
 
 
+@router.get("/invoices/{invoice_id}/document-chain", response_model=DocumentChainRead)
+async def get_invoice_document_chain_endpoint(
+    invoice_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentChainRead:
+    _owner_only(user)
+    result = await get_invoice_document_chain(
+        session, company_id=_require_company_id(user), invoice_id=invoice_id
+    )
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
+    return result
+
+
 @router.put("/invoices/{invoice_id}", response_model=InvoiceRead)
 async def update_invoice_endpoint(
     invoice_id: uuid.UUID,
@@ -251,6 +268,7 @@ async def update_invoice_endpoint(
             body,
             company_id=company_id,
             company_currency=base_currency,
+            actor_user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -273,7 +291,7 @@ async def delete_invoice_endpoint(
     _owner_only(user)
     company_id = _require_company_id(user)
     try:
-        deleted = await delete_invoice(session, invoice_id, company_id)
+        deleted = await delete_invoice(session, invoice_id, company_id, actor_user_id=user.id)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
