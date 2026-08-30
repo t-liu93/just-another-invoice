@@ -15,6 +15,7 @@ from jai.schemas.invoice import (
     CreditCalculationRequest,
     InvoiceStatusWrite,
     InvoiceWrite,
+    ProjectCancellationCreateRequest,
 )
 from jai.schemas.payment import PaymentInput
 from jai.schemas.setting import CreditNumberingConfig, InvoiceNumberingConfig
@@ -135,3 +136,29 @@ def test_chain_event_metadata_is_closed_typed_and_non_renderable() -> None:
     ):
         with pytest.raises(ValueError):
             _safe_metadata(event_type, metadata)
+
+
+def test_step6_cancellation_confirmation_requires_exact_typed_token() -> None:
+    command = ProjectCancellationCreateRequest.model_validate(
+        {"preview_token": "a" * 64, "invoice_date": "2026-08-30"}
+    )
+    assert command.preview_token == "a" * 64
+    for payload in (
+        {"preview_token": "short"},
+        {"preview_token": "Z" * 64},
+        {"preview_token": "a" * 64, "gross_amount": "1"},
+    ):
+        with pytest.raises(ValidationError):
+            ProjectCancellationCreateRequest.model_validate(payload)
+
+
+def test_step6_openapi_exposes_only_the_frozen_command_routes() -> None:
+    from jai.main import app
+
+    paths = app.openapi()["paths"]
+    assert {
+        "/api/v1/credit-notes/{credit_note_id}/replacement",
+        "/api/v1/credit-notes/{credit_note_id}/compensating-invoice",
+        "/api/v1/quotes/{quote_id}/cancellation/preview",
+        "/api/v1/quotes/{quote_id}/cancellation/create-credit-drafts",
+    }.issubset(paths)

@@ -18,6 +18,7 @@ from jai.models.document import (  # noqa: F401
     InvoiceCorrectionLine,
     InvoiceCreditBasisLine,
     InvoicePartySnapshot,
+    InvoiceRelation,
 )
 from jai.models.email_log import EmailLog  # noqa: F401
 from jai.models.estimate import Estimate, EstimateGroup, EstimateLine  # noqa: F401

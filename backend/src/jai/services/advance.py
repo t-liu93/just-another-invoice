@@ -26,12 +26,14 @@ from jai.models._enums import (
     DocumentChainEventType,
     InvoiceDocumentKind,
     InvoicePaidStatus,
+    InvoiceRelationType,
     InvoiceSettlementStatus,
     InvoiceStatus,
     InvoiceTaxMode,
     QuoteSettlementMode,
     QuoteStatus,
 )
+from jai.models.document import InvoiceRelation
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
 from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax
 from jai.schemas.invoice import (
@@ -69,6 +71,18 @@ class AdvanceValidationError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def _assert_replacement_dates(
+    *, invoice_date: date, supply_or_advance_date: date | None, credit: Invoice
+) -> None:
+    """Keep replacement invoice and supply dates after its issued Credit."""
+    supply_date = supply_or_advance_date or invoice_date
+    if invoice_date < credit.invoice_date or supply_date < credit.invoice_date:
+        raise AdvanceValidationError(
+            "REPLACEMENT_DATE_BEFORE_CREDIT",
+            "Replacement invoice and supply dates cannot precede its Credit Note date.",
+        )
 
 
 def is_retryable_transaction_conflict(exc: DBAPIError) -> bool:
@@ -724,6 +738,76 @@ async def validate_advance_issue(session: AsyncSession, *, quote: Quote, invoice
     if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.ADVANCE:
         raise AdvanceConflictError("Only Advance invoices can use Advance issue validation.")
     _validate_advance_dates(invoice.invoice_date, invoice.due_date)
+    relation = await session.scalar(
+        select(InvoiceRelation).where(InvoiceRelation.invoice_id == invoice.id)
+    )
+    if relation is not None:
+        def related_buckets(document: Invoice) -> dict[uuid.UUID, tuple[Decimal, Decimal]]:
+            buckets: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
+            if InvoiceTaxMode(document.tax_mode) == InvoiceTaxMode.DOCUMENT:
+                for tax in document.taxes:
+                    old_net, old_vat = buckets.get(
+                        tax.vat_rate_id, (Decimal("0"), Decimal("0"))
+                    )
+                    buckets[tax.vat_rate_id] = (
+                        old_net + Decimal(str(tax.taxable_amount)),
+                        old_vat + Decimal(str(tax.tax_amount)),
+                    )
+                return buckets
+            for row in document.lines:
+                if row.vat_rate_id is None:
+                    raise AdvanceStaleError("A related Advance has an incomplete VAT bucket.")
+                old_net, old_vat = buckets.get(
+                    row.vat_rate_id, (Decimal("0"), Decimal("0"))
+                )
+                buckets[row.vat_rate_id] = (
+                    old_net + Decimal(str(row.taxable_amount)),
+                    old_vat + Decimal(str(row.vat_total)),
+                )
+            return buckets
+
+        remaining = {
+            bucket.vat_rate_id: bucket for bucket in await _remaining_buckets(session, quote)
+        }
+        invoice_buckets = related_buckets(invoice)
+        for rate_id, (net, vat) in invoice_buckets.items():
+            capacity = remaining.get(rate_id)
+            if capacity is None or net > capacity.taxable_amount or vat > capacity.vat_amount:
+                raise AdvanceStaleError(
+                    "Related Advance VAT basis no longer fits the locked Quote capacity."
+                )
+        if InvoiceRelationType(relation.relation_type) == InvoiceRelationType.COMPENSATES_CREDIT:
+            credit = (
+                await session.execute(
+                    select(Invoice).where(Invoice.id == relation.related_credit_note_id)
+                )
+            ).scalar_one()
+            credit_buckets = related_buckets(credit)
+            if invoice_buckets != credit_buckets:
+                raise AdvanceStaleError(
+                    "A compensating Advance must retain its issued Credit tax basis."
+                )
+        elif InvoiceRelationType(relation.relation_type) == InvoiceRelationType.REPLACEMENT_OF:
+            credit = (
+                await session.execute(
+                    select(Invoice).where(Invoice.id == relation.related_credit_note_id)
+                )
+            ).scalar_one()
+            _assert_replacement_dates(
+                invoice_date=invoice.invoice_date,
+                supply_or_advance_date=invoice.supply_or_advance_date,
+                credit=credit,
+            )
+        if (
+            sum((value[0] for value in invoice_buckets.values()), Decimal("0"))
+            != Decimal(str(invoice.taxable_amount))
+            or sum((value[1] for value in invoice_buckets.values()), Decimal("0"))
+            != Decimal(str(invoice.vat_total))
+            or Decimal(str(invoice.taxable_amount)) + Decimal(str(invoice.vat_total))
+            != Decimal(str(invoice.total_incl_vat))
+        ):
+            raise AdvanceStaleError("Related Advance totals do not close over its VAT buckets.")
+        return
     if invoice.advance_input_mode is None:
         raise AdvanceStaleError(
             "Advance DRAFT has no persisted input intent and cannot be safely issued."
@@ -876,6 +960,31 @@ async def update_advance_draft(
         ).scalar_one()
         if InvoiceStatus(invoice.status) != InvoiceStatus.DRAFT:
             raise AdvanceConflictError("Only a DRAFT Advance can be updated.")
+        relation = await session.scalar(
+            select(InvoiceRelation).where(InvoiceRelation.invoice_id == invoice.id)
+        )
+        if (
+            relation is not None
+            and InvoiceRelationType(relation.relation_type)
+            == InvoiceRelationType.COMPENSATES_CREDIT
+        ):
+            raise AdvanceConflictError(
+                "A compensating Advance mirrors its Credit basis and cannot be repriced."
+            )
+        if (
+            relation is not None
+            and InvoiceRelationType(relation.relation_type) == InvoiceRelationType.REPLACEMENT_OF
+        ):
+            credit = (
+                await session.execute(
+                    select(Invoice).where(Invoice.id == relation.related_credit_note_id)
+                )
+            ).scalar_one()
+            _assert_replacement_dates(
+                invoice_date=body.invoice_date,
+                supply_or_advance_date=body.supply_or_advance_date,
+                credit=credit,
+            )
         calculation = _read_calculation(
             body, Decimal(str(quote.total_incl_vat)), await _remaining_buckets(session, quote)
         )

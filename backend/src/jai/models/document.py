@@ -24,7 +24,11 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jai.db import Base
-from jai.models._enums import DocumentChainEventType, PartySnapshotProvenance
+from jai.models._enums import (
+    DocumentChainEventType,
+    InvoiceRelationType,
+    PartySnapshotProvenance,
+)
 
 _MONEY = Numeric(18, 3)
 _RATE = Numeric(6, 3)
@@ -42,10 +46,7 @@ class FinalAdvanceApplication(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("company.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
+        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     final_invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="CASCADE"), nullable=False, index=True
@@ -217,7 +218,10 @@ class InvoiceCorrection(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     credit_note_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="CASCADE"), nullable=False, index=True
@@ -264,6 +268,40 @@ class InvoiceCorrectionLine(Base):
     base_net_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     base_vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     base_gross_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+
+
+class InvoiceRelation(Base):
+    """Immutable provenance from one positive DRAFT to an issued Credit."""
+
+    __tablename__ = "invoice_relation"
+    __table_args__ = (
+        UniqueConstraint("invoice_id", name="uq_invoice_relation_invoice"),
+        UniqueConstraint("related_credit_note_id", name="uq_invoice_relation_credit"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    related_credit_note_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    relation_type: Mapped[InvoiceRelationType] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
 class DocumentChainEvent(Base):

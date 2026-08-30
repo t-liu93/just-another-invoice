@@ -337,6 +337,50 @@ class CreditDraftUpdate(CreditCalculationRequest):
     reference_number: str | None = None
 
 
+class ProjectCancellationRequest(BaseModel):
+    """Intent shared by formal-project cancellation preview and confirmation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    invoice_date: date | None = Field(
+        default=None,
+        description="Credit date; defaults to the server's current local date.",
+    )
+    supply_or_advance_date: date | None = None
+    reference_number: str | None = None
+
+
+class ProjectCancellationCreateRequest(ProjectCancellationRequest):
+    """Confirmation of one exact previewed formal-chain state."""
+
+    preview_token: str = Field(min_length=64, max_length=64, pattern="^[0-9a-f]{64}$")
+
+
+class ProjectCancellationSourceRead(BaseModel):
+    source_invoice_id: uuid.UUID
+    source_invoice_number: str
+    document_kind: InvoiceDocumentKind
+    remaining_net_amount: Decimal
+    remaining_vat_amount: Decimal
+    remaining_gross_amount: Decimal
+    remaining_base_net_amount: Decimal
+    remaining_base_vat_amount: Decimal
+    remaining_base_gross_amount: Decimal
+
+
+class ProjectCancellationPreview(BaseModel):
+    quote_id: uuid.UUID
+    preview_token: str
+    invoice_date: date
+    sources: list[ProjectCancellationSourceRead]
+    net_amount: Decimal
+    vat_amount: Decimal
+    gross_amount: Decimal
+    base_net_amount: Decimal
+    base_vat_amount: Decimal
+    base_gross_amount: Decimal
+
+
 # ---------------------------------------------------------------------------
 # VatTreatment snapshot
 # ---------------------------------------------------------------------------
@@ -622,6 +666,12 @@ class InvoiceRead(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectCancellationResult(BaseModel):
+    quote_id: uuid.UUID
+    preview_token: str
+    credit_notes: list[InvoiceRead]
 
 
 # ---------------------------------------------------------------------------

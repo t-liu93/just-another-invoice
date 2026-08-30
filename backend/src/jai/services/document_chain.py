@@ -13,7 +13,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.db import set_rls_company
@@ -24,7 +24,7 @@ from jai.models._enums import (
     QuoteSettlementMode,
     QuoteStatus,
 )
-from jai.models.document import DocumentChainEvent, InvoiceCorrection
+from jai.models.document import DocumentChainEvent, InvoiceCorrection, InvoiceRelation
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment
 from jai.models.quote import Quote
@@ -70,6 +70,14 @@ class _PaymentMetadata(_EventMetadata):
         return value
 
 
+class _CreditRelationMetadata(_EventMetadata):
+    credit_note_id: uuid.UUID
+
+
+class _CancellationCreditMetadata(_EventMetadata):
+    source_invoice_id: uuid.UUID
+
+
 _EVENT_METADATA_MODELS: dict[DocumentChainEventType, type[_EventMetadata]] = {
     DocumentChainEventType.MODE_LOCKED: _ModeLockedMetadata,
     DocumentChainEventType.INVOICE_CREATED: _InvoiceKindMetadata,
@@ -83,6 +91,9 @@ _EVENT_METADATA_MODELS: dict[DocumentChainEventType, type[_EventMetadata]] = {
     DocumentChainEventType.INVOICE_PAYMENT_CREATED: _PaymentMetadata,
     DocumentChainEventType.INVOICE_PAYMENT_UPDATED: _PaymentMetadata,
     DocumentChainEventType.INVOICE_PAYMENT_DELETED: _PaymentMetadata,
+    DocumentChainEventType.REPLACEMENT_CREATED: _CreditRelationMetadata,
+    DocumentChainEventType.COMPENSATING_INVOICE_CREATED: _CreditRelationMetadata,
+    DocumentChainEventType.PROJECT_CANCELLATION_CREDIT_CREATED: _CancellationCreditMetadata,
 }
 
 
@@ -235,13 +246,19 @@ async def get_document_chain(
         return None
     invoice_rows = (
         await session.execute(
-            select(Invoice, InvoiceCorrection.source_invoice_id)
+            select(
+                Invoice,
+                InvoiceCorrection.source_invoice_id,
+                InvoiceRelation.related_credit_note_id,
+                InvoiceRelation.relation_type,
+            )
             .outerjoin(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
+            .outerjoin(InvoiceRelation, InvoiceRelation.invoice_id == Invoice.id)
             .where(Invoice.company_id == company_id, Invoice.quote_id == quote.id)
             .order_by(Invoice.created_at, Invoice.id)
         )
     ).all()
-    invoices = [invoice for invoice, _ in invoice_rows]
+    invoices = [invoice for invoice, _, _, _ in invoice_rows]
     invoice_ids = [invoice.id for invoice in invoices]
     payments = list(
         (
@@ -328,7 +345,7 @@ async def get_document_chain(
     ]
     credit_sources = {
         invoice.id: source_id
-        for invoice, source_id in invoice_rows
+        for invoice, source_id, _, _ in invoice_rows
         if source_id is not None
     }
     relations.extend(
@@ -338,6 +355,15 @@ async def get_document_chain(
             to_node_id=credit_id,
         )
         for credit_id, source_id in credit_sources.items()
+    )
+    relations.extend(
+        DocumentChainRelationRead(
+            relation_type=relation_type.value,
+            from_node_id=related_credit_note_id,
+            to_node_id=invoice.id,
+        )
+        for invoice, _, related_credit_note_id, relation_type in invoice_rows
+        if related_credit_note_id is not None and relation_type is not None
     )
     for payment in payments:
         if payment.quote_id == quote.id:
@@ -441,24 +467,45 @@ async def get_invoice_document_chain(
     if invoice is None:
         return None
     if invoice.quote_id is None:
-        # A direct Standard has no Quote root.  When the requested document is
-        # its Credit Note, promote the immutable correction source to the
-        # small direct-chain root so the projection does not hide provenance.
-        root_id = invoice.id
-        if InvoiceDocumentKind(invoice.document_kind) == InvoiceDocumentKind.CREDIT_NOTE:
-            source_id = await session.scalar(
-                select(InvoiceCorrection.source_invoice_id).where(
-                    InvoiceCorrection.credit_note_id == invoice.id
-                )
-            )
-            if source_id is not None:
-                root_id = source_id
-        credit_ids = list(
+        # Direct documents have no Quote root.  Their correction family is an
+        # undirected graph: source <-> Credit and Credit <-> positive follow-up.
+        # One company-scoped recursive CTE finds the complete component from
+        # any member.  The UUID path prevents corrupted/cyclic provenance from
+        # causing an unbounded walk; all subsequent reads are fixed bulk queries.
+        component_ids = list(
             (
                 await session.execute(
-                    select(InvoiceCorrection.credit_note_id)
-                    .where(InvoiceCorrection.source_invoice_id == root_id)
-                    .order_by(InvoiceCorrection.credit_note_id)
+                    text(
+                        "WITH RECURSIVE component(id, path) AS ("
+                        " SELECT CAST(:invoice_id AS uuid), ARRAY[CAST(:invoice_id AS uuid)]"
+                        " UNION ALL "
+                        " SELECT edge.id, component.path || edge.id "
+                        " FROM component "
+                        " JOIN LATERAL ("
+                        "   SELECT correction.credit_note_id AS id "
+                        "   FROM invoice_correction AS correction "
+                        "   WHERE correction.company_id = CAST(:company_id AS uuid) "
+                        "     AND correction.source_invoice_id = component.id "
+                        "   UNION "
+                        "   SELECT correction.source_invoice_id AS id "
+                        "   FROM invoice_correction AS correction "
+                        "   WHERE correction.company_id = CAST(:company_id AS uuid) "
+                        "     AND correction.credit_note_id = component.id "
+                        "   UNION "
+                        "   SELECT relation.invoice_id AS id "
+                        "   FROM invoice_relation AS relation "
+                        "   WHERE relation.company_id = CAST(:company_id AS uuid) "
+                        "     AND relation.related_credit_note_id = component.id "
+                        "   UNION "
+                        "   SELECT relation.related_credit_note_id AS id "
+                        "   FROM invoice_relation AS relation "
+                        "   WHERE relation.company_id = CAST(:company_id AS uuid) "
+                        "     AND relation.invoice_id = component.id"
+                        " ) AS edge ON TRUE "
+                        " WHERE NOT edge.id = ANY(component.path)"
+                        ") SELECT DISTINCT id FROM component ORDER BY id"
+                    ),
+                    {"invoice_id": invoice.id, "company_id": company_id},
                 )
             ).scalars()
         )
@@ -468,17 +515,43 @@ async def get_invoice_document_chain(
                     select(Invoice)
                     .where(
                         Invoice.company_id == company_id,
-                        Invoice.id.in_([root_id, *credit_ids]),
+                        Invoice.id.in_(component_ids),
                     )
                     .order_by(Invoice.id)
                 )
             ).scalars()
         )
         direct_invoice_ids = [item.id for item in direct_invoices]
+        corrections = list(
+            (
+                await session.execute(
+                    select(InvoiceCorrection)
+                    .where(
+                        InvoiceCorrection.company_id == company_id,
+                        InvoiceCorrection.source_invoice_id.in_(direct_invoice_ids),
+                        InvoiceCorrection.credit_note_id.in_(direct_invoice_ids),
+                    )
+                    .order_by(InvoiceCorrection.id)
+                )
+            ).scalars()
+        )
+        related_positive_rows = list(
+            (
+                await session.execute(
+                    select(InvoiceRelation)
+                    .where(
+                        InvoiceRelation.company_id == company_id,
+                        InvoiceRelation.related_credit_note_id.in_(direct_invoice_ids),
+                        InvoiceRelation.invoice_id.in_(direct_invoice_ids),
+                    )
+                    .order_by(InvoiceRelation.created_at, InvoiceRelation.id)
+                )
+            ).scalars()
+        )
         payments = list(
             (
                 await session.execute(
-                select(Payment)
+                    select(Payment)
                     .where(
                         Payment.company_id == company_id,
                         Payment.invoice_id.in_(direct_invoice_ids),
@@ -543,10 +616,18 @@ async def get_invoice_document_chain(
             + [
                 DocumentChainRelationRead(
                     relation_type="INVOICE_TO_CREDIT_NOTE",
-                    from_node_id=root_id,
-                    to_node_id=credit_id,
+                    from_node_id=correction.source_invoice_id,
+                    to_node_id=correction.credit_note_id,
                 )
-                for credit_id in credit_ids
+                for correction in corrections
+            ]
+            + [
+                DocumentChainRelationRead(
+                    relation_type=relation.relation_type.value,
+                    from_node_id=relation.related_credit_note_id,
+                    to_node_id=relation.invoice_id,
+                )
+                for relation in related_positive_rows
             ],
             events=[
                 DocumentChainEventRead(

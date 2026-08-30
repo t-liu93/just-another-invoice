@@ -1168,6 +1168,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/credit-notes/{credit_note_id}/replacement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Replacement Endpoint */
+        post: operations["create_replacement_endpoint_api_v1_credit_notes__credit_note_id__replacement_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-notes/{credit_note_id}/compensating-invoice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Compensating Invoice Endpoint */
+        post: operations["create_compensating_invoice_endpoint_api_v1_credit_notes__credit_note_id__compensating_invoice_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices": {
         parameters: {
             query?: never;
@@ -1484,6 +1518,40 @@ export interface paths {
         get: operations["get_quote_document_chain_endpoint_api_v1_quotes__quote_id__document_chain_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/cancellation/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Project Cancellation Endpoint */
+        post: operations["preview_project_cancellation_endpoint_api_v1_quotes__quote_id__cancellation_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/cancellation/create-credit-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Project Cancellation Drafts Endpoint */
+        post: operations["create_project_cancellation_drafts_endpoint_api_v1_quotes__quote_id__cancellation_create_credit_drafts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3524,7 +3592,7 @@ export interface components {
          * @description Append-only, safe-to-display lifecycle facts for a document chain.
          * @enum {string}
          */
-        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED";
+        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED" | "REPLACEMENT_CREATED" | "COMPENSATING_INVOICE_CREATED" | "PROJECT_CANCELLATION_CREDIT_CREATED";
         /**
          * DocumentChainNodeRead
          * @description A Quote, formal document or cash row in stable chain order.
@@ -6805,6 +6873,102 @@ export interface components {
              * @description revenue_net − expense_actual for this period.
              */
             profit: string;
+        };
+        /**
+         * ProjectCancellationCreateRequest
+         * @description Confirmation of one exact previewed formal-chain state.
+         */
+        ProjectCancellationCreateRequest: {
+            /**
+             * Invoice Date
+             * @description Credit date; defaults to the server's current local date.
+             */
+            invoice_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+            /** Preview Token */
+            preview_token: string;
+        };
+        /** ProjectCancellationPreview */
+        ProjectCancellationPreview: {
+            /**
+             * Quote Id
+             * Format: uuid
+             */
+            quote_id: string;
+            /** Preview Token */
+            preview_token: string;
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Sources */
+            sources: components["schemas"]["ProjectCancellationSourceRead"][];
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Net Amount */
+            base_net_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
+        };
+        /**
+         * ProjectCancellationRequest
+         * @description Intent shared by formal-project cancellation preview and confirmation.
+         */
+        ProjectCancellationRequest: {
+            /**
+             * Invoice Date
+             * @description Credit date; defaults to the server's current local date.
+             */
+            invoice_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+        };
+        /** ProjectCancellationResult */
+        ProjectCancellationResult: {
+            /**
+             * Quote Id
+             * Format: uuid
+             */
+            quote_id: string;
+            /** Preview Token */
+            preview_token: string;
+            /** Credit Notes */
+            credit_notes: components["schemas"]["InvoiceRead"][];
+        };
+        /** ProjectCancellationSourceRead */
+        ProjectCancellationSourceRead: {
+            /**
+             * Source Invoice Id
+             * Format: uuid
+             */
+            source_invoice_id: string;
+            /** Source Invoice Number */
+            source_invoice_number: string;
+            document_kind: components["schemas"]["InvoiceDocumentKind"];
+            /** Remaining Net Amount */
+            remaining_net_amount: string;
+            /** Remaining Vat Amount */
+            remaining_vat_amount: string;
+            /** Remaining Gross Amount */
+            remaining_gross_amount: string;
+            /** Remaining Base Net Amount */
+            remaining_base_net_amount: string;
+            /** Remaining Base Vat Amount */
+            remaining_base_vat_amount: string;
+            /** Remaining Base Gross Amount */
+            remaining_base_gross_amount: string;
         };
         /**
          * QuoteCalculationRead
@@ -10898,6 +11062,68 @@ export interface operations {
             };
         };
     };
+    create_replacement_endpoint_api_v1_credit_notes__credit_note_id__replacement_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credit_note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_compensating_invoice_endpoint_api_v1_credit_notes__credit_note_id__compensating_invoice_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credit_note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_invoices_endpoint_api_v1_invoices_get: {
         parameters: {
             query?: {
@@ -11550,6 +11776,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentChainRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_project_cancellation_endpoint_api_v1_quotes__quote_id__cancellation_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ProjectCancellationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCancellationPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_cancellation_drafts_endpoint_api_v1_quotes__quote_id__cancellation_create_credit_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCancellationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCancellationResult"];
                 };
             };
             /** @description Validation Error */

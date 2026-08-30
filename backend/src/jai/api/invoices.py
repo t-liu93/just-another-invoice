@@ -53,6 +53,12 @@ from jai.services.advance import (
     create_advance_draft,
     update_advance_draft,
 )
+from jai.services.correction_followup import (
+    CorrectionFollowupConflictError,
+    CorrectionFollowupValidationError,
+    create_compensating_invoice_draft,
+    create_replacement_draft,
+)
 from jai.services.credit import (
     CreditConflictError,
     CreditValidationError,
@@ -307,6 +313,58 @@ async def update_credit_endpoint(credit_note_id: uuid.UUID, body: CreditDraftUpd
     if result is None:
         raise HTTPException(status_code=404, detail="Credit Note not found.")
     return result
+
+
+@router.post(
+    "/credit-notes/{credit_note_id}/replacement",
+    response_model=InvoiceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_replacement_endpoint(
+    credit_note_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceRead:
+    _owner_only(user)
+    try:
+        return await create_replacement_draft(
+            session,
+            company_id=_require_company_id(user),
+            credit_id=credit_note_id,
+            creator_id=user.id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Credit Note not found.") from exc
+    except (CorrectionFollowupConflictError, AdvanceConflictError) as exc:
+        raise _advance_error(409, getattr(exc, "code", "FOLLOWUP_CONFLICT"), exc) from exc
+    except CorrectionFollowupValidationError as exc:
+        raise _advance_error(422, exc.code, exc) from exc
+
+
+@router.post(
+    "/credit-notes/{credit_note_id}/compensating-invoice",
+    response_model=InvoiceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_compensating_invoice_endpoint(
+    credit_note_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceRead:
+    _owner_only(user)
+    try:
+        return await create_compensating_invoice_draft(
+            session,
+            company_id=_require_company_id(user),
+            credit_id=credit_note_id,
+            creator_id=user.id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Credit Note not found.") from exc
+    except (CorrectionFollowupConflictError, AdvanceConflictError) as exc:
+        raise _advance_error(409, getattr(exc, "code", "FOLLOWUP_CONFLICT"), exc) from exc
+    except CorrectionFollowupValidationError as exc:
+        raise _advance_error(422, exc.code, exc) from exc
 
 
 # ---------------------------------------------------------------------------

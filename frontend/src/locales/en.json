@@ -8,6 +8,7 @@
     "readOnly": "Document-chain timeline (read-only)",
     "initialLoadFailed": "Could not load the document chain.",
     "paymentRefreshFailed": "Could not refresh the document chain. Your payment was saved.",
+    "relations": "Document relations",
     "retry": "Retry"
   },
   "nav": {

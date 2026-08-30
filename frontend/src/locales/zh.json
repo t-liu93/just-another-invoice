@@ -8,6 +8,7 @@
     "readOnly": "单据链时间线（只读）",
     "initialLoadFailed": "无法读取单据链。",
     "paymentRefreshFailed": "无法刷新单据链。付款已保存。",
+    "relations": "单据关系",
     "retry": "重试"
   },
   "nav": {

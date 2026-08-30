@@ -57,6 +57,7 @@ if TYPE_CHECKING:
         InvoiceCorrection,
         InvoiceCreditBasisLine,
         InvoicePartySnapshot,
+        InvoiceRelation,
     )
 
 # ---------------------------------------------------------------------------
@@ -286,6 +287,16 @@ class Invoice(Base):
         # not serialize correction rows, so eager loading here would add a
         # query to every historical Standard-only chain.  ``raise`` rather
         # than ``noload`` leaves the explicit selectinload path usable.
+        lazy="raise",
+    )
+    positive_relations: Mapped[list[InvoiceRelation]] = relationship(
+        "InvoiceRelation",
+        foreign_keys="InvoiceRelation.invoice_id",
+        # Provenance is immutable and the FK owns draft cleanup.  Runtime has
+        # no direct relation DELETE privilege, so always let PostgreSQL apply
+        # ON DELETE CASCADE with the Invoice root.
+        cascade="save-update, merge",
+        passive_deletes="all",
         lazy="raise",
     )
 

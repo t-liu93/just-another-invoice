@@ -678,6 +678,14 @@ function handleReceiptSent(log: EmailLogRead) {
                 <n-button v-if="paymentRefreshError" text type="primary" :loading="chainRefreshing" @click="refreshAfterPayment">
                   {{ t('chain.retry') }}
                 </n-button>
+                <template v-if="documentChain?.relations.length">
+                  <n-text strong>{{ t('chain.relations') }}</n-text>
+                  <n-list bordered>
+                    <n-list-item v-for="relation in documentChain.relations" :key="`${relation.relation_type}:${relation.from_node_id}:${relation.to_node_id}`">
+                      {{ relation.relation_type }} · {{ relation.from_node_id }} → {{ relation.to_node_id }}
+                    </n-list-item>
+                  </n-list>
+                </template>
                 <n-list v-if="documentChain" bordered>
                   <n-list-item v-for="event in documentChain.events" :key="event.id">
                     {{ event.event_type }} · {{ event.occurred_at }}

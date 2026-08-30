@@ -40,6 +40,7 @@ from jai.models._enums import (
     InvoiceCreditStatus,
     InvoiceDocumentKind,
     InvoicePaidStatus,
+    InvoiceRelationType,
     InvoiceSettlementStatus,
     InvoiceStatus,
     InvoiceTaxMode,
@@ -57,6 +58,7 @@ from jai.models.document import (
     FinalAdvanceApplicationTax,
     InvoiceCreditBasisLine,
     InvoicePartySnapshot,
+    InvoiceRelation,
 )
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
 from jai.models.payment import Payment
@@ -320,6 +322,23 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
         if inv.final_original_gross_amount is not None
         else None
     )
+    positive_relations = inv.__dict__.get("positive_relations") or []
+    replacement_relation = next(
+        (
+            relation
+            for relation in positive_relations
+            if InvoiceRelationType(relation.relation_type) == InvoiceRelationType.REPLACEMENT_OF
+        ),
+        None,
+    )
+    compensation_relation = next(
+        (
+            relation
+            for relation in positive_relations
+            if InvoiceRelationType(relation.relation_type) == InvoiceRelationType.COMPENSATES_CREDIT
+        ),
+        None,
+    )
     return InvoiceRead(
         id=inv.id,
         company_id=inv.company_id,
@@ -346,6 +365,16 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
         source_invoice_id=(
             correction.source_invoice_id
             if (correction := inv.__dict__.get("correction")) is not None
+            else None
+        ),
+        replacement_of_credit_note_id=(
+            replacement_relation.related_credit_note_id
+            if replacement_relation is not None
+            else None
+        ),
+        compensates_credit_note_id=(
+            compensation_relation.related_credit_note_id
+            if compensation_relation is not None
             else None
         ),
         original_quote_totals=(
@@ -465,6 +494,23 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
 
 
 def _invoice_to_list_item(inv: Invoice, *, customer_name: str) -> InvoiceListItem:
+    positive_relations = inv.__dict__.get("positive_relations") or []
+    replacement_relation = next(
+        (
+            relation
+            for relation in positive_relations
+            if InvoiceRelationType(relation.relation_type) == InvoiceRelationType.REPLACEMENT_OF
+        ),
+        None,
+    )
+    compensation_relation = next(
+        (
+            relation
+            for relation in positive_relations
+            if InvoiceRelationType(relation.relation_type) == InvoiceRelationType.COMPENSATES_CREDIT
+        ),
+        None,
+    )
     return InvoiceListItem(
         id=inv.id,
         company_id=inv.company_id,
@@ -489,6 +535,16 @@ def _invoice_to_list_item(inv: Invoice, *, customer_name: str) -> InvoiceListIte
         source_invoice_id=(
             correction.source_invoice_id
             if (correction := inv.__dict__.get("correction")) is not None
+            else None
+        ),
+        replacement_of_credit_note_id=(
+            replacement_relation.related_credit_note_id
+            if replacement_relation is not None
+            else None
+        ),
+        compensates_credit_note_id=(
+            compensation_relation.related_credit_note_id
+            if compensation_relation is not None
             else None
         ),
         settlement_status=InvoiceSettlementStatus(inv.settlement_status),
@@ -531,6 +587,7 @@ async def _load_invoice_read(session: AsyncSession, inv: Invoice) -> InvoiceRead
             selectinload(Invoice.party_snapshot),
             selectinload(Invoice.credit_basis_lines),
             selectinload(Invoice.correction),
+            selectinload(Invoice.positive_relations),
             selectinload(Invoice.final_advance_applications).selectinload(
                 FinalAdvanceApplication.taxes
             ),
@@ -1313,29 +1370,55 @@ async def update_invoice(
     ).one_or_none()
     if probe is None:
         return None
-    locked_final_quote: _Quote | None = None
-    if InvoiceDocumentKind(probe.document_kind) == InvoiceDocumentKind.FINAL:
+    relation_probe = await session.scalar(
+        select(InvoiceRelation).where(InvoiceRelation.invoice_id == invoice_id)
+    )
+    related_standard = (
+        InvoiceDocumentKind(probe.document_kind) == InvoiceDocumentKind.STANDARD
+        and relation_probe is not None
+    )
+    locked_quote: _Quote | None = None
+    if InvoiceDocumentKind(probe.document_kind) == InvoiceDocumentKind.FINAL or (
+        related_standard and probe.quote_id is not None
+    ):
         if probe.quote_id is None:
             raise InvoiceLifecycleConflictError("Final invoice has no Quote provenance.")
-        locked_final_quote = (
+        locked_quote = (
             await session.execute(
                 select(_Quote)
                 .where(_Quote.id == probe.quote_id, _Quote.company_id == company_id)
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if locked_final_quote is None:
-            raise InvoiceLifecycleConflictError("Final Quote no longer exists.")
-    stmt = (
-        select(Invoice)
-        .where(
-            Invoice.id == invoice_id,
-            Invoice.company_id == company_id,
+        if locked_quote is None:
+            raise InvoiceLifecycleConflictError("Invoice Quote no longer exists.")
+    if related_standard and probe.quote_id is not None:
+        locked_positive = list(
+            (
+                await session.execute(
+                    select(Invoice)
+                    .where(
+                        Invoice.company_id == company_id,
+                        Invoice.quote_id == probe.quote_id,
+                        Invoice.document_kind != InvoiceDocumentKind.CREDIT_NOTE,
+                    )
+                    .order_by(Invoice.id)
+                    .with_for_update()
+                )
+            ).scalars()
         )
-        .with_for_update()
-    )
-    result = await session.execute(stmt)
-    inv = result.scalar_one_or_none()
+        inv = next((item for item in locked_positive if item.id == invoice_id), None)
+    else:
+        stmt = (
+            select(Invoice)
+            .where(
+                Invoice.id == invoice_id,
+                Invoice.company_id == company_id,
+            )
+            .with_for_update()
+        )
+        result = await session.execute(stmt)
+        inv = result.scalar_one_or_none()
     if inv is None:
         return None
     if (
@@ -1349,8 +1432,8 @@ async def update_invoice(
     if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.FINAL:
         from jai.services.final import update_final_draft
 
-        assert locked_final_quote is not None
-        quote = locked_final_quote
+        assert locked_quote is not None
+        quote = locked_quote
         if inv.status != InvoiceStatus.DRAFT:
             raise InvoiceLifecycleConflictError("Only a DRAFT Final can be updated.")
         # Repricing replaces child line/tax rows.  Keep it inside a savepoint
@@ -1385,6 +1468,28 @@ async def update_invoice(
                 "Advance invoices must be updated through the dedicated Advance endpoint."
             )
         raise ValueError("Generic invoice update currently supports STANDARD invoices only.")
+
+    followup_relation = relation_probe
+    if followup_relation is not None:
+        relation_type = InvoiceRelationType(followup_relation.relation_type)
+        if relation_type == InvoiceRelationType.COMPENSATES_CREDIT:
+            raise InvoiceLifecycleConflictError(
+                "A compensating invoice mirrors its issued Credit basis and cannot be repriced."
+            )
+        related_credit = await session.scalar(
+            select(Invoice).where(Invoice.id == followup_relation.related_credit_note_id)
+        )
+        if related_credit is None:
+            raise InvoiceLifecycleConflictError("Replacement Credit provenance no longer exists.")
+        request_currency = body.currency or company_currency
+        if (
+            body.customer_id != inv.customer_id
+            or request_currency != inv.currency
+            or (body.vat_treatment_id is not None and body.vat_treatment_id != inv.vat_treatment_id)
+        ):
+            raise ValueError("Replacement customer, currency and VAT treatment are immutable.")
+        if body.invoice_date < related_credit.invoice_date:
+            raise ValueError("Replacement date cannot precede its Credit Note date.")
 
     # Only DRAFT invoices can be fully edited; SENT is a locked formal document.
     if inv.status != InvoiceStatus.DRAFT:
@@ -1639,7 +1744,11 @@ async def list_invoices(
     }.get(sort_by, Invoice.invoice_date)
 
     data_stmt = (
-        base.options(selectinload(Invoice.party_snapshot), selectinload(Invoice.correction))
+        base.options(
+            selectinload(Invoice.party_snapshot),
+            selectinload(Invoice.correction),
+            selectinload(Invoice.positive_relations),
+        )
         .order_by(sort_col.desc())
         .limit(limit)
         .offset(offset)
@@ -1715,8 +1824,17 @@ async def transition_status(
             session, invoice_id=invoice_id, company_id=company_id, body=body,
             issued_by_user_id=issued_by_user_id,
         )
+    related_standard = (
+        probe_kind == InvoiceDocumentKind.STANDARD
+        and await session.scalar(
+            select(InvoiceRelation.id).where(InvoiceRelation.invoice_id == invoice_id)
+        )
+        is not None
+    )
     locked_invoices: list[Invoice] = []
-    if probe_kind in {InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL}:
+    if probe_kind in {InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL} or (
+        related_standard and probe_quote_id is not None
+    ):
         if probe_quote_id is None:
             raise InvoiceLifecycleConflictError("Formal invoice has no Quote provenance.")
         try:
@@ -1736,7 +1854,12 @@ async def transition_status(
                     "Concurrent invoice lifecycle mutation; retry the command."
                 ) from exc
             raise
-        if quote is None or quote.settlement_mode.value != "FORMAL_ADVANCE":
+        if quote is None:
+            raise InvoiceLifecycleConflictError("Follow-up Quote no longer exists.")
+        if (
+            probe_kind in {InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL}
+            and quote.settlement_mode.value != "FORMAL_ADVANCE"
+        ):
             raise InvoiceLifecycleConflictError("Formal Quote is not in FORMAL_ADVANCE mode.")
     try:
         if probe_kind == InvoiceDocumentKind.FINAL:
@@ -1747,6 +1870,25 @@ async def transition_status(
 
             assert quote is not None
             locked_invoices = await lock_formal_charge_invoices(session, quote)
+            inv = next((item for item in locked_invoices if item.id == invoice_id), None)
+        elif related_standard and probe_quote_id is not None:
+            # A supplemental/replacement Standard belongs to its correction
+            # chain.  It must honor the same Quote -> sorted positive-source
+            # prefix as cancellation and follow-up creation.
+            locked_invoices = list(
+                (
+                    await session.execute(
+                        select(Invoice)
+                        .where(
+                            Invoice.company_id == company_id,
+                            Invoice.quote_id == probe_quote_id,
+                            Invoice.document_kind != InvoiceDocumentKind.CREDIT_NOTE,
+                        )
+                        .order_by(Invoice.id)
+                        .with_for_update()
+                    )
+                ).scalars()
+            )
             inv = next((item for item in locked_invoices if item.id == invoice_id), None)
         else:
             stmt = (

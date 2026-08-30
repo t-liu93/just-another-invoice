@@ -18,7 +18,7 @@ import uuid
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
@@ -27,7 +27,14 @@ from jai.models._enums import QuoteStatus
 from jai.models.user import User
 from jai.schemas.document_chain import DocumentChainRead
 from jai.schemas.email_log import DocumentSendRequest, EmailLogListResponse, EmailLogRead
-from jai.schemas.invoice import InvoiceCalculationRead, InvoiceRead
+from jai.schemas.invoice import (
+    InvoiceCalculationRead,
+    InvoiceRead,
+    ProjectCancellationCreateRequest,
+    ProjectCancellationPreview,
+    ProjectCancellationRequest,
+    ProjectCancellationResult,
+)
 from jai.schemas.quote import (
     QuoteCalculationRead,
     QuoteCalculationRequest,
@@ -38,6 +45,13 @@ from jai.schemas.quote import (
     QuoteWrite,
 )
 from jai.services import company as company_svc
+from jai.services.correction_followup import (
+    CorrectionFollowupConflictError,
+    CorrectionFollowupValidationError,
+    create_project_cancellation_drafts,
+    preview_project_cancellation,
+)
+from jai.services.credit import CreditConflictError, CreditValidationError
 from jai.services.document_chain import ModeConflictError, get_document_chain
 from jai.services.pricing import calculate_quote
 from jai.services.quote import (
@@ -53,6 +67,10 @@ from jai.services.quote import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["quotes"])
+
+
+def _correction_error(status_code: int, code: str, exc: Exception) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"code": code, "message": str(exc)})
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +222,60 @@ async def get_quote_document_chain_endpoint(
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")
     return result
+
+
+@router.post(
+    "/quotes/{quote_id}/cancellation/preview",
+    response_model=ProjectCancellationPreview,
+)
+async def preview_project_cancellation_endpoint(
+    quote_id: uuid.UUID,
+    body: ProjectCancellationRequest = Body(default_factory=ProjectCancellationRequest),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ProjectCancellationPreview:
+    _owner_only(user)
+    try:
+        return await preview_project_cancellation(
+            session,
+            company_id=_require_company_id(user),
+            quote_id=quote_id,
+            request=body,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Quote not found.") from exc
+    except (CorrectionFollowupConflictError, CreditConflictError) as exc:
+        raise _correction_error(409, getattr(exc, "code", "CANCELLATION_CONFLICT"), exc) from exc
+    except CorrectionFollowupValidationError as exc:
+        raise _correction_error(422, exc.code, exc) from exc
+
+
+@router.post(
+    "/quotes/{quote_id}/cancellation/create-credit-drafts",
+    response_model=ProjectCancellationResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_project_cancellation_drafts_endpoint(
+    quote_id: uuid.UUID,
+    body: ProjectCancellationCreateRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ProjectCancellationResult:
+    _owner_only(user)
+    try:
+        return await create_project_cancellation_drafts(
+            session,
+            company_id=_require_company_id(user),
+            quote_id=quote_id,
+            request=body,
+            creator_id=user.id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Quote not found.") from exc
+    except (CorrectionFollowupConflictError, CreditConflictError) as exc:
+        raise _correction_error(409, getattr(exc, "code", "CANCELLATION_CONFLICT"), exc) from exc
+    except (CorrectionFollowupValidationError, CreditValidationError) as exc:
+        raise _correction_error(422, exc.code, exc) from exc
 
 
 @router.put("/quotes/{quote_id}", response_model=QuoteRead)
