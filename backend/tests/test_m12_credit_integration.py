@@ -1213,10 +1213,10 @@ async def test_partial_gross_credit_keeps_single_currency_base_parity_and_remain
     assert values[0] + values[1] == values[2]
 
 
-async def test_credit_read_list_chain_and_legacy_reports_remain_bounded_and_isolated(
+async def test_credit_read_list_chain_and_reports_project_issued_credit_once(
     db_client: AsyncClient,
 ) -> None:
-    """Step 5 exposes Credit identity without making it an M10 report event."""
+    """Step 8 projects an issued Credit once, at its own invoice date."""
     await _full_auth(db_client)
     seeds = await _setup_company(db_client)
     source = await _issued_standard(db_client, seeds["rates"]["NL standard (21%)"]["id"])
@@ -1277,7 +1277,42 @@ async def test_credit_read_list_chain_and_legacy_reports_remain_bounded_and_isol
         db_client.get("/api/v1/reports/profit-loss?from=2026-01-01&to=2026-03-31"),
         db_client.get("/api/v1/reports/dashboard?year=2026"),
     )
-    assert [response.json() for response in after] == [response.json() for response in baseline]
+    vat_before, icp_before, pl_before, dashboard_before = [response.json() for response in baseline]
+    vat_after, icp_after, pl_after, dashboard_after = [response.json() for response in after]
+    # The original Standard remains on the legacy invoice path.  The issued
+    # Credit is its own negative, document-dated reporting event; it is not a
+    # payment/refund adjustment and therefore exactly cancels this source.
+    assert vat_before["boxes"]["box_1a"] == {"base": "100.00", "vat": "21.00"}
+    assert vat_after["boxes"]["box_1a"] == {"base": "0.00", "vat": "0.00"}
+    report_events = [
+        (row["document_kind"], row["source_document_id"])
+        for row in vat_after["event_rows"]
+    ]
+    # The BTW event ledger exposes every event included in the period: the
+    # legacy Standard source exactly once and the dated Credit correction once.
+    assert report_events == [
+        ("STANDARD", None),
+        ("CREDIT_NOTE", source["id"]),
+    ]
+    assert icp_after == icp_before == {
+        "year": 2026,
+        "quarter": 1,
+        "lines": [],
+        "total_net": "0",
+        "warnings": [],
+        "correction_warnings": [],
+    }
+    assert pl_before["revenue_net"] == "100.00"
+    assert pl_after["revenue_net"] == "0.00"
+    # Dashboard has no separate accounting path: it uses P/L and BTW service
+    # results, so YTD revenue follows the Credit while its Q3 VAT KPI remains
+    # unchanged by Q1 events.
+    assert dashboard_before["kpi"]["ytd_revenue"] == "100.00"
+    assert dashboard_after["kpi"]["ytd_revenue"] == "0.00"
+    assert (
+        dashboard_after["kpi"]["current_quarter_vat_payable"]
+        == dashboard_before["kpi"]["current_quarter_vat_payable"]
+    )
 
 
 @pytest.mark.parametrize(

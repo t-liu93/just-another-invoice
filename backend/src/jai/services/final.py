@@ -32,7 +32,13 @@ from jai.models._enums import (
     VatTreatmentEffect,
     VatTreatmentSide,
 )
-from jai.models.document import FinalAdvanceApplication, FinalAdvanceApplicationTax
+from jai.models.document import (
+    FinalAdvanceApplication,
+    FinalAdvanceApplicationTax,
+    InvoiceCorrection,
+    InvoiceCorrectionLine,
+    InvoiceCreditBasisLine,
+)
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
 from jai.models.quote import Quote, QuoteLine
 from jai.models.vat import VatTreatment
@@ -280,9 +286,37 @@ async def _advance_tax_rows(
 async def _exact_pre_final_credit_buckets(
     session: AsyncSession, advance: Invoice
 ) -> list[AdvanceBucket]:
-    """Step-5 source-bucket seam; never infer tax from a gross aggregate."""
-    del session, advance
-    return []
+    """Return an Advance's exact issued Credit buckets before Final creation."""
+    credit = Invoice.__table__.alias("final_credit_invoice")
+    rows = (
+        await session.execute(
+            select(InvoiceCreditBasisLine, InvoiceCorrectionLine)
+            .join(
+                InvoiceCorrectionLine,
+                InvoiceCorrectionLine.source_basis_line_id == InvoiceCreditBasisLine.id,
+            )
+            .join(InvoiceCorrection, InvoiceCorrection.id == InvoiceCorrectionLine.correction_id)
+            .join(credit, credit.c.id == InvoiceCorrection.credit_note_id)
+            .where(
+                InvoiceCorrection.source_invoice_id == advance.id,
+                credit.c.status.in_([InvoiceStatus.SENT, InvoiceStatus.COMPLETED]),
+            )
+        )
+    ).all()
+    grouped: dict[tuple[uuid.UUID, str, Decimal], list[Decimal]] = {}
+    for basis, line in rows:
+        if basis.vat_rate_id is None or basis.vat_rate_label is None or basis.vat_rate_percent is None:
+            raise FinalValidationError(
+                "FINAL_CREDIT_BUCKET_INVALID", "Issued Advance Credit lacks a frozen VAT bucket."
+            )
+        key = (basis.vat_rate_id, basis.vat_rate_label, Decimal(str(basis.vat_rate_percent)))
+        amounts = grouped.setdefault(key, [Decimal("0"), Decimal("0")])
+        amounts[0] += Decimal(str(line.net_amount))
+        amounts[1] += Decimal(str(line.vat_amount))
+    return [
+        AdvanceBucket(key[0], key[1], key[2], amounts[0], amounts[1])
+        for key, amounts in sorted(grouped.items(), key=lambda item: (item[0][2], item[0][1], item[0][0]))
+    ]
 
 
 def net_advance_application_buckets(

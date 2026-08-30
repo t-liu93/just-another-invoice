@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
-from jai.db import get_session
+from jai.db import get_session, set_rls_company
 from jai.models._enums import SettingLevel
 from jai.models.company import Company
 from jai.models.user import User
@@ -101,6 +101,7 @@ async def get_profit_loss(
     """
     _owner_only(user)
     company_id = _require_company_id(user)
+    await set_rls_company(session, company_id)
 
     if date_from > date_to:
         raise HTTPException(
@@ -155,6 +156,7 @@ async def get_vat_return(
     """
     _owner_only(user)
     company_id = _require_company_id(user)
+    await set_rls_company(session, company_id)
 
     # Fetch the company record (needed for country_code).
     stmt_co = select(Company).where(Company.id == company_id)
@@ -219,6 +221,7 @@ async def get_icp_report(
     """
     _owner_only(user)
     company_id = _require_company_id(user)
+    await set_rls_company(session, company_id)
 
     # Fetch the company record.
     stmt_co = select(Company).where(Company.id == company_id)
@@ -269,6 +272,7 @@ async def get_expense_report(
     """
     _owner_only(user)
     company_id = _require_company_id(user)
+    await set_rls_company(session, company_id)
 
     if date_from > date_to:
         raise HTTPException(

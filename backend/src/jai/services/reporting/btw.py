@@ -61,11 +61,23 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.db import set_rls_company
-from jai.models._enums import InvoiceDocumentKind, InvoiceStatus
+from jai.models._enums import InvoiceDocumentKind, InvoiceStatus, VatTreatmentEffect
+from jai.models.document import (
+    FinalAdvanceApplication,
+    FinalAdvanceApplicationTax,
+    InvoiceCorrection,
+    InvoiceCorrectionLine,
+    InvoiceCreditBasisLine,
+)
 from jai.models.expense import Expense
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment, PaymentTax
 from jai.schemas.report import (
+    ReportDocumentReference,
+    ReportTaxEventKind,
+    ReportTaxEventRow,
+    ReportWarning,
+    ReportWarningCode,
     VatBoxBaseOnly,
     VatBoxBaseVat,
     VatBoxVatOnly,
@@ -75,6 +87,7 @@ from jai.schemas.report import (
 )
 from jai.schemas.setting import VatRateTiers
 from jai.services.money import quantize_to_minor_unit
+from jai.services.reporting.events import quarter_label
 
 if TYPE_CHECKING:
     from jai.models.company import Company
@@ -84,6 +97,27 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _ZERO = Decimal("0")
+
+
+def _event_row_sort_key(row: ReportTaxEventRow) -> tuple[object, ...]:
+    """Return the complete canonical key for one public BTW audit event."""
+    return (
+        row.event_date,
+        row.event_kind.value,
+        row.document_id or "",
+        row.document_kind.value if row.document_kind is not None else "",
+        row.document_number or "",
+        row.payment_id or "",
+        row.source_document_id or "",
+        row.source_document_kind.value if row.source_document_kind is not None else "",
+        row.source_document_number or "",
+        row.vat_treatment_code,
+        row.vat_treatment_effect.value,
+        row.vat_rate_percent,
+        row.requires_icp,
+        row.taxable_amount,
+        row.vat_amount,
+    )
 
 _DISCLAIMER = (
     "This output is for bookkeeping assistance only and does not constitute "
@@ -394,6 +428,60 @@ async def compute_vat_return(
         )
 
     acc = _BoxAccumulator()
+    # Keep a persisted fact identity alongside each public row until the final
+    # sort.  Tax/correction relationships intentionally have no ORM ordering;
+    # a row's API-visible fields define its canonical audit order and this
+    # immutable source ID resolves otherwise equal public rows without relying
+    # on database load order.
+    event_rows: list[tuple[ReportTaxEventRow, str]] = []
+    correction_warnings: list[ReportWarning] = []
+
+    def apply_tax_event(
+        *,
+        event_kind: ReportTaxEventKind,
+        event_date: date,
+        taxable: Decimal,
+        vat: Decimal,
+        code: str,
+        effect: str,
+        requires_icp: bool,
+        rate: Decimal,
+        document: Invoice | None = None,
+        payment_id: uuid.UUID | None = None,
+        source_document_id: uuid.UUID | None = None,
+        source_document_kind: InvoiceDocumentKind | None = None,
+        source_document_number: str | None = None,
+        source_row_id: uuid.UUID | None = None,
+    ) -> None:
+        """Apply and expose one frozen invoice-side tax event exactly once."""
+        if taxable == _ZERO and vat == _ZERO:
+            return
+        document_kind = document.document_kind if document is not None else None
+        # The legacy Standard query itself fixes the kind.  A few established
+        # pure-report fixtures intentionally model only its financial fields,
+        # so keep that compatibility without weakening runtime document kinds.
+        if document is not None and not isinstance(document_kind, InvoiceDocumentKind):
+            document_kind = InvoiceDocumentKind.STANDARD
+        _apply_invoice_line_nl(acc, effect, requires_icp, code, rate, taxable, vat, tiers)
+        event_rows.append((ReportTaxEventRow(
+            event_kind=event_kind,
+            document_id=str(document.id) if document is not None else None,
+            document_kind=document_kind,
+            document_number=document.invoice_number if document is not None else None,
+            event_date=event_date,
+            payment_id=str(payment_id) if payment_id is not None else None,
+            source_document_id=(
+                str(source_document_id) if source_document_id is not None else None
+            ),
+            source_document_kind=source_document_kind,
+            source_document_number=source_document_number,
+            taxable_amount=taxable,
+            vat_amount=vat,
+            vat_treatment_code=code,
+            vat_treatment_effect=VatTreatmentEffect(effect),
+            vat_rate_percent=rate,
+            requires_icp=requires_icp,
+        ), str(source_row_id) if source_row_id is not None else ""))
 
     # -----------------------------------------------------------------------
     # 1. Revenue: invoices with status SENT or COMPLETED in [date_from, date_to]
@@ -418,7 +506,7 @@ async def compute_vat_return(
     # not the quote has already been converted. These are locked PaymentTax
     # snapshots; VAT is never inferred from the gross payment amount here.
     advance_result = await session.execute(
-        select(Payment.id, PaymentTax)
+        select(Payment.id, Payment.payment_date, PaymentTax)
         .join(PaymentTax, PaymentTax.payment_id == Payment.id)
         .where(
             Payment.company_id == company_id,
@@ -428,17 +516,19 @@ async def compute_vat_return(
         )
     )
     advance_payment_ids: set[uuid.UUID] = set()
-    for payment_id, payment_tax in advance_result.all():
+    for payment_id, payment_date, payment_tax in advance_result.all():
         advance_payment_ids.add(payment_id)
-        _apply_invoice_line_nl(
-            acc,
-            payment_tax.vat_treatment_effect,
-            payment_tax.vat_treatment_requires_icp,
-            payment_tax.vat_treatment_code,
-            Decimal(str(payment_tax.vat_rate_percent)),
-            quantize_to_minor_unit(Decimal(str(payment_tax.base_taxable_amount))),
-            quantize_to_minor_unit(Decimal(str(payment_tax.base_vat_amount))),
-            tiers,
+        apply_tax_event(
+            event_kind=ReportTaxEventKind.RECEIPT_ONLY_PAYMENT_TAX,
+            event_date=payment_date,
+            payment_id=payment_id,
+            code=payment_tax.vat_treatment_code,
+            effect=payment_tax.vat_treatment_effect,
+            requires_icp=payment_tax.vat_treatment_requires_icp,
+            rate=Decimal(str(payment_tax.vat_rate_percent)),
+            taxable=quantize_to_minor_unit(Decimal(str(payment_tax.base_taxable_amount))),
+            vat=quantize_to_minor_unit(Decimal(str(payment_tax.base_vat_amount))),
+            source_row_id=payment_tax.id,
         )
     if advance_payment_ids:
         warnings.append(
@@ -447,7 +537,7 @@ async def compute_vat_return(
         )
 
     invoice_ids = [invoice.id for invoice in invoices]
-    offsets_by_invoice: dict[uuid.UUID, list[PaymentTax]] = {}
+    offsets_by_invoice: dict[uuid.UUID, list[tuple[uuid.UUID, PaymentTax]]] = {}
     offset_payment_ids: set[uuid.UUID] = set()
     if invoice_ids:
         offset_result = await session.execute(
@@ -462,7 +552,7 @@ async def compute_vat_return(
         for invoice_id, payment_id, payment_tax in offset_result.all():
             if invoice_id is None:
                 continue
-            offsets_by_invoice.setdefault(invoice_id, []).append(payment_tax)
+            offsets_by_invoice.setdefault(invoice_id, []).append((payment_id, payment_tax))
             offset_payment_ids.add(payment_id)
 
     # Track EU B2B invoices that need ICP but have no customer vat_id.
@@ -480,15 +570,17 @@ async def compute_vat_return(
                 rate_pct = Decimal(str(tax.vat_rate_percent))
                 taxable = quantize_to_minor_unit(Decimal(str(tax.taxable_amount)))
                 vat_amt = quantize_to_minor_unit(Decimal(str(tax.tax_amount)))
-                _apply_invoice_line_nl(
-                    acc,
-                    effect,
-                    requires_icp,
-                    treatment_code,
-                    rate_pct,
-                    taxable,
-                    vat_amt,
-                    tiers,
+                apply_tax_event(
+                    event_kind=ReportTaxEventKind.DOCUMENT_TAX,
+                    event_date=inv.invoice_date,
+                    document=inv,
+                    code=treatment_code,
+                    effect=effect,
+                    requires_icp=requires_icp,
+                    rate=rate_pct,
+                    taxable=taxable,
+                    vat=vat_amt,
+                    source_row_id=tax.id,
                 )
         else:
             # LINE mode: per-line VAT via InvoiceLineTax rows.
@@ -497,32 +589,37 @@ async def compute_vat_return(
                     rate_pct = Decimal(str(line_tax.vat_rate_percent))
                     taxable = quantize_to_minor_unit(Decimal(str(line_tax.taxable_amount)))
                     vat_amt = quantize_to_minor_unit(Decimal(str(line_tax.tax_amount)))
-                    _apply_invoice_line_nl(
-                        acc,
-                        effect,
-                        requires_icp,
-                        treatment_code,
-                        rate_pct,
-                        taxable,
-                        vat_amt,
-                        tiers,
+                    apply_tax_event(
+                        event_kind=ReportTaxEventKind.DOCUMENT_TAX,
+                        event_date=inv.invoice_date,
+                        document=inv,
+                        code=treatment_code,
+                        effect=effect,
+                        requires_icp=requires_icp,
+                        rate=rate_pct,
+                        taxable=taxable,
+                        vat=vat_amt,
+                        source_row_id=line_tax.id,
                     )
 
         # The formal invoice contributes its complete VAT above. Subtract all
         # quote-origin advance snapshots attached to it, including advances
         # recognised in earlier quarters, so the project is filed exactly once.
-        for payment_tax in offsets_by_invoice.get(inv.id, []):
-            _apply_invoice_line_nl(
-                acc,
-                payment_tax.vat_treatment_effect,
-                payment_tax.vat_treatment_requires_icp,
-                payment_tax.vat_treatment_code,
-                Decimal(str(payment_tax.vat_rate_percent)),
-                -quantize_to_minor_unit(
+        for payment_id, payment_tax in offsets_by_invoice.get(inv.id, []):
+            apply_tax_event(
+                event_kind=ReportTaxEventKind.RECEIPT_ONLY_INVOICE_OFFSET,
+                event_date=inv.invoice_date,
+                document=inv,
+                payment_id=payment_id,
+                code=payment_tax.vat_treatment_code,
+                effect=payment_tax.vat_treatment_effect,
+                requires_icp=payment_tax.vat_treatment_requires_icp,
+                rate=Decimal(str(payment_tax.vat_rate_percent)),
+                taxable=-quantize_to_minor_unit(
                     Decimal(str(payment_tax.base_taxable_amount))
                 ),
-                -quantize_to_minor_unit(Decimal(str(payment_tax.base_vat_amount))),
-                tiers,
+                vat=-quantize_to_minor_unit(Decimal(str(payment_tax.base_vat_amount))),
+                source_row_id=payment_tax.id,
             )
 
         # D5 / warning: EU B2B invoices going to 3b require a customer vat_id.
@@ -546,6 +643,170 @@ async def compute_vat_return(
             f"The following EU B2B (ICP) invoices are missing a customer VAT ID, "
             f"which is required for the Opgaaf ICP declaration: {missing_str}{extra}."
         )
+
+    # -------------------------------------------------------------------
+    # 1b. M12 formal document events.  Receipt-only remains entirely in
+    #     the PaymentTax + Standard offset path above.
+    # -------------------------------------------------------------------
+    formal_result = await session.execute(
+        select(Invoice).where(
+            and_(
+                Invoice.company_id == company_id,
+                Invoice.document_kind.in_([
+                    InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL,
+                ]),
+                Invoice.status.in_(revenue_statuses),
+                Invoice.invoice_date >= date_from,
+                Invoice.invoice_date <= date_to,
+            )
+        )
+    )
+    formal_invoices = list(formal_result.scalars().all())
+    final_ids = [
+        row.id
+        for row in formal_invoices
+        if row.document_kind == InvoiceDocumentKind.FINAL
+    ]
+    applied: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, Decimal]] = {}
+    if final_ids:
+        app_result = await session.execute(
+            select(FinalAdvanceApplicationTax, FinalAdvanceApplication.final_invoice_id)
+            .join(FinalAdvanceApplication)
+            .where(FinalAdvanceApplication.final_invoice_id.in_(final_ids))
+        )
+        for tax, final_id in app_result.all():
+            key = (final_id, tax.source_vat_rate_id)
+            old_net, old_vat = applied.get(key, (_ZERO, _ZERO))
+            applied[key] = (
+                old_net + quantize_to_minor_unit(Decimal(str(tax.base_taxable_amount))),
+                old_vat + quantize_to_minor_unit(Decimal(str(tax.base_vat_amount))),
+            )
+
+    def apply_formal_row(
+        invoice: Invoice,
+        rate: Decimal,
+        taxable: Decimal,
+        vat: Decimal,
+        *,
+        source_id: uuid.UUID | None = None,
+        source_kind: InvoiceDocumentKind | None = None,
+        source_number: str | None = None,
+        treatment_code: str | None = None,
+        treatment_effect: str | None = None,
+        requires_icp: bool | None = None,
+        source_row_id: uuid.UUID | None = None,
+    ) -> None:
+        if taxable == _ZERO and vat == _ZERO:
+            return
+        code = treatment_code if treatment_code is not None else invoice.vat_treatment_code
+        effect = treatment_effect if treatment_effect is not None else invoice.vat_treatment_effect
+        icp = requires_icp if requires_icp is not None else invoice.vat_treatment_requires_icp
+        apply_tax_event(
+            event_kind=ReportTaxEventKind.DOCUMENT_TAX,
+            event_date=invoice.invoice_date,
+            document=invoice,
+            source_document_id=source_id,
+            source_document_kind=source_kind,
+            source_document_number=source_number,
+            code=code,
+            effect=effect,
+            requires_icp=icp,
+            rate=rate,
+            taxable=taxable,
+            vat=vat,
+            source_row_id=source_row_id,
+        )
+
+    for invoice in formal_invoices:
+        if invoice.tax_mode.value == "DOCUMENT":
+            rows = [(tax.vat_rate_id, Decimal(str(tax.vat_rate_percent)),
+                     quantize_to_minor_unit(Decimal(str(tax.taxable_amount))),
+                     quantize_to_minor_unit(Decimal(str(tax.tax_amount))), tax.id)
+                    for tax in invoice.taxes]
+        else:
+            rows = [(tax.vat_rate_id, Decimal(str(tax.vat_rate_percent)),
+                     quantize_to_minor_unit(Decimal(str(tax.taxable_amount))),
+                     quantize_to_minor_unit(Decimal(str(tax.tax_amount))), tax.id)
+                    for line in invoice.lines for tax in line.line_taxes]
+        for rate_id, rate, taxable, vat, tax_row_id in rows:
+            if invoice.document_kind == InvoiceDocumentKind.FINAL:
+                app_net, app_vat = applied.get((invoice.id, rate_id), (_ZERO, _ZERO))
+                taxable -= app_net
+                vat -= app_vat
+            apply_formal_row(invoice, rate, taxable, vat, source_row_id=tax_row_id)
+
+    from sqlalchemy.orm import aliased
+
+    source_invoice = aliased(Invoice)
+    credit_result = await session.execute(
+        select(
+            Invoice, InvoiceCorrection, InvoiceCorrectionLine, InvoiceCreditBasisLine,
+            source_invoice.invoice_number, source_invoice.invoice_date,
+            source_invoice.document_kind,
+        )
+        .join(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
+        .join(InvoiceCorrectionLine, InvoiceCorrectionLine.correction_id == InvoiceCorrection.id)
+        .join(
+            InvoiceCreditBasisLine,
+            InvoiceCreditBasisLine.id == InvoiceCorrectionLine.source_basis_line_id,
+        )
+        .join(source_invoice, source_invoice.id == InvoiceCorrection.source_invoice_id)
+        .where(
+            Invoice.company_id == company_id,
+            Invoice.document_kind == InvoiceDocumentKind.CREDIT_NOTE,
+            Invoice.status.in_(revenue_statuses),
+            Invoice.invoice_date >= date_from,
+            Invoice.invoice_date <= date_to,
+        )
+    )
+    warnings_by_credit: dict[uuid.UUID, ReportWarning] = {}
+    for (
+        credit,
+        correction,
+        line,
+        basis,
+        source_number,
+        source_date,
+        source_kind,
+    ) in credit_result.all():
+        net = -quantize_to_minor_unit(Decimal(str(line.base_net_amount)))
+        vat = -quantize_to_minor_unit(Decimal(str(line.base_vat_amount)))
+        apply_formal_row(
+            credit, Decimal(str(basis.vat_rate_percent or _ZERO)), net, vat,
+            source_id=correction.source_invoice_id,
+            source_kind=source_kind,
+            source_number=source_number,
+            treatment_code=basis.vat_treatment_code, treatment_effect=basis.vat_treatment_effect,
+            requires_icp=basis.vat_treatment_requires_icp,
+            source_row_id=line.id,
+        )
+        if (
+            quarter_label(source_date) != quarter_label(credit.invoice_date)
+            and credit.id not in warnings_by_credit
+        ):
+            warnings_by_credit[credit.id] = ReportWarning(
+                code=ReportWarningCode.CREDIT_CROSS_PERIOD,
+                message=("This Credit Note is dated in a different VAT period from its source. "
+                         "Review the applicable correction process with your accountant."),
+                document=ReportDocumentReference(
+                    document_id=str(credit.id), document_kind=InvoiceDocumentKind.CREDIT_NOTE,
+                    document_number=credit.invoice_number, event_date=credit.invoice_date,
+                    source_document_id=str(correction.source_invoice_id),
+                    source_document_kind=source_kind,
+                    source_document_number=source_number,
+                ),
+                source=ReportDocumentReference(
+                    document_id=str(correction.source_invoice_id), document_kind=source_kind,
+                    document_number=source_number, event_date=source_date,
+                ),
+                event_period=quarter_label(credit.invoice_date),
+                source_period=quarter_label(source_date),
+                amount=-quantize_to_minor_unit(
+                    Decimal(str(correction.issued_base_gross_amount))
+                ),
+            )
+
+    correction_warnings.extend(warnings_by_credit.values())
 
     if offset_payment_ids:
         warnings.append(
@@ -633,6 +894,19 @@ async def compute_vat_return(
         net_payable_or_refundable=VatBoxVatOnly(vat=net_payable_or_refundable),
     )
 
+    event_rows.sort(
+        key=lambda event: (
+            # Every public identity, bucket-routing and signed-amount field
+            # participates in the canonical order. Decimal values are compared
+            # directly, preserving their exact persisted quantized values.
+            _event_row_sort_key(event[0]),
+            event[1],
+        )
+    )
+    correction_warnings.sort(
+        key=lambda warning: (warning.document.event_date, warning.document.document_id)
+    )
+
     return VatReturnReport(
         year=year,
         quarter=quarter,
@@ -642,5 +916,7 @@ async def compute_vat_return(
         boxes=boxes,
         totals=totals,
         warnings=warnings,
+        event_rows=[row for row, _source_row_id in event_rows],
+        correction_warnings=correction_warnings,
         disclaimer=_DISCLAIMER,
     )

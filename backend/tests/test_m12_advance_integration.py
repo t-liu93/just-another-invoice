@@ -932,11 +932,11 @@ async def test_advance_intent_round_trips_without_precision_loss(
     assert rejected_quote_read.json()["settlement_mode"] == "UNSET"
 
 
-async def test_advance_is_excluded_from_legacy_reports_until_step_8(
+async def test_advance_is_projected_by_step_8_reports_without_payment_tax(
     db_client: AsyncClient,
     db_session_maker: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Step-3 compatibility gate: old Standard projections never infer formal events."""
+    """Step 8: issued formal Advance is invoice-dated, payment is a no-op."""
     quote, _ = await _formal_quote(db_client)
     created = await db_client.post(
         f"/api/v1/quotes/{quote['id']}/advance-invoices", json=_advance_payload()
@@ -963,8 +963,9 @@ async def test_advance_is_excluded_from_legacy_reports_until_step_8(
     assert dashboard.json()["kpi"]["ytd_profit"] == "0"
     vat = await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1")
     assert vat.status_code == 200, vat.text
-    assert vat.json()["boxes"]["box_1a"]["base"] == "0"
-    assert vat.json()["boxes"]["box_1a"]["vat"] == "0"
+    assert vat.json()["boxes"]["box_1a"]["base"] == "50.00"
+    assert vat.json()["boxes"]["box_1a"]["vat"] == "10.50"
+    assert vat.json()["event_rows"][0]["document_kind"] == "ADVANCE"
 
     # Formal Advances are NL_DOMESTIC and therefore normally cannot appear in
     # ICP. Set the legacy snapshot flag directly only to prove ICP applies the

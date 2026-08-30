@@ -193,7 +193,7 @@ def _make_session(invoices: list, expenses: list) -> AsyncMock:
     """Create a mock AsyncSession that returns given rows for execute()."""
     session = AsyncMock()
 
-    # execute() is called twice: once for invoices, once for expenses.
+    # execute() is called three times: positive revenue, Credit events, expenses.
     # We use side_effect to return the correct result for each call.
     call_count = 0
 
@@ -203,12 +203,18 @@ def _make_session(invoices: list, expenses: list) -> AsyncMock:
         return result
 
     invoice_result = _scalars_for(invoices)
+    credit_result = MagicMock()
+    credit_result.all.return_value = []
     expense_result = _scalars_for(expenses)
 
     async def _execute(stmt):  # type: ignore[no-untyped-def]
         nonlocal call_count
         call_count += 1
-        return invoice_result if call_count == 1 else expense_result
+        if call_count == 1:
+            return invoice_result
+        if call_count == 2:
+            return credit_result
+        return expense_result
 
     session.execute = _execute
     return session

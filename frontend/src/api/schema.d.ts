@@ -5083,6 +5083,11 @@ export interface components {
              * @description Sum of base_taxable_amount for all requires_icp invoices in the quarter (EUR).
              */
             net_amount: string;
+            /**
+             * Source Documents
+             * @description Issued invoice/Credit event references contributing to this aggregate.
+             */
+            source_documents?: components["schemas"]["ReportDocumentReference"][];
         };
         /**
          * IcpReport
@@ -5117,6 +5122,11 @@ export interface components {
              * @description Advisory messages for customers missing vat_id or billing country_code – both are required fields for the Opgaaf ICP filing.
              */
             warnings?: string[];
+            /**
+             * Correction Warnings
+             * @description Dated advisory warnings for cross-period Credit corrections; no filing state.
+             */
+            correction_warnings?: components["schemas"]["ReportWarning"][];
         };
         /**
          * InvoiceCalculationRead
@@ -7893,6 +7903,107 @@ export interface components {
             password: string;
         };
         /**
+         * ReportDocumentReference
+         * @description Frozen document reference carried by a reporting event row.
+         */
+        ReportDocumentReference: {
+            /** Document Id */
+            document_id: string;
+            document_kind: components["schemas"]["InvoiceDocumentKind"];
+            /** Document Number */
+            document_number?: string | null;
+            /**
+             * Event Date
+             * Format: date
+             */
+            event_date: string;
+            /** Source Document Id */
+            source_document_id?: string | null;
+            source_document_kind?: components["schemas"]["InvoiceDocumentKind"] | null;
+            /** Source Document Number */
+            source_document_number?: string | null;
+        };
+        /**
+         * ReportTaxEventKind
+         * @description The immutable source family of one signed BTW event row.
+         * @enum {string}
+         */
+        ReportTaxEventKind: "DOCUMENT_TAX" | "RECEIPT_ONLY_PAYMENT_TAX" | "RECEIPT_ONLY_INVOICE_OFFSET";
+        /**
+         * ReportTaxEventRow
+         * @description One signed BTW event included exactly once in this period's invoice-side totals.
+         *
+         *     ``vat_treatment_effect`` and ``vat_rate_percent`` are the immutable inputs
+         *     used by the reporting service to route this row to its Dutch BTW box.
+         *     They are deliberately carried alongside the signed amounts so consumers can
+         *     audit the authoritative projection without inferring tax routing from a
+         *     treatment code or rounded amount.
+         */
+        ReportTaxEventRow: {
+            event_kind: components["schemas"]["ReportTaxEventKind"];
+            /** Document Id */
+            document_id?: string | null;
+            document_kind?: components["schemas"]["InvoiceDocumentKind"] | null;
+            /** Document Number */
+            document_number?: string | null;
+            /**
+             * Event Date
+             * Format: date
+             */
+            event_date: string;
+            /**
+             * Payment Id
+             * @description Receipt-only payment identity for payment-tax and offset events.
+             */
+            payment_id?: string | null;
+            /** Source Document Id */
+            source_document_id?: string | null;
+            source_document_kind?: components["schemas"]["InvoiceDocumentKind"] | null;
+            /** Source Document Number */
+            source_document_number?: string | null;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Vat Treatment Code */
+            vat_treatment_code: string;
+            /** @description Frozen treatment effect used to route this event to a BTW box. */
+            vat_treatment_effect: components["schemas"]["VatTreatmentEffect"];
+            /**
+             * Vat Rate Percent
+             * @description Frozen VAT rate percentage used to route this event to a BTW box.
+             */
+            vat_rate_percent: string;
+            /** Requires Icp */
+            requires_icp: boolean;
+        };
+        /**
+         * ReportWarning
+         * @description Stable, advisory correction guidance; never a filing-state assertion.
+         */
+        ReportWarning: {
+            code: components["schemas"]["ReportWarningCode"];
+            /** Message */
+            message: string;
+            document: components["schemas"]["ReportDocumentReference"];
+            source: components["schemas"]["ReportDocumentReference"];
+            /** Event Period */
+            event_period: string;
+            /** Source Period */
+            source_period: string;
+            /**
+             * Amount
+             * @description Signed frozen base-currency gross correction amount (EUR).
+             */
+            amount: string;
+        };
+        /**
+         * ReportWarningCode
+         * @description Machine-readable advisory codes emitted by reporting projections.
+         * @enum {string}
+         */
+        ReportWarningCode: "CREDIT_CROSS_PERIOD";
+        /**
          * ResetPasswordRequest
          * @description Body for ``POST /auth/reset-password``.
          */
@@ -8358,6 +8469,16 @@ export interface components {
              * @description Advisory messages, e.g. missing VAT-ID on ICP customers, or non-NL company using the NL ruleset as fallback.
              */
             warnings?: string[];
+            /**
+             * Event Rows
+             * @description All signed invoice-side BTW events included exactly once in this period: document tax, receipt-only payment tax, and receipt-only invoice offsets.
+             */
+            event_rows?: components["schemas"]["ReportTaxEventRow"][];
+            /**
+             * Correction Warnings
+             * @description Dated advisory warnings for Credit corrections; no filing state.
+             */
+            correction_warnings?: components["schemas"]["ReportWarning"][];
             /**
              * Disclaimer
              * @description Fixed disclaimer: this output is for bookkeeping assistance only; not tax or accounting advice.  Verify with your accountant / tax authority.

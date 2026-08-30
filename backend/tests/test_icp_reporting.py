@@ -65,6 +65,8 @@ def _make_icp_invoice(
     """An invoice with vat_treatment_requires_icp=True (EU_B2B_REVERSE)."""
     inv = MagicMock()
     inv.invoice_date = invoice_date
+    inv.id = uuid.uuid4()
+    inv.invoice_number = None
     inv.vat_treatment_requires_icp = True
     inv.vat_treatment_effect = "ZERO_REVERSE"
     inv.vat_treatment_code = "EU_B2B_REVERSE"
@@ -85,6 +87,8 @@ def _make_non_icp_invoice(
     """An invoice with vat_treatment_requires_icp=False (NL_DOMESTIC)."""
     inv = MagicMock()
     inv.invoice_date = invoice_date
+    inv.id = uuid.uuid4()
+    inv.invoice_number = None
     inv.vat_treatment_requires_icp = False
     inv.vat_treatment_effect = "APPLY_RATE"
     inv.vat_treatment_code = "NL_DOMESTIC"
@@ -124,20 +128,23 @@ def _build_session(
 ) -> AsyncMock:
     """Build a mock AsyncSession for compute_icp.
 
-    compute_icp makes 3 queries (when invoices present):
+    compute_icp makes 4 queries (when invoices present):
     1. Invoice query  → invoices
-    2. Customer query → customers
-    3. Address query  → billing_addresses
+    2. Credit correction query → empty for M10 fixtures
+    3. Customer query → customers
+    4. Address query → billing_addresses
 
-    If invoices list is empty, compute_icp returns early → only 1 query.
+    If invoices list is empty, it still checks for a negative Credit event.
     """
     session = AsyncMock()
 
     if not invoices:
-        # Only the invoice query is made; the function short-circuits.
+        # Invoice + Credit event query are made; then it short-circuits.
         inv_result = MagicMock()
         inv_result.scalars.return_value.all.return_value = []
-        session.execute.side_effect = [inv_result]
+        credit_result = MagicMock()
+        credit_result.all.return_value = []
+        session.execute.side_effect = [inv_result, credit_result]
         return session
 
     inv_result = MagicMock()
@@ -149,7 +156,9 @@ def _build_session(
     addr_result = MagicMock()
     addr_result.scalars.return_value.all.return_value = billing_addresses
 
-    session.execute.side_effect = [inv_result, cust_result, addr_result]
+    credit_result = MagicMock()
+    credit_result.all.return_value = []
+    session.execute.side_effect = [inv_result, credit_result, cust_result, addr_result]
     return session
 
 

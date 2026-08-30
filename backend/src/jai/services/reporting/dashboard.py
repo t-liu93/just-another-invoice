@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jai.db import set_rls_company
 from jai.schemas.report import (
     DashboardKpi,
     DashboardMonthly,
@@ -128,6 +129,10 @@ async def compute_dashboard(
         KPI, 12-month series, top-5 expense categories.
     """
     company_id: uuid.UUID = company.id
+    # P/L reaches RLS-protected M12 correction rows before BTW establishes its
+    # own tenant context, so the composed dashboard must scope the transaction
+    # up front.
+    await set_rls_company(session, company_id)
     year_start = date(year, 1, 1)
     year_end = date(year, 12, 31)
 

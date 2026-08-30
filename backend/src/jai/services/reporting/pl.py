@@ -71,6 +71,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.models._enums import InvoiceDocumentKind, InvoiceStatus
+from jai.models.document import InvoiceCorrection
 from jai.models.expense import Expense
 from jai.models.invoice import Invoice
 from jai.schemas.report import ProfitLossReport, ProfitLossSeriesItem
@@ -209,9 +210,12 @@ async def compute_profit_loss(
     stmt_inv = select(Invoice).where(
         and_(
             Invoice.company_id == company_id,
-            # Step 3 compatibility boundary: the legacy projection remains
-            # Standard-only until Step 8 adds explicit formal revenue events.
-            Invoice.document_kind == InvoiceDocumentKind.STANDARD,
+            # Advance never creates revenue; Final is the full edited project
+            # event (not its residual payable amount).
+            Invoice.document_kind.in_([
+                InvoiceDocumentKind.STANDARD,
+                InvoiceDocumentKind.FINAL,
+            ]),
             Invoice.status.in_(revenue_statuses),
             Invoice.invoice_date >= date_from,
             Invoice.invoice_date <= date_to,
@@ -232,6 +236,28 @@ async def compute_profit_loss(
         amount = quantize_to_minor_unit(Decimal(str(inv.base_taxable_amount)))
         if key in buckets:
             buckets[key]["revenue_net"] = buckets[key]["revenue_net"] + amount
+
+    # Credit revenue timing is an immutable issue-time fact.  In particular,
+    # a pre-Final Advance Credit has affects_revenue=false and must not reduce
+    # P/L, while its later Final naturally restates the project net.
+    credit_result = await session.execute(
+        select(Invoice, InvoiceCorrection)
+        .join(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
+        .where(
+            Invoice.company_id == company_id,
+            Invoice.document_kind == InvoiceDocumentKind.CREDIT_NOTE,
+            Invoice.status.in_(revenue_statuses),
+            InvoiceCorrection.affects_revenue.is_(True),
+            Invoice.invoice_date >= date_from,
+            Invoice.invoice_date <= date_to,
+        )
+    )
+    for credit, correction in credit_result.all():
+        key = _bucket_key(credit.invoice_date, granularity)
+        if key in buckets:
+            buckets[key]["revenue_net"] = buckets[key]["revenue_net"] - quantize_to_minor_unit(
+                Decimal(str(correction.issued_base_net_amount))
+            )
 
     # -------------------------------------------------------------------
     # 2. Expenses: confirmed expenses with depreciation/business% (D3, D-DEP, D-PCT)

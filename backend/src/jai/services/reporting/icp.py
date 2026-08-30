@@ -48,9 +48,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jai.models._enums import AddressType, InvoiceDocumentKind, InvoiceStatus
 from jai.models.address import Address
 from jai.models.customer import Customer
+from jai.models.document import InvoiceCorrection, InvoiceCorrectionLine, InvoiceCreditBasisLine
 from jai.models.invoice import Invoice
-from jai.schemas.report import IcpLine, IcpReport
+from jai.schemas.report import (
+    IcpLine,
+    IcpReport,
+    ReportDocumentReference,
+    ReportWarning,
+    ReportWarningCode,
+)
 from jai.services.money import quantize_to_minor_unit
+from jai.services.reporting.events import quarter_label
 
 if TYPE_CHECKING:
     from jai.models.company import Company
@@ -136,14 +144,98 @@ async def compute_icp(
     #    Per-invoice: round base_taxable_amount to minor unit first, then sum.
     # -----------------------------------------------------------------------
     customer_net: dict[uuid.UUID, Decimal] = {}
+    source_documents: dict[uuid.UUID, list[ReportDocumentReference]] = {}
     for inv in invoices:
         cust_id = inv.customer_id
         amount = quantize_to_minor_unit(Decimal(str(inv.base_taxable_amount)))
         customer_net[cust_id] = customer_net.get(cust_id, _ZERO) + amount
+        source_documents.setdefault(cust_id, []).append(ReportDocumentReference(
+            document_id=str(inv.id), document_kind=InvoiceDocumentKind.STANDARD,
+            document_number=inv.invoice_number, event_date=inv.invoice_date,
+        ))
+
+    # Credit Notes inherit the exact cross-border/ICP source snapshots and
+    # enter as negative dated correction events.  Formal Advance/Final are
+    # NL-only by design, so they cannot add positive ICP rows.
+    from sqlalchemy.orm import aliased
+
+    source_invoice = aliased(Invoice)
+    credit_result = await session.execute(
+        select(
+            Invoice, InvoiceCorrection, InvoiceCorrectionLine, InvoiceCreditBasisLine,
+            source_invoice.invoice_number, source_invoice.invoice_date,
+            source_invoice.document_kind,
+        )
+        .join(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
+        .join(InvoiceCorrectionLine, InvoiceCorrectionLine.correction_id == InvoiceCorrection.id)
+        .join(
+            InvoiceCreditBasisLine,
+            InvoiceCreditBasisLine.id == InvoiceCorrectionLine.source_basis_line_id,
+        )
+        .join(source_invoice, source_invoice.id == InvoiceCorrection.source_invoice_id)
+        .where(
+            Invoice.company_id == company_id,
+            Invoice.document_kind == InvoiceDocumentKind.CREDIT_NOTE,
+            Invoice.status.in_(revenue_statuses),
+            Invoice.invoice_date >= date_from,
+            Invoice.invoice_date <= date_to,
+            InvoiceCreditBasisLine.vat_treatment_requires_icp.is_(True),
+        )
+    )
+    correction_warnings_by_credit: dict[uuid.UUID, ReportWarning] = {}
+    credit_source_ids: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for (
+        credit,
+        correction,
+        line,
+        _basis,
+        source_number,
+        source_date,
+        source_kind,
+    ) in credit_result.all():
+        amount = -quantize_to_minor_unit(Decimal(str(line.base_net_amount)))
+        customer_net[credit.customer_id] = customer_net.get(credit.customer_id, _ZERO) + amount
+        document = ReportDocumentReference(
+            document_id=str(credit.id),
+            document_kind=InvoiceDocumentKind.CREDIT_NOTE,
+            document_number=credit.invoice_number,
+            event_date=credit.invoice_date,
+            source_document_id=str(correction.source_invoice_id),
+            source_document_kind=source_kind,
+            source_document_number=source_number,
+        )
+        credit_ids = credit_source_ids.setdefault(credit.customer_id, set())
+        if credit.id not in credit_ids:
+            source_documents.setdefault(credit.customer_id, []).append(document)
+            credit_ids.add(credit.id)
+        if (
+            quarter_label(source_date) != quarter_label(credit.invoice_date)
+            and credit.id not in correction_warnings_by_credit
+        ):
+            correction_warnings_by_credit[credit.id] = ReportWarning(
+                code=ReportWarningCode.CREDIT_CROSS_PERIOD,
+                message=("This Credit Note is dated in a different VAT period from its source. "
+                         "Review the applicable correction process with your accountant."),
+                document=document,
+                source=ReportDocumentReference(
+                    document_id=str(correction.source_invoice_id), document_kind=source_kind,
+                    document_number=source_number, event_date=source_date,
+                ),
+                event_period=quarter_label(credit.invoice_date),
+                source_period=quarter_label(source_date),
+                amount=-quantize_to_minor_unit(
+                    Decimal(str(correction.issued_base_gross_amount))
+                ),
+            )
+
+    correction_warnings = list(correction_warnings_by_credit.values())
 
     if not customer_net:
         # Empty quarter: return immediately.
-        return IcpReport(year=year, quarter=quarter, lines=[], total_net=_ZERO, warnings=[])
+        return IcpReport(
+            year=year, quarter=quarter, lines=[], total_net=_ZERO, warnings=[],
+            correction_warnings=correction_warnings,
+        )
 
     # -----------------------------------------------------------------------
     # 3. Fetch customer records and their BILLING addresses (D5).
@@ -216,6 +308,10 @@ async def compute_icp(
                 country_code=country_code,
                 vat_id=vat_id,
                 net_amount=net_amount,
+                source_documents=sorted(
+                    source_documents.get(cust_id, []),
+                    key=lambda document: (document.event_date, document.document_id),
+                ),
             )
         )
 
@@ -227,4 +323,8 @@ async def compute_icp(
         lines=lines,
         total_net=total_net,
         warnings=warnings,
+        correction_warnings=sorted(
+            correction_warnings,
+            key=lambda warning: (warning.document.event_date, warning.document.document_id),
+        ),
     )

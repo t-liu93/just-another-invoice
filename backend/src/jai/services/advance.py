@@ -33,7 +33,12 @@ from jai.models._enums import (
     QuoteSettlementMode,
     QuoteStatus,
 )
-from jai.models.document import InvoiceRelation
+from jai.models.document import (
+    InvoiceCorrection,
+    InvoiceCorrectionLine,
+    InvoiceCreditBasisLine,
+    InvoiceRelation,
+)
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax
 from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax
 from jai.schemas.invoice import (
@@ -386,13 +391,43 @@ async def _issued_advance_buckets(
 
 
 async def _exact_advance_credit_buckets(session: AsyncSession, quote: Quote) -> list[AdvanceBucket]:
-    """Step-5 seam for normalized Advance Credit source-bucket reversals.
+    """Return immutable issued Credit buckets for the Quote's Advances.
 
-    There is intentionally no fallback to ``invoice.credited_total``: a gross
-    aggregate cannot faithfully identify which 21/9/0% bucket was credited.
+    Never derive a VAT split from ``credited_total``: correction lines retain
+    the selected source-basis bucket, so reopening capacity stays exact for
+    mixed 21/9/0% projects.
     """
-    del session, quote
-    return []
+    credit = Invoice.__table__.alias("advance_credit_invoice")
+    source = Invoice.__table__.alias("advance_credit_source")
+    rows = (
+        await session.execute(
+            select(InvoiceCreditBasisLine, InvoiceCorrectionLine)
+            .join(
+                InvoiceCorrectionLine,
+                InvoiceCorrectionLine.source_basis_line_id == InvoiceCreditBasisLine.id,
+            )
+            .join(InvoiceCorrection, InvoiceCorrection.id == InvoiceCorrectionLine.correction_id)
+            .join(credit, credit.c.id == InvoiceCorrection.credit_note_id)
+            .join(source, source.c.id == InvoiceCorrection.source_invoice_id)
+            .where(
+                source.c.quote_id == quote.id,
+                source.c.document_kind == InvoiceDocumentKind.ADVANCE,
+                credit.c.status.in_([InvoiceStatus.SENT, InvoiceStatus.COMPLETED]),
+            )
+        )
+    ).all()
+    grouped: dict[tuple[uuid.UUID, str, Decimal], list[Decimal]] = {}
+    for basis, line in rows:
+        if basis.vat_rate_id is None or basis.vat_rate_label is None or basis.vat_rate_percent is None:
+            raise AdvanceStaleError("Issued Advance Credit lacks a frozen VAT bucket.")
+        key = (basis.vat_rate_id, basis.vat_rate_label, Decimal(str(basis.vat_rate_percent)))
+        amounts = grouped.setdefault(key, [Decimal("0"), Decimal("0")])
+        amounts[0] += Decimal(str(line.net_amount))
+        amounts[1] += Decimal(str(line.vat_amount))
+    return [
+        AdvanceBucket(key[0], key[1], key[2], amounts[0], amounts[1])
+        for key, amounts in sorted(grouped.items(), key=lambda item: (item[0][2], item[0][1], item[0][0]))
+    ]
 
 
 async def _remaining_buckets(session: AsyncSession, quote: Quote) -> list[AdvanceBucket]:

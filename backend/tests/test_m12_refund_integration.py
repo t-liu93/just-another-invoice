@@ -1199,7 +1199,11 @@ async def test_runtime_dashboard_and_vat_share_payment_tax_context_and_refunds_a
     credit = await _issue_full_credit(
         db_client, source.json()["id"], invoice_date=source.json()["invoice_date"]
     )
-    baseline_vat, baseline_dashboard = await _assert_report_equality("21.00")
+    # Step 8 gives the issued Standard Credit its own negative invoice-date
+    # event.  The receipt-only PaymentTax path is still counted once, then
+    # offset by the converted Standard; the Credit now correctly brings Q3
+    # back to zero before any Refund cash is recorded.
+    baseline_vat, baseline_dashboard = await _assert_report_equality("0.00")
 
     refund = await db_client.post(
         f"/api/v1/credit-notes/{credit['id']}/refunds",
@@ -1207,16 +1211,16 @@ async def test_runtime_dashboard_and_vat_share_payment_tax_context_and_refunds_a
     )
     assert refund.status_code == 201, refund.text
     refund_id = refund.json()["items"][0]["id"]
-    assert await _assert_report_equality("21.00") == (baseline_vat, baseline_dashboard)
+    assert await _assert_report_equality("0.00") == (baseline_vat, baseline_dashboard)
     updated = await db_client.put(
         f"/api/v1/payments/{refund_id}",
         json={"payment_date": "2026-09-02", "amount": "30"},
     )
     assert updated.status_code == 200, updated.text
-    assert await _assert_report_equality("21.00") == (baseline_vat, baseline_dashboard)
+    assert await _assert_report_equality("0.00") == (baseline_vat, baseline_dashboard)
     deleted = await db_client.delete(f"/api/v1/payments/{refund_id}")
     assert deleted.status_code == 200, deleted.text
-    assert await _assert_report_equality("21.00") == (baseline_vat, baseline_dashboard)
+    assert await _assert_report_equality("0.00") == (baseline_vat, baseline_dashboard)
 
     foreign_company_id = uuid.uuid4()
     async with admin_session_maker() as session:

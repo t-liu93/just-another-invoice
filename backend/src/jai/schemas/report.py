@@ -15,10 +15,88 @@ convention (see payment.py).
 
 from __future__ import annotations
 
+import enum
 from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
+
+from jai.models._enums import InvoiceDocumentKind, VatTreatmentEffect
+
+
+class ReportWarningCode(enum.StrEnum):
+    """Machine-readable advisory codes emitted by reporting projections."""
+
+    CREDIT_CROSS_PERIOD = "CREDIT_CROSS_PERIOD"
+
+
+class ReportTaxEventKind(enum.StrEnum):
+    """The immutable source family of one signed BTW event row."""
+
+    DOCUMENT_TAX = "DOCUMENT_TAX"
+    RECEIPT_ONLY_PAYMENT_TAX = "RECEIPT_ONLY_PAYMENT_TAX"
+    RECEIPT_ONLY_INVOICE_OFFSET = "RECEIPT_ONLY_INVOICE_OFFSET"
+
+
+class ReportDocumentReference(BaseModel):
+    """Frozen document reference carried by a reporting event row."""
+
+    document_id: str
+    document_kind: InvoiceDocumentKind
+    document_number: str | None = None
+    event_date: date
+    source_document_id: str | None = None
+    source_document_kind: InvoiceDocumentKind | None = None
+    source_document_number: str | None = None
+
+
+class ReportTaxEventRow(BaseModel):
+    """One signed BTW event included exactly once in this period's invoice-side totals.
+
+    ``vat_treatment_effect`` and ``vat_rate_percent`` are the immutable inputs
+    used by the reporting service to route this row to its Dutch BTW box.
+    They are deliberately carried alongside the signed amounts so consumers can
+    audit the authoritative projection without inferring tax routing from a
+    treatment code or rounded amount.
+    """
+
+    event_kind: ReportTaxEventKind
+    document_id: str | None = None
+    document_kind: InvoiceDocumentKind | None = None
+    document_number: str | None = None
+    event_date: date
+    payment_id: str | None = Field(
+        default=None,
+        description="Receipt-only payment identity for payment-tax and offset events.",
+    )
+    source_document_id: str | None = None
+    source_document_kind: InvoiceDocumentKind | None = None
+    source_document_number: str | None = None
+
+    taxable_amount: Decimal
+    vat_amount: Decimal
+    vat_treatment_code: str
+    vat_treatment_effect: VatTreatmentEffect = Field(
+        description="Frozen treatment effect used to route this event to a BTW box."
+    )
+    vat_rate_percent: Decimal = Field(
+        description="Frozen VAT rate percentage used to route this event to a BTW box."
+    )
+    requires_icp: bool
+
+
+class ReportWarning(BaseModel):
+    """Stable, advisory correction guidance; never a filing-state assertion."""
+
+    code: ReportWarningCode
+    message: str
+    document: ReportDocumentReference
+    source: ReportDocumentReference
+    event_period: str
+    source_period: str
+    amount: Decimal = Field(
+        description="Signed frozen base-currency gross correction amount (EUR)."
+    )
 
 # ---------------------------------------------------------------------------
 # Sub-models
@@ -195,6 +273,10 @@ class IcpLine(BaseModel):
     net_amount: Decimal = Field(
         description="Sum of base_taxable_amount for all requires_icp invoices in the quarter (EUR)."
     )
+    source_documents: list[ReportDocumentReference] = Field(
+        default_factory=list,
+        description="Issued invoice/Credit event references contributing to this aggregate.",
+    )
 
 
 class IcpReport(BaseModel):
@@ -218,6 +300,10 @@ class IcpReport(BaseModel):
             "Advisory messages for customers missing vat_id or billing country_code – "
             "both are required fields for the Opgaaf ICP filing."
         ),
+    )
+    correction_warnings: list[ReportWarning] = Field(
+        default_factory=list,
+        description="Dated advisory warnings for cross-period Credit corrections; no filing state.",
     )
 
 
@@ -245,6 +331,17 @@ class VatReturnReport(BaseModel):
             "Advisory messages, e.g. missing VAT-ID on ICP customers, "
             "or non-NL company using the NL ruleset as fallback."
         ),
+    )
+    event_rows: list[ReportTaxEventRow] = Field(
+        default_factory=list,
+        description=(
+            "All signed invoice-side BTW events included exactly once in this period: "
+            "document tax, receipt-only payment tax, and receipt-only invoice offsets."
+        ),
+    )
+    correction_warnings: list[ReportWarning] = Field(
+        default_factory=list,
+        description="Dated advisory warnings for Credit corrections; no filing state.",
     )
     disclaimer: str = Field(
         description=(

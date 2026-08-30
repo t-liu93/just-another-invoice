@@ -582,8 +582,10 @@ def _build_session(
     # 2. Quote-payment VAT rows in this period
     # 3. Final-invoice advance offsets (when invoices exist)
     # 4. Customer query (for each ICP invoice) – optional
-    # 5. Expenses in period query
-    # 6. Year expenses query (only in Q4)
+    # 5. Formal Advance/Final invoices (Step 8)
+    # 6. Formal Credit correction rows (Step 8)
+    # 7. Expenses in period query
+    # 8. Year expenses query (only in Q4)
 
     invoke_results: list[MagicMock] = []
 
@@ -597,7 +599,13 @@ def _build_session(
     invoke_results.append(inv_result)
 
     advance_result = MagicMock()
-    advance_result.all.return_value = advance_rows or []
+    # Payment-date is now exposed in the auditable event-row contract.  The
+    # older financial fixtures intentionally did not care about that date, so
+    # give their two-column shorthand a stable in-quarter default.
+    advance_result.all.return_value = [
+        (payment_id, date(2026, 1, 1), payment_tax)
+        for payment_id, payment_tax in (advance_rows or [])
+    ]
     invoke_results.append(advance_result)
 
     if invoices:
@@ -611,6 +619,14 @@ def _build_session(
             cust_result = MagicMock()
             cust_result.scalar_one_or_none.return_value = customer
             invoke_results.append(cust_result)
+
+    formal_result = MagicMock()
+    formal_result.scalars.return_value.all.return_value = []
+    invoke_results.append(formal_result)
+
+    credit_result = MagicMock()
+    credit_result.all.return_value = []
+    invoke_results.append(credit_result)
 
     # Result: expenses in period
     exp_period_result = MagicMock()
