@@ -24,6 +24,7 @@ GET /api/v1/payments/{id}/receipt-pdf?locale=en|zh
     - Receipt is download-only; no email sending (D3).
     - Amounts taken from payment and invoice snapshots, never recalculated.
 """
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -36,7 +37,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session
+from jai.models._enums import DocumentArtifactReason, InvoiceStatus
 from jai.models.user import User
+from jai.schemas.artifact import DocumentArtifactListResponse, DocumentArtifactRead
 
 from .invoices import _owner_only, _require_company_id
 
@@ -62,6 +65,10 @@ async def download_invoice_pdf(
             "customer.locale → company default → 'en'."
         ),
     ),
+    preview: bool = Query(
+        default=False,
+        description="Render for the in-app preview only; do not retain an artifact.",
+    ),
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
@@ -76,14 +83,38 @@ async def download_invoice_pdf(
     _owner_only(user)
     company_id = _require_company_id(user)
 
-    from jai.services.pdf import build_content_disposition, render_invoice_pdf
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
 
-    pdf_bytes, filename = await render_invoice_pdf(
+    from jai.models.invoice import Invoice
+    from jai.services.artifacts import retain_invoice_artifact
+    from jai.services.pdf import build_content_disposition, render_invoice_pdf_artifact
+
+    pdf_bytes, filename, resolved_locale, render_fingerprint = await render_invoice_pdf_artifact(
         session=session,
         invoice_id=invoice_id,
         company_id=company_id,
         locale=locale,
     )
+    invoice = await session.scalar(
+        select(Invoice)
+        .where(Invoice.id == invoice_id, Invoice.company_id == company_id)
+        .options(selectinload(Invoice.party_snapshot))
+    )
+    # A draft is a preview-only document.  Issued formal documents retain the
+    # exact bytes that this response returns.
+    if (
+        not preview
+        and invoice is not None
+        and invoice.status in {InvoiceStatus.SENT, InvoiceStatus.COMPLETED}
+    ):
+        artifact, _ = await retain_invoice_artifact(
+            session, invoice_id=invoice_id, company_id=company_id, pdf_bytes=pdf_bytes,
+            render_fingerprint=render_fingerprint, locale=resolved_locale,
+            filename=filename, reason=DocumentArtifactReason.DOWNLOAD,
+        )
+        await session.commit()
+        pdf_bytes = artifact.pdf_bytes
 
     return Response(
         content=pdf_bytes,
@@ -92,6 +123,27 @@ async def download_invoice_pdf(
             "Content-Disposition": build_content_disposition(filename),
         },
     )
+
+
+@router.get("/invoices/{invoice_id}/artifacts", response_model=DocumentArtifactListResponse)
+async def list_invoice_artifacts_endpoint(
+    invoice_id: uuid.UUID, user: User = Depends(current_mfa_user), session: AsyncSession = Depends(get_session)
+) -> DocumentArtifactListResponse:
+    _owner_only(user)
+    from jai.services.artifacts import list_invoice_artifacts
+    rows = await list_invoice_artifacts(session, invoice_id=invoice_id, company_id=_require_company_id(user))
+    return DocumentArtifactListResponse(items=[DocumentArtifactRead.model_validate(row) for row in rows])
+
+
+@router.get("/invoices/{invoice_id}/artifacts/{artifact_id}", response_class=Response)
+async def download_invoice_artifact_endpoint(
+    invoice_id: uuid.UUID, artifact_id: uuid.UUID, user: User = Depends(current_mfa_user), session: AsyncSession = Depends(get_session)
+) -> Response:
+    _owner_only(user)
+    from jai.services.artifacts import get_invoice_artifact
+    from jai.services.pdf import build_content_disposition
+    artifact = await get_invoice_artifact(session, invoice_id=invoice_id, artifact_id=artifact_id, company_id=_require_company_id(user))
+    return Response(content=artifact.pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": build_content_disposition(artifact.filename)})
 
 
 @router.get(

@@ -19,6 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -606,6 +607,7 @@ class InvoiceRead(BaseModel):
     issued_at: datetime | None = None
     issued_by_user_id: uuid.UUID | None = None
     party_snapshot_provenance: PartySnapshotProvenance | None = None
+    party_snapshot_locale: Literal["en", "zh"] | None = None
     source_invoice_id: uuid.UUID | None = None
     replacement_of_credit_note_id: uuid.UUID | None = None
     compensates_credit_note_id: uuid.UUID | None = None
@@ -698,6 +700,7 @@ class InvoiceListItem(BaseModel):
     issued_at: datetime | None = None
     issued_by_user_id: uuid.UUID | None = None
     party_snapshot_provenance: PartySnapshotProvenance | None = None
+    party_snapshot_locale: Literal["en", "zh"] | None = None
     source_invoice_id: uuid.UUID | None = None
     replacement_of_credit_note_id: uuid.UUID | None = None
     compensates_credit_note_id: uuid.UUID | None = None

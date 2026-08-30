@@ -90,6 +90,13 @@ class EmailLog(Base):
         comment="Rendered HTML body that was sent to the recipient.",
     )
     attachment_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artifact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_artifact.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Exact retained PDF attached to a successful M12 formal send.",
+    )
     locale: Mapped[str | None] = mapped_column(
         String(5),
         nullable=True,

@@ -1028,18 +1028,26 @@ async def test_global_filters_read_chain_events_and_step9_boundary(
         if row["metadata"].get("payment_id") == refund_id
     ]
     assert refund_events == ["REFUND_CREATED", "REFUND_UPDATED"]
-    for suffix, method in (
-        ("refund-confirmation/preview", db_client.get),
-        ("refund-confirmation", db_client.get),
-    ):
-        response = await method(f"/api/v1/payments/{refund_id}/{suffix}")
-        assert response.status_code == 501
-        assert response.json()["detail"]["code"] == "REFUND_CONFIRMATION_PENDING_STEP9"
+    preview = await db_client.get(
+        f"/api/v1/payments/{refund_id}/refund-confirmation/preview"
+    )
+    assert preview.status_code == 200
+    assert preview.content.startswith(b"%PDF-")
+    assert (await db_client.get(f"/api/v1/payments/{refund_id}/artifacts")).json()["items"] == []
+    download = await db_client.get(f"/api/v1/payments/{refund_id}/refund-confirmation")
+    assert download.status_code == 200
+    artifacts = (await db_client.get(f"/api/v1/payments/{refund_id}/artifacts")).json()["items"]
+    assert len(artifacts) == 1
+    artifact = await db_client.get(
+        f"/api/v1/payments/{refund_id}/artifacts/{artifacts[0]['id']}"
+    )
+    assert artifact.status_code == 200
+    assert artifact.content == download.content
     send = await db_client.post(
         f"/api/v1/payments/{refund_id}/send-refund-confirmation",
         json={"to": "customer@example.com"},
     )
-    assert send.status_code == 501
+    assert send.status_code == 400
 
 
 async def test_runtime_triggers_rls_and_no_refund_payment_tax(

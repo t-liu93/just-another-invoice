@@ -334,6 +334,14 @@ class TestMigrations:
             f"upgrade head failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
+    def test_0040_downgrade_round_trip_without_refund_tombstones(self) -> None:
+        """0040 remains reversible when no deleted Refund owner exists."""
+        assert _run_alembic("upgrade", "0040", url=self.url).returncode == 0
+        down = _run_alembic("downgrade", "0039", url=self.url)
+        assert down.returncode == 0, down.stderr
+        up = _run_alembic("upgrade", "0040", url=self.url)
+        assert up.returncode == 0, up.stderr
+
     def test_0025_to_0026_backfills_existing_expenses_and_seeds_live_defaults(self) -> None:
         """The production upgrade preserves all pre-M11 Expense snapshots exactly."""
         assert _run_alembic("downgrade", "0025", url=self.url).returncode == 0

@@ -364,6 +364,11 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
             if (snapshot := inv.__dict__.get("party_snapshot")) is not None
             else None
         ),
+        party_snapshot_locale=(
+            snapshot.locale
+            if (snapshot := inv.__dict__.get("party_snapshot")) is not None
+            else None
+        ),
         source_invoice_id=(
             correction.source_invoice_id
             if (correction := inv.__dict__.get("correction")) is not None
@@ -531,6 +536,11 @@ def _invoice_to_list_item(inv: Invoice, *, customer_name: str) -> InvoiceListIte
         issued_by_user_id=inv.issued_by_user_id,
         party_snapshot_provenance=(
             PartySnapshotProvenance(snapshot.provenance)
+            if (snapshot := inv.__dict__.get("party_snapshot")) is not None
+            else None
+        ),
+        party_snapshot_locale=(
+            snapshot.locale
             if (snapshot := inv.__dict__.get("party_snapshot")) is not None
             else None
         ),
@@ -1500,7 +1510,9 @@ async def update_invoice(
             "Only DRAFT invoices may be modified."
         )
 
-    payment_result = await session.execute(select(Payment).where(Payment.invoice_id == inv.id))
+    payment_result = await session.execute(
+        select(Payment).where(Payment.invoice_id == inv.id, Payment.deleted_at.is_(None))
+    )
     payments = list(payment_result.scalars().all())
     quote_origin_payments = [p for p in payments if p.quote_id is not None]
     if quote_origin_payments:
@@ -1979,7 +1991,7 @@ async def transition_status(
 
     payment_result = await session.execute(
         select(Payment)
-        .where(Payment.invoice_id == inv.id)
+        .where(Payment.invoice_id == inv.id, Payment.deleted_at.is_(None))
         .order_by(Payment.payment_date, Payment.created_at, Payment.id)
     )
     payments = list(payment_result.scalars().all())

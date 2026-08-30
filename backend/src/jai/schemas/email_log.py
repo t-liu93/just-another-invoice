@@ -94,6 +94,7 @@ class EmailLogRead(BaseModel):
     subject: str
     body_snapshot: str
     attachment_filename: str | None
+    artifact_id: uuid.UUID | None
     locale: str | None
     status: EmailStatus
     error_message: str | None

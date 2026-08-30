@@ -25,10 +25,12 @@ Red-line compliance
 2. company_id always injected by caller; cross-company → 404.
 7. Jinja2 autoescape ON; url_fetcher blocks http/https/file.
 """
+# ruff: noqa: E501
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import re
 import unicodedata
@@ -36,6 +38,7 @@ import urllib.parse
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -44,6 +47,10 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("jai.pdf")
+
+# Semantic output-pipeline version.  Bump it whenever renderer, template, CSS
+# or font behaviour can change bytes for identical HTML.
+FORMAL_OUTPUT_PIPELINE_VERSION = "m12-formal-output-v2"
 
 # ---------------------------------------------------------------------------
 # Template environment (autoescape ON – red-line 7)
@@ -176,6 +183,26 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "payments": "Payments received",
         "already_paid": "Already paid",
         "not_vat_invoice": "NOT A VAT INVOICE",
+        "standard_invoice": "Standard Invoice",
+        "advance_invoice": "Advance Invoice",
+        "final_invoice": "Final Invoice",
+        "credit_note": "Credit Note",
+        "credit_note_number": "Credit Note Number",
+        "supply_or_advance_date": "Supply / Advance Date",
+        "advance_applications": "Applied Advance Invoices",
+        "source_document": "Corrected Source Document",
+        "corrected_lines": "Corrected Lines",
+        "refunds": "Refunds",
+        "refund_confirmation": "Refund Confirmation",
+        "credit_note_reference": "Credit Note",
+        "refund_date": "Refund Date",
+        "refund_method": "Refund Method",
+        "refund_amount": "Refund Amount",
+        "refund_reference": "Refund Reference",
+        "post_refund_entitlement": "Remaining Refund Entitlement",
+        "correction_provenance": "Correction Provenance",
+        "replacement_credit_reference": "Replacement for Credit Note",
+        "compensation_credit_reference": "Compensates Credit Note",
     },
     "zh": {
         "invoice": "发票",
@@ -225,6 +252,26 @@ PDF_LABELS: dict[str, dict[str, str]] = {
         "payments": "已收款明细",
         "already_paid": "已付款",
         "not_vat_invoice": "非 VAT 发票",
+        "standard_invoice": "普通发票",
+        "advance_invoice": "预付款发票",
+        "final_invoice": "最终结算发票",
+        "credit_note": "贷项通知单",
+        "credit_note_number": "贷项通知单号",
+        "supply_or_advance_date": "供货／预付款日期",
+        "advance_applications": "已抵扣的预付款发票",
+        "source_document": "更正来源单据",
+        "corrected_lines": "更正项目",
+        "refunds": "退款",
+        "refund_confirmation": "退款确认单",
+        "credit_note_reference": "贷项通知单",
+        "refund_date": "退款日期",
+        "refund_method": "退款方式",
+        "refund_amount": "退款金额",
+        "refund_reference": "退款参考号",
+        "post_refund_entitlement": "退款后剩余额度",
+        "correction_provenance": "更正来源",
+        "replacement_credit_reference": "替换以下贷项通知单",
+        "compensation_credit_reference": "补偿以下贷项通知单",
     },
 }
 
@@ -301,6 +348,13 @@ def resolve_document_locale(
         if candidate and candidate in _valid:
             return candidate
     return _DEFAULT_LOCALE
+
+
+def _formal_render_fingerprint(html: str) -> str:
+    """Hash the formal-output pipeline identity and rendered HTML."""
+    return hashlib.sha256(
+        FORMAL_OUTPUT_PIPELINE_VERSION.encode("utf-8") + b"\0" + html.encode("utf-8")
+    ).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +437,13 @@ def build_invoice_html(
     *,
     payments: list[Any] | None = None,
     paid_total: Decimal | None = None,
+    document_kind_label: str | None = None,
+    source_quote: Any | None = None,
+    source_invoice: Any | None = None,
+    correction_lines: list[Any] | None = None,
+    advance_applications: list[Any] | None = None,
+    refunds: list[Any] | None = None,
+    followup_relations: list[Any] | None = None,
 ) -> str:
     """Render invoice HTML from ORM objects.
 
@@ -412,6 +473,8 @@ def build_invoice_html(
     from jai.models._enums import AddressType
 
     labels = _get_labels(locale)
+    kind_value = getattr(getattr(invoice, "document_kind", None), "value", getattr(invoice, "document_kind", None))
+    is_credit_note = kind_value == "CREDIT_NOTE"
 
     # -- Resolve billing address ----------------------------------------------
     billing_address: Any = None
@@ -441,11 +504,52 @@ def build_invoice_html(
         "logo_data_uri": logo_data_uri,
         "payments": payments or [],
         "paid_total": paid_total,
+        "document_kind_label": document_kind_label or labels["invoice"],
+        "is_credit_note": is_credit_note,
+        "source_quote": source_quote,
+        "source_invoice": source_invoice,
+        "correction_lines": correction_lines or [],
+        "advance_applications": advance_applications or [],
+        "refunds": refunds or [],
+        "followup_relations": followup_relations or [],
         "css": css_text,
     }
 
     template = _jinja_env.get_template("invoice.html")
     return template.render(**context)
+
+
+def snapshot_presentation(snapshot: Any, company: Any, customer: Any) -> tuple[Any, Any]:
+    """Build display-only seller/buyer views from the frozen issue snapshot."""
+    from jai.models._enums import AddressType
+
+    if snapshot is None:
+        return company, customer
+    seller_address = snapshot.seller_address or {}
+    buyer_address = snapshot.buyer_address or {}
+    seller = SimpleNamespace(
+        id=company.id, name=snapshot.seller_name, legal_name=snapshot.seller_legal_name,
+        vat_id=snapshot.seller_vat_id, coc_number=snapshot.seller_coc_number,
+        email=snapshot.seller_email, phone=snapshot.seller_phone, website=None,
+        logo_id=snapshot.logo_id, **seller_address,
+    )
+    buyer = SimpleNamespace(
+        id=customer.id, name=snapshot.buyer_name, company_name=snapshot.buyer_company_name,
+        contact_name=snapshot.buyer_contact_name, vat_id=snapshot.buyer_vat_id,
+        email=snapshot.buyer_email, phone=snapshot.buyer_phone, locale=snapshot.locale,
+        addresses=[SimpleNamespace(type=AddressType.BILLING, **buyer_address)],
+    )
+    return seller, buyer
+
+
+def _invoice_kind_label(labels: dict[str, str], kind: Any) -> str:
+    value = getattr(kind, "value", kind)
+    return {
+        "STANDARD": labels["standard_invoice"],
+        "ADVANCE": labels["advance_invoice"],
+        "FINAL": labels["final_invoice"],
+        "CREDIT_NOTE": labels["credit_note"],
+    }.get(str(value), labels["invoice"])
 
 
 def html_to_pdf(html: str) -> bytes:
@@ -476,12 +580,12 @@ def html_to_pdf(html: str) -> bytes:
     return pdf_bytes
 
 
-async def render_invoice_pdf(
+async def _render_invoice_pdf(
     session: AsyncSession,
     invoice_id: uuid.UUID,
     company_id: uuid.UUID,
     locale: str | None = None,
-) -> tuple[bytes, str]:
+) -> tuple[bytes, str, str, str]:
     """Load an invoice from the DB, render it as PDF, and return (bytes, filename).
 
     Steps
@@ -514,6 +618,12 @@ async def render_invoice_pdf(
     from jai.models.binary_asset import BinaryAsset
     from jai.models.company import Company
     from jai.models.customer import Customer
+    from jai.models.document import (
+        FinalAdvanceApplication,
+        InvoiceCorrection,
+        InvoiceCreditBasisLine,
+        InvoiceRelation,
+    )
     from jai.models.invoice import Invoice
     from jai.models.payment import Payment
 
@@ -526,12 +636,17 @@ async def render_invoice_pdf(
         .options(
             selectinload(Invoice.lines),
             selectinload(Invoice.taxes),
+            selectinload(Invoice.party_snapshot),
         )
         # Payment writers take ``FOR UPDATE`` on the invoice before changing
         # both payment rows and the invoice due snapshot.  A shared parent lock
         # makes this renderer observe one settlement point-in-time instead of
         # an old due amount combined with a new payment list.
         .with_for_update(read=True)
+        # The locked renderer projection is the settlement boundary.  Refresh
+        # a previously loaded identity if a caller used the same Session for a
+        # lightweight guard before it reached this boundary.
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     invoice = result.scalar_one_or_none()
@@ -573,18 +688,18 @@ async def render_invoice_pdf(
         .where(
             Payment.invoice_id == invoice.id,
             Payment.company_id == company_id,
+            Payment.deleted_at.is_(None),
         )
         .order_by(Payment.payment_date, Payment.created_at, Payment.id)
     )
     payments = list(payment_result.scalars().all())
-    paid_total = Decimal(str(invoice.total_incl_vat)) - Decimal(
-        str(invoice.due_amount)
-    )
+    # Settlement snapshots are authoritative service data. Rendering only
+    # presents them; it must not derive cash totals from amounts/due values.
+    paid_total = Decimal(str(invoice.incoming_payment_total))
 
-    # -- Resolve locale via D2 chain (step 2) ---------------------------------
-    # When locale is None (no explicit override), we read the company-level
-    # document default and fall through: override → customer.locale →
-    # company default → "en".
+    # Issued legal documents use the issue-time locale snapshot unless the
+    # caller explicitly asks for another supported locale.  Drafts keep M9's
+    # live D2 chain.
     from jai.models._enums import SettingLevel
     from jai.schemas.setting import SETTING_KEY_DOCUMENT_DEFAULTS, DocumentDefaultsSetting
     from jai.services.settings import get_setting
@@ -599,34 +714,210 @@ async def render_invoice_pdf(
     company_default_locale: str | None = (
         company_default_setting.locale if company_default_setting is not None else None
     )
-    customer_locale: str | None = getattr(customer, "locale", None)
+    customer_locale: str | None = (
+        invoice.party_snapshot.locale
+        if invoice.party_snapshot is not None
+        else getattr(customer, "locale", None)
+    )
     resolved_locale = resolve_document_locale(locale, customer_locale, company_default_locale)
 
     # -- Inline logo as data: URI (D7 – never a URL) -------------------------
     logo_data_uri: str | None = None
-    if company.logo_id is not None:
-        asset_stmt = select(BinaryAsset).where(BinaryAsset.id == company.logo_id)
+    # A snapshot NULL means no logo at issue; never fall back to a later logo.
+    logo_id = (
+        invoice.party_snapshot.logo_id
+        if invoice.party_snapshot is not None
+        else company.logo_id
+    )
+    if logo_id is not None:
+        asset_stmt = select(BinaryAsset).where(BinaryAsset.id == logo_id)
         asset_result = await session.execute(asset_stmt)
         asset = asset_result.scalar_one_or_none()
         if asset is not None:
             b64 = base64.b64encode(asset.content).decode("ascii")
             logo_data_uri = f"data:{asset.mime_type};base64,{b64}"
 
+    source_invoice: Any | None = None
+    source_quote: Any | None = None
+    correction_lines: list[Any] = []
+    applications: list[Any] = []
+    refunds: list[Any] = []
+    followup_relations: list[Any] = []
+    if invoice.quote_id is not None:
+        from jai.models.quote import Quote
+
+        source_quote = await session.scalar(
+            select(Quote).where(Quote.id == invoice.quote_id, Quote.company_id == company_id)
+        )
+    kind_value = getattr(invoice.document_kind, "value", invoice.document_kind)
+    if kind_value == "CREDIT_NOTE":
+        correction = await session.scalar(
+            select(InvoiceCorrection)
+            .where(InvoiceCorrection.credit_note_id == invoice.id)
+            .options(selectinload(InvoiceCorrection.lines))
+        )
+        if correction is not None:
+            source_invoice = await session.scalar(
+                select(Invoice).where(Invoice.id == correction.source_invoice_id)
+            )
+            basis_ids = [line.source_basis_line_id for line in correction.lines]
+            basis_by_id = {
+                row.id: row
+                for row in (await session.execute(
+                    select(InvoiceCreditBasisLine).where(
+                        InvoiceCreditBasisLine.id.in_(basis_ids)
+                    )
+                )).scalars()
+            }
+            correction_lines = [
+                SimpleNamespace(
+                    sort_order=line.sort_order,
+                    name=getattr(basis_by_id.get(line.source_basis_line_id), "name", ""),
+                    description=getattr(basis_by_id.get(line.source_basis_line_id), "description", None),
+                    quantity=line.quantity,
+                    gross_amount=line.gross_amount,
+                )
+                for line in correction.lines
+            ]
+        refunds = [
+            SimpleNamespace(
+                payment_date=refund.payment_date,
+                reference=refund.reference,
+                amount=refund.amount,
+                credit_note_number=invoice.invoice_number,
+            )
+            for refund in (await session.execute(
+                select(Payment).where(
+                    Payment.credit_note_id == invoice.id, Payment.company_id == company_id,
+                    Payment.deleted_at.is_(None),
+                ).order_by(Payment.payment_date, Payment.created_at, Payment.id)
+            )).scalars().all()
+        ]
+    elif kind_value == "FINAL":
+        applications = list((await session.execute(
+            select(FinalAdvanceApplication)
+            .where(FinalAdvanceApplication.final_invoice_id == invoice.id)
+            .order_by(FinalAdvanceApplication.sort_order)
+        )).scalars().all())
+
+    # Positive follow-ups use the immutable InvoiceRelation provenance rather
+    # than a Quote compatibility backlink.  A related Credit's issue number
+    # and date are frozen at issue and belong in the retained formal output.
+    from sqlalchemy.orm import aliased
+
+    from jai.models._enums import InvoiceRelationType, InvoiceStatus
+
+    related_credit = aliased(Invoice)
+    relation_rows = await session.execute(
+        select(
+            InvoiceRelation.relation_type,
+            related_credit.invoice_number,
+            related_credit.invoice_date,
+        )
+        .join(related_credit, related_credit.id == InvoiceRelation.related_credit_note_id)
+        .where(
+            InvoiceRelation.invoice_id == invoice.id,
+            InvoiceRelation.company_id == company_id,
+            related_credit.company_id == company_id,
+        )
+        .order_by(InvoiceRelation.created_at, InvoiceRelation.id)
+    )
+    labels = _get_labels(resolved_locale)
+    for relation_type, credit_number, credit_date in relation_rows:
+        relation_value = getattr(relation_type, "value", relation_type)
+        if relation_value == InvoiceRelationType.REPLACEMENT_OF.value:
+            label = labels["replacement_credit_reference"]
+        elif relation_value == InvoiceRelationType.COMPENSATES_CREDIT.value:
+            label = labels["compensation_credit_reference"]
+        else:
+            continue
+        followup_relations.append(
+            SimpleNamespace(label=label, invoice_number=credit_number, invoice_date=credit_date)
+        )
+
+    # The source parent is already held with FOR SHARE.  Settlement writers
+    # take it before Credits and Payments, so this issued Credit/refund lookup
+    # is a source-bound snapshot, not renderer-side settlement arithmetic.
+    if kind_value != "CREDIT_NOTE":
+        credit_rows = list((await session.execute(
+            select(Invoice.id, Invoice.invoice_number)
+            .join(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
+            .where(
+                InvoiceCorrection.source_invoice_id == invoice.id,
+                Invoice.company_id == company_id,
+                Invoice.document_kind == "CREDIT_NOTE",
+                Invoice.status.in_((InvoiceStatus.SENT, InvoiceStatus.COMPLETED)),
+            )
+            .order_by(Invoice.invoice_date, Invoice.invoice_number, Invoice.id)
+        )).all())
+        credit_numbers = {credit_id: credit_number for credit_id, credit_number in credit_rows}
+        if credit_numbers:
+            refunds = [
+                SimpleNamespace(
+                    payment_date=refund.payment_date,
+                    reference=refund.reference,
+                    amount=refund.amount,
+                    credit_note_number=credit_numbers[refund.credit_note_id],
+                )
+                for refund in (await session.execute(
+                    select(Payment)
+                    .where(
+                        Payment.company_id == company_id,
+                        Payment.credit_note_id.in_(credit_numbers),
+                        Payment.deleted_at.is_(None),
+                    )
+                    .order_by(Payment.payment_date, Payment.created_at, Payment.id)
+                )).scalars().all()
+            ]
+
+    presentation_company, presentation_customer = snapshot_presentation(
+        invoice.party_snapshot, company, customer
+    )
     # -- Build HTML + render PDF ----------------------------------------------
     html = build_invoice_html(
         invoice=invoice,
-        company=company,
-        customer=customer,
+        company=presentation_company,
+        customer=presentation_customer,
         locale=resolved_locale,
         logo_data_uri=logo_data_uri,
         payments=payments,
         paid_total=paid_total,
+        document_kind_label=_invoice_kind_label(_get_labels(resolved_locale), invoice.document_kind),
+        source_quote=source_quote,
+        source_invoice=source_invoice,
+        correction_lines=correction_lines,
+        advance_applications=applications,
+        refunds=refunds,
+        followup_relations=followup_relations,
     )
     pdf_bytes = html_to_pdf(html)
 
     # Unnumbered drafts (invoice_number is None) get an ASCII-safe fallback name.
     filename = f"{invoice.invoice_number}.pdf" if invoice.invoice_number else "concept.pdf"
+    return pdf_bytes, filename, resolved_locale, _formal_render_fingerprint(html)
+
+
+async def render_invoice_pdf(
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    company_id: uuid.UUID,
+    locale: str | None = None,
+) -> tuple[bytes, str]:
+    """Render an invoice PDF for previews and legacy callers."""
+    pdf_bytes, filename, _, _ = await _render_invoice_pdf(
+        session, invoice_id, company_id, locale
+    )
     return pdf_bytes, filename
+
+
+async def render_invoice_pdf_artifact(
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    company_id: uuid.UUID,
+    locale: str | None = None,
+) -> tuple[bytes, str, str, str]:
+    """Render a formal PDF with its resolved locale and pipeline fingerprint."""
+    return await _render_invoice_pdf(session, invoice_id, company_id, locale)
 
 
 # ---------------------------------------------------------------------------
@@ -930,7 +1221,7 @@ async def render_payment_receipt_pdf(
     # just-deleted payment a clean 404 rather than a stale receipt.
     payment_result = await session.execute(
         select(Payment)
-        .where(Payment.id == payment_id, Payment.company_id == company_id)
+        .where(Payment.id == payment_id, Payment.company_id == company_id, Payment.deleted_at.is_(None))
         .with_for_update(read=True)
     )
     payment = payment_result.scalar_one_or_none()
@@ -1018,6 +1309,7 @@ async def render_payment_receipt_pdf(
             select(Payment).where(
                 Payment.quote_id == quote.id,
                 Payment.company_id == company_id,
+                Payment.deleted_at.is_(None),
             )
         )
         quote_payments = list(quote_payments_result.scalars().all())
@@ -1053,6 +1345,83 @@ async def render_payment_receipt_pdf(
         receipt_document_number = invoice.invoice_number
     filename = f"receipt-{receipt_document_number}-{payment.payment_date}.pdf"
     return pdf_bytes, filename
+
+
+async def render_refund_confirmation_pdf(
+    session: AsyncSession, payment_id: uuid.UUID, company_id: uuid.UUID,
+    locale: str | None = None,
+) -> tuple[bytes, str, str, str]:
+    """Render a Refund Confirmation from persisted refund/Credit snapshots.
+
+    It is deliberately a separate document, never an invoice or Credit Note.
+    Amounts are authoritative service snapshots; the template only formats
+    them for presentation.
+    """
+    from fastapi import HTTPException, status
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from jai.db import set_rls_company
+    from jai.models.binary_asset import BinaryAsset
+    from jai.models.company import Company
+    from jai.models.customer import Customer
+    from jai.models.invoice import Invoice
+    from jai.services.payment import refund_confirmation_projection
+
+    await set_rls_company(session, company_id)
+    try:
+        projection = await refund_confirmation_projection(
+            session, payment_id=payment_id, company_id=company_id
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Refund not found."
+        ) from exc
+    refund = projection.refund
+    credit = projection.credit
+    source = projection.source
+    # Fill the relationship on the canonical Credit identity without taking
+    # any additional chain lock or running a second settlement query.
+    await session.scalar(select(Invoice).where(
+        Invoice.id == credit.id, Invoice.company_id == company_id,
+    ).options(selectinload(Invoice.party_snapshot)))
+    company = await session.scalar(select(Company).where(Company.id == company_id))
+    customer = await session.scalar(select(Customer).where(
+        Customer.id == credit.customer_id
+    ).options(selectinload(Customer.addresses)))
+    if company is None or customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Refund party not found.")
+    resolved_locale = locale or (credit.party_snapshot.locale if credit.party_snapshot else customer.locale) or "en"
+    if resolved_locale not in PDF_LABELS:
+        resolved_locale = "en"
+    presentation_company, presentation_customer = snapshot_presentation(
+        credit.party_snapshot, company, customer
+    )
+    logo_data_uri: str | None = None
+    logo_id = getattr(presentation_company, "logo_id", None)
+    if logo_id is not None:
+        asset = await session.scalar(select(BinaryAsset).where(BinaryAsset.id == logo_id))
+        if asset is not None:
+            logo_data_uri = f"data:{asset.mime_type};base64,{base64.b64encode(asset.content).decode('ascii')}"
+    billing_address = next(iter(presentation_customer.addresses), None)
+    context = {
+        "locale": resolved_locale, "labels": _get_labels(resolved_locale),
+        "legal_disclosure": _legal_disclosure(presentation_company, _get_labels(resolved_locale)),
+        "company": presentation_company, "customer": presentation_customer,
+        "billing_name": resolve_billing_name(presentation_customer),
+        "billing_address": billing_address, "logo_data_uri": logo_data_uri,
+        "refund": refund, "credit": credit, "source": source,
+        "remaining_entitlement": projection.collection.remaining_entitlement,
+        "css": _CSS_PATH.read_text(encoding="utf-8"),
+    }
+    html = _jinja_env.get_template("refund_confirmation.html").render(**context)
+    filename = f"refund-confirmation-{credit.invoice_number or credit.id}-{refund.payment_date}.pdf"
+    return (
+        html_to_pdf(html),
+        filename,
+        resolved_locale,
+        _formal_render_fingerprint(html),
+    )
 
 
 async def render_quote_pdf(

@@ -25,6 +25,7 @@ import {
 import type { components } from '../../api/schema'
 import { persistedReceiptCustomer, receiptAuditTarget } from '../../utils/receiptEmail'
 import { invoiceDocumentKindLabelKey } from '../../utils/documentKind'
+import { invoiceDocumentSendType } from '../../utils/documentSend'
 
 type CustomerRead = components['schemas']['CustomerRead']
 type VatRateRead = components['schemas']['VatRateRead']
@@ -543,8 +544,8 @@ function openPreview(locale?: 'en' | 'zh') {
   if (!existingInvoice.value) return
   const id = existingInvoice.value.id
   previewSrc.value = locale
-    ? `/api/v1/invoices/${id}/pdf?locale=${locale}`
-    : `/api/v1/invoices/${id}/pdf`
+    ? `/api/v1/invoices/${id}/pdf?preview=true&locale=${locale}`
+    : `/api/v1/invoices/${id}/pdf?preview=true`
   previewFallback.value = `${existingInvoice.value.invoice_number ?? 'concept'}.pdf`
   previewShow.value = true
 }
@@ -579,7 +580,7 @@ function handleReceiptSent(log: EmailLogRead) {
   if (target === 'refresh-invoice') {
     emailLogPanelRef.value?.refresh()
     receiptQuoteAuditId.value = null
-  } else {
+  } else if (target !== null) {
     receiptQuoteAuditId.value = target.quoteId
   }
 }
@@ -1145,10 +1146,10 @@ function handleReceiptSent(log: EmailLogRead) {
     <DocumentSendDialog
       v-if="isEdit && existingInvoice"
       v-model:show="sendDialogShow"
-      doc-type="invoice"
+      :doc-type="invoiceDocumentSendType(existingInvoice.document_kind)"
       :doc-id="existingInvoice.id"
       :customer-email="selectedCustomer?.email ?? null"
-      :customer-locale="selectedCustomer?.locale ?? null"
+      :customer-locale="existingInvoice.party_snapshot_locale"
       @sent="handleSent"
     />
 

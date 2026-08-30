@@ -373,6 +373,7 @@ async def get_document_chain(
                 select(Payment)
                 .where(
                     Payment.company_id == company_id,
+                    Payment.deleted_at.is_(None),
                     or_(
                         Payment.quote_id == quote.id,
                         Payment.invoice_id.in_(invoice_ids or [uuid.uuid4()]),
@@ -643,6 +644,7 @@ async def get_invoice_document_chain(
                     select(Payment)
                     .where(
                         Payment.company_id == company_id,
+                        Payment.deleted_at.is_(None),
                         or_(
                             Payment.invoice_id.in_(direct_invoice_ids),
                             Payment.credit_note_id.in_(direct_invoice_ids),

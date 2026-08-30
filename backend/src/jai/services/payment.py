@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Protocol
 
@@ -353,7 +353,7 @@ async def _load_quote(
 async def _load_payments_for_invoice(session: AsyncSession, invoice_id: uuid.UUID) -> list[Payment]:
     result = await session.execute(
         select(Payment)
-        .where(Payment.invoice_id == invoice_id)
+        .where(Payment.invoice_id == invoice_id, Payment.deleted_at.is_(None))
         .options(selectinload(Payment.taxes))
         .order_by(Payment.payment_date, Payment.created_at, Payment.id)
     )
@@ -365,7 +365,7 @@ async def _load_payments_for_quote(
 ) -> list[Payment]:
     stmt = (
         select(Payment)
-        .where(Payment.quote_id == quote_id)
+        .where(Payment.quote_id == quote_id, Payment.deleted_at.is_(None))
         .options(selectinload(Payment.taxes))
         .order_by(Payment.payment_date, Payment.created_at, Payment.id)
     )
@@ -731,19 +731,45 @@ class LockedSettlementChain:
     payments: list[Payment]
 
 
-async def lock_settlement_chain(
+@dataclass(frozen=True)
+class _LockedSettlementPrefix:
+    """Canonical Quote/source/Credit prefix, held before cash locks.
+
+    This deliberately small boundary is shared by mutation and output paths.
+    Besides documenting the global lock order, it lets the concurrency suite
+    place a real-PG barrier exactly between Credit and Payment locks.
+    """
+
+    anchor: Invoice
+    quote: Quote | None
+    positive_documents: list[Invoice]
+    credits: list[Invoice]
+
+
+@dataclass(frozen=True)
+class RefundConfirmationProjection:
+    """One locked, renderer-ready Refund Confirmation settlement snapshot.
+
+    The unlocked payment lookup is deliberately only a seed for the canonical
+    Quote/source/Credit/cash lock chain.  Callers must use the returned refund
+    rather than the seed: a concurrent mutation may have changed or tombstoned
+    it while the chain locks were being acquired.
+    """
+
+    refund: Payment
+    credit: Invoice
+    correction: InvoiceCorrection
+    source: Invoice
+    collection: RefundCollectionRead
+
+
+async def _lock_settlement_chain_prefix(
     session: AsyncSession,
     *,
     anchor_invoice_id: uuid.UUID,
     company_id: uuid.UUID,
-) -> LockedSettlementChain:
-    """Lock Quote -> positive documents -> Credits -> cash -> snapshots.
-
-    DRAFT positive documents are locked because they belong to the component,
-    but only issued positive documents are returned as settlement sources.
-    Direct chains reuse the exact Step 6 connected-component definition used
-    by the document-chain projection.
-    """
+) -> _LockedSettlementPrefix:
+    """Lock Quote -> positive documents -> Credits, before Payment/Refund."""
     probe = (
         await session.execute(
             select(Invoice.quote_id).where(
@@ -764,10 +790,7 @@ async def lock_settlement_chain(
             (
                 await session.execute(
                     select(Invoice.id)
-                    .where(
-                        Invoice.company_id == company_id,
-                        Invoice.quote_id == quote.id,
-                    )
+                    .where(Invoice.company_id == company_id, Invoice.quote_id == quote.id)
                     .order_by(Invoice.id)
                 )
             ).scalars()
@@ -808,6 +831,35 @@ async def lock_settlement_chain(
     anchor = next((item for item in documents if item.id == anchor_invoice_id), None)
     if anchor is None:
         raise LookupError("Invoice not found.")
+    return _LockedSettlementPrefix(
+        anchor=anchor,
+        quote=quote,
+        positive_documents=positive_documents,
+        credits=credits,
+    )
+
+
+async def lock_settlement_chain(
+    session: AsyncSession,
+    *,
+    anchor_invoice_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> LockedSettlementChain:
+    """Lock Quote -> positive documents -> Credits -> cash -> snapshots.
+
+    DRAFT positive documents are locked because they belong to the component,
+    but only issued positive documents are returned as settlement sources.
+    Direct chains reuse the exact Step 6 connected-component definition used
+    by the document-chain projection.
+    """
+    prefix = await _lock_settlement_chain_prefix(
+        session, anchor_invoice_id=anchor_invoice_id, company_id=company_id
+    )
+    anchor = prefix.anchor
+    quote = prefix.quote
+    positive_documents = prefix.positive_documents
+    credits = prefix.credits
+    documents = [*positive_documents, *credits]
     positive_ids = [item.id for item in positive_documents]
     credit_ids = [item.id for item in credits]
     cash_clause = or_(
@@ -820,7 +872,7 @@ async def lock_settlement_chain(
         (
             await session.execute(
                 select(Payment)
-                .where(Payment.company_id == company_id, cash_clause)
+                .where(Payment.company_id == company_id, Payment.deleted_at.is_(None), cash_clause)
                 .options(selectinload(Payment.taxes))
                 .order_by(Payment.payment_date, Payment.created_at, Payment.id)
                 .with_for_update()
@@ -953,7 +1005,8 @@ def _settle_refund_chain(
         (
             Decimal(str(p.amount))
             for p in payments
-            if PaymentDirection(p.direction) == PaymentDirection.INCOMING
+            if getattr(p, "deleted_at", None) is None
+            and PaymentDirection(p.direction) == PaymentDirection.INCOMING
         ),
         zero,
     )
@@ -961,7 +1014,8 @@ def _settle_refund_chain(
         (
             Decimal(str(p.base_amount))
             for p in payments
-            if PaymentDirection(p.direction) == PaymentDirection.INCOMING
+            if getattr(p, "deleted_at", None) is None
+            and PaymentDirection(p.direction) == PaymentDirection.INCOMING
         ),
         zero,
     )
@@ -987,7 +1041,10 @@ def _settle_refund_chain(
         credit.id: zero for credit in issued_credits
     }
     for payment in payments:
-        if PaymentDirection(payment.direction) != PaymentDirection.REFUND:
+        if (
+            getattr(payment, "deleted_at", None) is not None
+            or PaymentDirection(payment.direction) != PaymentDirection.REFUND
+        ):
             continue
         if payment.credit_note_id not in issued_credit_ids:
             raise RefundSettlementError(
@@ -1031,7 +1088,10 @@ def _settle_refund_chain(
         item.id: zero for item in chain_sources
     }
     for payment in payments:
-        if PaymentDirection(payment.direction) != PaymentDirection.INCOMING:
+        if (
+            getattr(payment, "deleted_at", None) is not None
+            or PaymentDirection(payment.direction) != PaymentDirection.INCOMING
+        ):
             continue
         payment_source_id = payment.invoice_id
         if payment_source_id is None and quote is not None:
@@ -1198,7 +1258,7 @@ async def _refund_collection(
     payments: list[Payment],
     settlement: SettlementResult,
 ) -> RefundCollectionRead:
-    refunds = [p for p in payments if p.credit_note_id == credit.id]
+    refunds = [p for p in payments if p.deleted_at is None and p.credit_note_id == credit.id]
     refunded = sum((Decimal(str(p.amount)) for p in refunds), Decimal("0"))
     base_refunded = sum(
         (Decimal(str(p.base_amount)) for p in refunds), Decimal("0")
@@ -1331,6 +1391,71 @@ async def list_credit_refunds(session: AsyncSession, credit_note_id: uuid.UUID, 
     )
 
 
+async def refund_confirmation_remaining_entitlement(
+    session: AsyncSession, *, credit_note_id: uuid.UUID, company_id: uuid.UUID,
+) -> Decimal:
+    """Return the Step 7 post-refund entitlement projection for output.
+
+    This deliberately reuses the same locked collection projection as the
+    public refunds endpoint.  PDF rendering receives a ready-to-display
+    value; it never substitutes cash coverage or derives an amount itself.
+    """
+    collection = await list_credit_refunds(session, credit_note_id, company_id)
+    return collection.remaining_entitlement
+
+
+async def refund_confirmation_projection(
+    session: AsyncSession, *, payment_id: uuid.UUID, company_id: uuid.UUID,
+) -> RefundConfirmationProjection:
+    """Load a live Refund Confirmation under the canonical settlement locks.
+
+    Do not lock the Refund before ``_locked_refund_chain``: Refund mutations
+    lock Quote/source/Credit before cash, and taking the opposite prefix here
+    can deadlock preview/download/send against PUT or DELETE.  The preliminary
+    lookup is intentionally non-locking and never supplies presentation data.
+    """
+    await set_rls_company(session, company_id)
+    credit_seed = await session.scalar(
+        select(Payment.credit_note_id).where(
+            Payment.id == payment_id,
+            Payment.company_id == company_id,
+            Payment.direction == PaymentDirection.REFUND,
+            Payment.deleted_at.is_(None),
+        )
+    )
+    if credit_seed is None:
+        raise LookupError("Payment not found.")
+    credit, correction, source, context = await _locked_refund_chain(
+        session, credit_id=credit_seed, company_id=company_id
+    )
+    refund = next((item for item in context.payments if item.id == payment_id), None)
+    if (
+        refund is None
+        or PaymentDirection(refund.direction) != PaymentDirection.REFUND
+        or refund.credit_note_id != credit.id
+    ):
+        # A DELETE or relink could have won while we waited for the prefix.
+        raise LookupError("Payment not found.")
+    settlement = _settle_refund_chain(
+        source=source,
+        chain_sources=context.chain_sources,
+        credits=context.credits,
+        credit_source_ids=context.credit_source_ids,
+        payments=context.payments,
+        quote=context.quote,
+    )
+    collection = await _refund_collection(
+        session, credit, correction, source, context.payments, settlement
+    )
+    return RefundConfirmationProjection(
+        refund=refund,
+        credit=credit,
+        correction=correction,
+        source=source,
+        collection=collection,
+    )
+
+
 async def _mutate_refund(
     session: AsyncSession, *, payment_id: uuid.UUID, company_id: uuid.UUID,
     body: PaymentInput | None, deleted: bool, actor_user_id: uuid.UUID | None,
@@ -1340,6 +1465,7 @@ async def _mutate_refund(
             select(Payment.credit_note_id).where(
                 Payment.id == payment_id, Payment.company_id == company_id,
                 Payment.direction == PaymentDirection.REFUND,
+                Payment.deleted_at.is_(None),
             )
         )
     ).scalar_one_or_none()
@@ -1353,7 +1479,7 @@ async def _mutate_refund(
         raise LookupError("Payment not found.")
     if deleted:
         amount = Decimal(str(refund.amount))
-        await session.delete(refund)
+        refund.deleted_at = datetime.now(UTC)
         context.payments.remove(refund)
         event_type = DocumentChainEventType.REFUND_DELETED
     else:
@@ -1458,7 +1584,8 @@ async def _mutate_chain_incoming(
         await session.execute(
             select(Payment.invoice_id, Payment.quote_id)
             .where(Payment.id == payment_id, Payment.company_id == company_id,
-                   Payment.direction == PaymentDirection.INCOMING)
+                   Payment.direction == PaymentDirection.INCOMING,
+                   Payment.deleted_at.is_(None))
         )
     ).one_or_none()
     if seed is None:
@@ -1794,7 +1921,7 @@ async def get_payment(
     await set_rls_company(session, company_id)
     result = await session.execute(
         select(Payment)
-        .where(Payment.id == payment_id, Payment.company_id == company_id)
+        .where(Payment.id == payment_id, Payment.company_id == company_id, Payment.deleted_at.is_(None))
         .options(selectinload(Payment.taxes))
     )
     payment = result.scalar_one_or_none()
@@ -1809,7 +1936,7 @@ async def _lock_payment_context(
     await set_rls_company(session, company_id)
     seed_result = await session.execute(
         select(Payment.quote_id, Payment.invoice_id).where(
-            Payment.id == payment_id, Payment.company_id == company_id
+            Payment.id == payment_id, Payment.company_id == company_id, Payment.deleted_at.is_(None)
         )
     )
     seed = seed_result.one_or_none()
@@ -1824,7 +1951,7 @@ async def _lock_payment_context(
 
     payment_result = await session.execute(
         select(Payment)
-        .where(Payment.id == payment_id, Payment.company_id == company_id)
+        .where(Payment.id == payment_id, Payment.company_id == company_id, Payment.deleted_at.is_(None))
         .options(selectinload(Payment.taxes))
         .with_for_update()
     )
@@ -1848,7 +1975,7 @@ async def update_payment(
 ) -> PaymentMutationResponse:
     await set_rls_company(session, company_id)
     direction = await session.scalar(
-        select(Payment.direction).where(Payment.id == payment_id, Payment.company_id == company_id)
+        select(Payment.direction).where(Payment.id == payment_id, Payment.company_id == company_id, Payment.deleted_at.is_(None))
     )
     if direction is None:
         raise LookupError("Payment not found.")
@@ -1963,7 +2090,7 @@ async def delete_payment(
 ) -> PaymentMutationResponse:
     await set_rls_company(session, company_id)
     direction = await session.scalar(
-        select(Payment.direction).where(Payment.id == payment_id, Payment.company_id == company_id)
+        select(Payment.direction).where(Payment.id == payment_id, Payment.company_id == company_id, Payment.deleted_at.is_(None))
     )
     if direction is None:
         raise LookupError("Payment not found.")
@@ -2061,7 +2188,7 @@ async def list_payments(
         .outerjoin(linked_invoice, linked_invoice_id == linked_invoice.id)
         .outerjoin(Quote, Payment.quote_id == Quote.id)
         .join(Customer, Customer.id == customer_link)
-        .where(Payment.company_id == company_id)
+        .where(Payment.company_id == company_id, Payment.deleted_at.is_(None))
     )
     if q:
         like = f"%{q}%"

@@ -4,8 +4,9 @@
  *
  * Pre-fills:
  *   - to: customer.email
- *   - locale: customer.locale || companyDefault || "en"  (D2 chain, frontend only
- *             computes the default selection; actual D2 resolution happens on the backend)
+ *   - formal invoices show a selectable locale, but leave it unset in the
+ *     request until the user changes it: issued documents must use their
+ *     backend issue-snapshot locale by default.
  *   - subject / body: raw template text from GET /api/v1/settings/email-templates
  *     (placeholders like {COMPANY_NAME} are shown as-is; backend renders them at send time)
  *
@@ -24,6 +25,13 @@ import {
 import { get, post } from '../api/http'
 import type { components } from '../api/schema'
 import { useDocumentSendContext } from '../composables/useDocumentSendContext'
+import {
+  buildDocumentSendPayload,
+  isFormalInvoiceSendType,
+  resolveDocumentSendInitialLocale,
+  type DocumentSendType,
+  type EmailTemplateValues,
+} from '../utils/documentSend'
 
 type EmailTemplatesRead = components['schemas']['EmailTemplatesRead']
 type DocumentDefaultsRead = components['schemas']['DocumentDefaultsRead']
@@ -32,8 +40,8 @@ type DocumentSendRequest = components['schemas']['DocumentSendRequest']
 
 const props = defineProps<{
   show: boolean
-  /** 'invoice' | 'quote' | 'receipt' */
-  docType: 'invoice' | 'quote' | 'receipt'
+  /** Typed formal invoice key, Quote, or legacy payment receipt. */
+  docType: DocumentSendType
   /** document id */
   docId: string
   /** pre-fill to field */
@@ -63,6 +71,8 @@ const formCc = ref('')
 const formLocale = ref<'en' | 'zh'>('en')
 const formSubject = ref('')
 const formBody = ref('')
+const activeTemplate = ref<EmailTemplateValues>({ subject: '', body: '' })
+const localeWasChosen = ref(false)
 
 const receiptDefaults: Record<'en' | 'zh', { subject: string; body: string }> = {
   en: {
@@ -84,12 +94,14 @@ const localeOptions = computed(() => [
 // ---- fill subject/body from templates when locale or docType changes ----
 function fillFromTemplate(locale: 'en' | 'zh') {
   if (props.docType === 'receipt') {
-    formSubject.value = receiptDefaults[locale].subject
-    formBody.value = receiptDefaults[locale].body
+    activeTemplate.value = receiptDefaults[locale]
+    formSubject.value = activeTemplate.value.subject
+    formBody.value = activeTemplate.value.body
     return
   }
   if (!templates.value) return
   const tpl = templates.value[props.docType][locale]
+  activeTemplate.value = tpl
   formSubject.value = tpl.subject
   formBody.value = tpl.body
 }
@@ -106,6 +118,8 @@ function resetForm() {
   formLocale.value = 'en'
   formSubject.value = ''
   formBody.value = ''
+  activeTemplate.value = { subject: '', body: '' }
+  localeWasChosen.value = false
   sendError.value = null
 }
 
@@ -135,9 +149,11 @@ const dialogContext = useDocumentSendContext(
     // Pre-fill form
     formTo.value = context.customerEmail ?? ''
     formCc.value = ''
-    formLocale.value = context.customerLocale === 'en' || context.customerLocale === 'zh'
-      ? context.customerLocale
-      : companyDefaultLocale.value
+    formLocale.value = resolveDocumentSendInitialLocale({
+      type: context.docType,
+      snapshotLocale: context.customerLocale,
+      fallbackLocale: companyDefaultLocale.value,
+    })
     fillFromTemplate(formLocale.value)
   } catch (e: unknown) {
     if (isCurrent()) message.error(e instanceof Error ? e.message : String(e))
@@ -163,16 +179,19 @@ async function handleSend() {
   sendError.value = null
   let closeCurrentContext = false
   try {
-    const body: DocumentSendRequest = {
-      to: formTo.value.trim(),
-      cc: formCc.value.trim() || null,
+    const body: DocumentSendRequest = buildDocumentSendPayload({
+      type: frozen.context.docType,
+      to: formTo.value,
+      cc: formCc.value,
       locale: formLocale.value,
-      subject: formSubject.value.trim() || undefined,
-      body: formBody.value.trim() || undefined,
-    }
+      localeWasChosen: localeWasChosen.value,
+      subject: formSubject.value,
+      body: formBody.value,
+      template: activeTemplate.value,
+    })
     const endpoint = frozen.context.docType === 'receipt'
       ? `/api/v1/payments/${frozen.context.docId}/send-receipt`
-      : `${frozen.context.docType === 'invoice' ? '/api/v1/invoices' : '/api/v1/quotes'}/${frozen.context.docId}/send`
+      : `${isFormalInvoiceSendType(frozen.context.docType) ? '/api/v1/invoices' : '/api/v1/quotes'}/${frozen.context.docId}/send`
     const log = await post<EmailLogRead>(endpoint, body)
     emit('sent', log)
     closeCurrentContext = true
@@ -195,6 +214,11 @@ function handleClose() {
 function handleModalShow(value: boolean) {
   if (!value && sending.value) return
   emit('update:show', value)
+}
+
+function handleLocaleChange(locale: 'en' | 'zh') {
+  localeWasChosen.value = true
+  formLocale.value = locale
 }
 </script>
 
@@ -227,10 +251,11 @@ function handleModalShow(value: boolean) {
 
         <n-form-item :label="t('sendDialog.locale')" required>
           <n-select
-            v-model:value="formLocale"
+            :value="formLocale"
             :options="localeOptions"
             :disabled="sending"
             style="width: 160px"
+            @update:value="handleLocaleChange"
           />
         </n-form-item>
 

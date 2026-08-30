@@ -511,6 +511,7 @@ async def compute_vat_return(
         .where(
             Payment.company_id == company_id,
             Payment.quote_id.is_not(None),
+            Payment.deleted_at.is_(None),
             Payment.payment_date >= date_from,
             Payment.payment_date <= date_to,
         )
@@ -547,6 +548,7 @@ async def compute_vat_return(
                 Payment.invoice_id.in_(invoice_ids),
                 Payment.company_id == company_id,
                 Payment.quote_id.is_not(None),
+                Payment.deleted_at.is_(None),
             )
         )
         for invoice_id, payment_id, payment_tax in offset_result.all():

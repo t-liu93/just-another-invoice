@@ -20,6 +20,7 @@ from jai.models.document import (  # noqa: F401
     InvoicePartySnapshot,
     InvoiceRelation,
 )
+from jai.models.document_artifact import DocumentArtifact  # noqa: F401
 from jai.models.email_log import EmailLog  # noqa: F401
 from jai.models.estimate import Estimate, EstimateGroup, EstimateLine  # noqa: F401
 from jai.models.expense import Expense  # noqa: F401

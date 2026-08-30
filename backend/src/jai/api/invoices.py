@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -629,28 +630,36 @@ async def send_invoice_email_endpoint(
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
-    from jai.models._enums import EmailRelatedType, SettingLevel
+    from jai.models._enums import (
+        DocumentArtifactReason,
+        EmailRelatedType,
+        InvoiceStatus,
+    )
     from jai.models.company import Company
     from jai.models.customer import Customer
+    from jai.models.document import InvoiceCorrection
     from jai.models.invoice import Invoice
-    from jai.schemas.setting import SETTING_KEY_DOCUMENT_DEFAULTS, DocumentDefaultsSetting
-    from jai.services.email import send_document_email
-    from jai.services.pdf import render_invoice_pdf, resolve_document_locale
-    from jai.services.settings import get_setting
+    from jai.services.artifacts import retain_invoice_artifact
+    from jai.services.email import (
+        failed_email_log_values,
+        persist_failed_email_log,
+        send_document_email,
+    )
+    from jai.services.pdf import render_invoice_pdf_artifact, snapshot_presentation
 
     _owner_only(user)
     company_id = _require_company_id(user)
     await set_rls_company(session, company_id)
 
-    # -- Load invoice scoped to company (cross-company → 404) ------------------
-    stmt = (
-        select(Invoice)
+    # -- Lightweight issue guard (cross-company → 404) ------------------------
+    # Do not materialise Invoice here.  render_invoice_pdf_artifact establishes
+    # the parent-lock settlement snapshot; retaining a full ORM identity before
+    # that point could combine stale aggregates with a current payment list.
+    guard = (await session.execute(
+        select(Invoice.invoice_number, Invoice.status)
         .where(Invoice.id == invoice_id, Invoice.company_id == company_id)
-        .options(selectinload(Invoice.lines), selectinload(Invoice.taxes))
-    )
-    result = await session.execute(stmt)
-    invoice = result.scalar_one_or_none()
-    if invoice is None:
+    )).one_or_none()
+    if guard is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invoice not found.",
@@ -659,11 +668,30 @@ async def send_invoice_email_endpoint(
     # -- Issue-gated guard (D8) -----------------------------------------------
     # An unnumbered DRAFT carries no legal invoice number; it must be issued
     # (marked as Sent) before it can be emailed to the customer.
-    if invoice.invoice_number is None:
+    if guard.invoice_number is None or guard.status not in {
+        InvoiceStatus.SENT,
+        InvoiceStatus.COMPLETED,
+    }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=("Cannot email an unissued draft invoice; issue it (mark as Sent) first."),
         )
+
+    # -- Render PDF immediately (D5) -------------------------------------------
+    # The renderer takes the parent shared lock before reading settlement rows.
+    pdf_bytes, filename, resolved_locale, render_fingerprint = await render_invoice_pdf_artifact(
+        session, invoice_id, company_id, locale=body.locale
+    )
+
+    # Placeholder values, document kind and recipient context all now use the
+    # same transaction and the renderer's held parent lock.
+    invoice = await session.scalar(
+        select(Invoice)
+        .where(Invoice.id == invoice_id, Invoice.company_id == company_id)
+        .options(selectinload(Invoice.party_snapshot))
+    )
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
 
     # -- Load company ----------------------------------------------------------
     company_result = await session.execute(select(Company).where(Company.id == company_id))
@@ -678,7 +706,6 @@ async def send_invoice_email_endpoint(
     customer_result = await session.execute(
         select(Customer)
         .where(Customer.id == invoice.customer_id)
-        .options(selectinload(Customer.addresses))
     )
     customer = customer_result.scalar_one_or_none()
     if customer is None:
@@ -686,26 +713,11 @@ async def send_invoice_email_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Customer not found.",
         )
-
-    # -- Resolve locale via D2 chain -------------------------------------------
-    company_default_setting = await get_setting(
-        session,
-        SETTING_KEY_DOCUMENT_DEFAULTS,
-        level=SettingLevel.COMPANY,
-        scope_id=company_id,
-        value_type=DocumentDefaultsSetting,
-    )
-    company_default_locale: str | None = (
-        company_default_setting.locale if company_default_setting is not None else None
-    )
-    customer_locale: str | None = getattr(customer, "locale", None)
-    resolved_locale = resolve_document_locale(body.locale, customer_locale, company_default_locale)
-
-    # -- Render PDF immediately (D5) -------------------------------------------
-    pdf_bytes, filename = await render_invoice_pdf(
-        session, invoice_id, company_id, locale=resolved_locale
+    presentation_company, presentation_customer = snapshot_presentation(
+        invoice.party_snapshot, company, customer
     )
 
+    # Byte-first: persist/deduplicate the precise in-memory bytes before SMTP.
     # -- Normalise CC ----------------------------------------------------------
     cc_list: list[str] | None = None
     if body.cc:
@@ -713,21 +725,55 @@ async def send_invoice_email_endpoint(
         cc_list = raw_parts if raw_parts else None
 
     # -- Send email + write log ------------------------------------------------
-    log = await send_document_email(
-        session=session,
-        related_type=EmailRelatedType.INVOICE,
-        doc=invoice,
-        company=company,
-        customer=customer,
-        to=str(body.to),
-        cc=cc_list,
-        locale=resolved_locale,
-        subject=body.subject,
-        body=body.body,
-        pdf_bytes=pdf_bytes,
-        filename=filename,
-        creator_id=user.id,
-    )
+    email_doc: object = invoice
+    if invoice.document_kind == InvoiceDocumentKind.CREDIT_NOTE:
+        correction = await session.scalar(
+            select(InvoiceCorrection).where(
+                InvoiceCorrection.credit_note_id == invoice.id,
+                InvoiceCorrection.company_id == company_id,
+            )
+        )
+        if correction is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credit correction not found.")
+        source_number = await session.scalar(
+            select(Invoice.invoice_number).where(
+                Invoice.id == correction.source_invoice_id,
+                Invoice.company_id == company_id,
+            )
+        )
+        if source_number is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credit source invoice not found.")
+        email_doc = SimpleNamespace(
+            id=invoice.id,
+            invoice_number=invoice.invoice_number,
+            credit_note_number=invoice.invoice_number,
+            source_document_number=source_number,
+            invoice_date=invoice.invoice_date,
+            due_date=None,
+            due_amount=None,
+            total_incl_vat=invoice.total_incl_vat,
+            currency=invoice.currency,
+        )
+    failed_values: dict[str, object] | None = None
+    async with session.begin_nested() as artifact_savepoint:
+        artifact, artifact_created = await retain_invoice_artifact(
+            session, invoice_id=invoice_id, company_id=company_id, pdf_bytes=pdf_bytes,
+            render_fingerprint=render_fingerprint, locale=resolved_locale,
+            filename=filename, reason=DocumentArtifactReason.SEND,
+        )
+        log = await send_document_email(
+            session=session, related_type=EmailRelatedType.INVOICE, doc=email_doc,
+            company=presentation_company, customer=presentation_customer,
+            to=str(body.to), cc=cc_list,
+            locale=resolved_locale, subject=body.subject, body=body.body,
+            pdf_bytes=artifact.pdf_bytes, filename=filename, creator_id=user.id,
+            artifact_id=artifact.id, document_kind=invoice.document_kind,
+        )
+        if log.status.value == "FAILED" and artifact_created:
+            failed_values = failed_email_log_values(log)
+            await artifact_savepoint.rollback()
+    if failed_values is not None:
+        log = await persist_failed_email_log(session, failed_values)
 
     await session.commit()
     return EmailLogRead.model_validate(log)
@@ -751,6 +797,7 @@ async def list_invoice_emails_endpoint(
 
     _owner_only(user)
     company_id = _require_company_id(user)
+    await set_rls_company(session, company_id)
 
     # Verify invoice belongs to company (cross-company → 404).
     inv_result = await session.execute(

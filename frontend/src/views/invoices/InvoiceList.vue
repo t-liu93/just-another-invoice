@@ -16,6 +16,7 @@ import type { InvoiceListItem } from '../../stores/invoices'
 import { get, downloadBlob } from '../../api/http'
 import type { components } from '../../api/schema'
 import { invoiceDocumentKindLabelKey } from '../../utils/documentKind'
+import { invoiceDocumentSendType, type DocumentSendType } from '../../utils/documentSend'
 
 type CustomerRead = components['schemas']['CustomerRead']
 type EmailLogRead = components['schemas']['EmailLogRead']
@@ -29,19 +30,21 @@ const store = useInvoicesStore()
 // Send dialog state
 const sendDialogShow = ref(false)
 const sendDialogInvoiceId = ref('')
+const sendDialogDocType = ref<DocumentSendType>('invoice')
 const sendDialogCustomerEmail = ref<string | null>(null)
-const sendDialogCustomerLocale = ref<'en' | 'zh' | null>(null)
+const sendDialogSnapshotLocale = ref<'en' | 'zh' | null>(null)
 
 async function openSendDialog(row: InvoiceListItem) {
   sendDialogInvoiceId.value = row.id
+  sendDialogDocType.value = invoiceDocumentSendType(row.document_kind)
   sendDialogCustomerEmail.value = null
-  sendDialogCustomerLocale.value = null
+  sendDialogSnapshotLocale.value = row.party_snapshot_locale ?? null
   sendDialogShow.value = true
-  // Fetch customer info for email/locale pre-fill
+  // Use live data only for the recipient.  A formal document's locale is an
+  // issue snapshot, so its default send must not inherit a changed Customer.
   try {
     const cust = await get<CustomerRead>(`/api/v1/customers/${row.customer_id}`)
     sendDialogCustomerEmail.value = cust.email ?? null
-    sendDialogCustomerLocale.value = (cust.locale as 'en' | 'zh' | null | undefined) ?? null
   } catch {
     // Non-critical: dialog pre-fill is best-effort
   }
@@ -92,8 +95,8 @@ const previewFallback = ref('invoice.pdf')
 
 function openPreview(id: string, locale?: 'en' | 'zh') {
   previewSrc.value = locale
-    ? `/api/v1/invoices/${id}/pdf?locale=${locale}`
-    : `/api/v1/invoices/${id}/pdf`
+    ? `/api/v1/invoices/${id}/pdf?preview=true&locale=${locale}`
+    : `/api/v1/invoices/${id}/pdf?preview=true`
   previewFallback.value = `invoice-${id}.pdf`
   previewShow.value = true
 }
@@ -474,10 +477,10 @@ const columns = computed(() => [
     <!-- Send email dialog -->
     <DocumentSendDialog
       v-model:show="sendDialogShow"
-      doc-type="invoice"
+      :doc-type="sendDialogDocType"
       :doc-id="sendDialogInvoiceId"
       :customer-email="sendDialogCustomerEmail"
-      :customer-locale="sendDialogCustomerLocale"
+      :customer-locale="sendDialogSnapshotLocale"
       @sent="handleSent"
     />
 

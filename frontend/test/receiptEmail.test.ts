@@ -23,6 +23,7 @@ test('receipt customer always follows the persisted document customer', () => {
 test('audit routing refreshes invoices and exposes quote-source logs', () => {
   assert.equal(receiptAuditTarget('invoice-1', { related_type: 'INVOICE', related_id: 'invoice-1' }), 'refresh-invoice')
   assert.deepEqual(receiptAuditTarget('invoice-1', { related_type: 'QUOTE', related_id: 'quote-9' }), { quoteId: 'quote-9' })
+  assert.equal(receiptAuditTarget('invoice-1', { related_type: 'REFUND', related_id: 'refund-9' }), null)
 })
 
 test('receipt dialog blocks every payment switch while a send is active', () => {

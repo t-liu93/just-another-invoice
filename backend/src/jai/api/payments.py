@@ -8,13 +8,14 @@ Endpoints:
   PUT    /api/v1/payments/{id}                   – edit a payment → 200
   DELETE /api/v1/payments/{id}                   – delete a payment → 200 (aggregate body)
 """
+# ruff: noqa: E501
 
 from __future__ import annotations
 
 import uuid
 from datetime import date
 from types import SimpleNamespace
-from typing import Any, Never
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from jai.auth.deps import current_mfa_user
 from jai.db import get_session, set_rls_company
 from jai.models._enums import InvoiceDocumentKind, PaymentDirection
 from jai.models.user import User
+from jai.schemas.artifact import DocumentArtifactListResponse, DocumentArtifactRead
 from jai.schemas.email_log import DocumentSendRequest, EmailLogRead
 from jai.schemas.payment import (
     InvoicePaymentsResponse,
@@ -218,23 +220,6 @@ async def record_refund_endpoint(
         ) from exc
 
 
-async def _refund_confirmation_step9(
-    session: AsyncSession, *, refund_id: uuid.UUID, company_id: uuid.UUID
-) -> Never:
-    payment = await get_payment(session, refund_id, company_id)
-    if payment is None or payment.direction != PaymentDirection.REFUND:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Refund not found."
-        )
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "code": "REFUND_CONFIRMATION_PENDING_STEP9",
-            "message": "Refund Confirmation rendering is implemented in M12 Step 9.",
-        },
-    )
-
-
 @router.get(
     "/payments/{refund_id}/refund-confirmation/preview",
     response_class=Response,
@@ -242,14 +227,17 @@ async def _refund_confirmation_step9(
 )
 async def preview_refund_confirmation_endpoint(
     refund_id: uuid.UUID,
+    locale: Literal["en", "zh"] | None = Query(default=None),
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Frozen Step 7 route contract; the renderer is intentionally Step 9."""
+    """Render a live Refund Confirmation without retaining an artifact."""
     _owner_only(user)
-    await _refund_confirmation_step9(
-        session, refund_id=refund_id, company_id=_require_company_id(user)
+    from jai.services.pdf import build_content_disposition, render_refund_confirmation_pdf
+    pdf_bytes, filename, _, _ = await render_refund_confirmation_pdf(
+        session, refund_id, _require_company_id(user), locale
     )
+    return Response(content=pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": build_content_disposition(filename)})
 
 
 @router.get(
@@ -259,14 +247,20 @@ async def preview_refund_confirmation_endpoint(
 )
 async def download_refund_confirmation_endpoint(
     refund_id: uuid.UUID,
+    locale: Literal["en", "zh"] | None = Query(default=None),
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Frozen Step 7 route contract; artifact retention is Step 9."""
+    """Render, retain, then return exactly the retained PDF bytes."""
     _owner_only(user)
-    await _refund_confirmation_step9(
-        session, refund_id=refund_id, company_id=_require_company_id(user)
-    )
+    from jai.models._enums import DocumentArtifactReason
+    from jai.services.artifacts import retain_refund_artifact
+    from jai.services.pdf import build_content_disposition, render_refund_confirmation_pdf
+    company_id = _require_company_id(user)
+    pdf_bytes, filename, resolved_locale, render_fingerprint = await render_refund_confirmation_pdf(session, refund_id, company_id, locale)
+    artifact, _ = await retain_refund_artifact(session, refund_id=refund_id, company_id=company_id, pdf_bytes=pdf_bytes, render_fingerprint=render_fingerprint, locale=resolved_locale, filename=filename, reason=DocumentArtifactReason.DOWNLOAD)
+    await session.commit()
+    return Response(content=artifact.pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": build_content_disposition(artifact.filename)})
 
 
 @router.post(
@@ -279,11 +273,72 @@ async def send_refund_confirmation_endpoint(
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> EmailLogRead:
-    """Frozen Step 7 route contract; email/artifact delivery is Step 9."""
+    """Send the exact retained Refund Confirmation attachment."""
     _owner_only(user)
-    await _refund_confirmation_step9(
-        session, refund_id=refund_id, company_id=_require_company_id(user)
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from jai.models._enums import DocumentArtifactReason, EmailRelatedType
+    from jai.models.company import Company
+    from jai.models.customer import Customer
+    from jai.models.document import InvoiceCorrection
+    from jai.models.invoice import Invoice
+    from jai.models.payment import Payment
+    from jai.services.artifacts import retain_refund_artifact
+    from jai.services.email import (
+        failed_email_log_values,
+        persist_failed_email_log,
+        send_document_email,
     )
+    from jai.services.pdf import render_refund_confirmation_pdf, snapshot_presentation
+
+    company_id = _require_company_id(user)
+    pdf_bytes, filename, resolved_locale, render_fingerprint = await render_refund_confirmation_pdf(session, refund_id, company_id, body.locale)
+    refund = await session.scalar(select(Payment).where(Payment.id == refund_id, Payment.company_id == company_id, Payment.direction == PaymentDirection.REFUND, Payment.deleted_at.is_(None)))
+    if refund is None or refund.credit_note_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Refund not found.")
+    credit = await session.scalar(select(Invoice).where(Invoice.id == refund.credit_note_id, Invoice.company_id == company_id).options(selectinload(Invoice.party_snapshot)))
+    correction = await session.scalar(select(InvoiceCorrection).where(InvoiceCorrection.credit_note_id == refund.credit_note_id))
+    if credit is None or correction is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Refund Credit Note not found.")
+    source = await session.scalar(select(Invoice).where(Invoice.id == correction.source_invoice_id))
+    company = await session.scalar(select(Company).where(Company.id == company_id))
+    customer = await session.scalar(select(Customer).where(Customer.id == credit.customer_id))
+    if source is None or company is None or customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Refund party not found.")
+    presentation_company, presentation_customer = snapshot_presentation(
+        credit.party_snapshot, company, customer
+    )
+    email_doc = SimpleNamespace(id=refund.id, invoice_number=credit.invoice_number, credit_note_number=credit.invoice_number, source_document_number=source.invoice_number, invoice_date=refund.payment_date, due_date=None, due_amount=credit.refund_due_amount, total_incl_vat=refund.amount, currency=refund.currency)
+    cc = [item.strip() for item in body.cc.split(",") if item.strip()] if body.cc else None
+    failed_values: dict[str, object] | None = None
+    async with session.begin_nested() as artifact_savepoint:
+        artifact, artifact_created = await retain_refund_artifact(session, refund_id=refund_id, company_id=company_id, pdf_bytes=pdf_bytes, render_fingerprint=render_fingerprint, locale=resolved_locale, filename=filename, reason=DocumentArtifactReason.SEND)
+        log = await send_document_email(session, EmailRelatedType.REFUND, email_doc, presentation_company, presentation_customer, str(body.to), cc, resolved_locale, body.subject, body.body, artifact.pdf_bytes, filename, creator_id=user.id, artifact_id=artifact.id)
+        if log.status.value == "FAILED" and artifact_created:
+            failed_values = failed_email_log_values(log)
+            await artifact_savepoint.rollback()
+    if failed_values is not None:
+        log = await persist_failed_email_log(session, failed_values)
+    await session.commit()
+    return EmailLogRead.model_validate(log)
+
+
+@router.get("/payments/{refund_id}/artifacts", response_model=DocumentArtifactListResponse)
+async def list_refund_artifacts_endpoint(refund_id: uuid.UUID, user: User = Depends(current_mfa_user), session: AsyncSession = Depends(get_session)) -> DocumentArtifactListResponse:
+    _owner_only(user)
+    from jai.services.artifacts import list_refund_artifacts
+    rows = await list_refund_artifacts(session, refund_id=refund_id, company_id=_require_company_id(user))
+    return DocumentArtifactListResponse(items=[DocumentArtifactRead.model_validate(row) for row in rows])
+
+
+@router.get("/payments/{refund_id}/artifacts/{artifact_id}", response_class=Response)
+async def download_refund_artifact_endpoint(refund_id: uuid.UUID, artifact_id: uuid.UUID, user: User = Depends(current_mfa_user), session: AsyncSession = Depends(get_session)) -> Response:
+    _owner_only(user)
+    from jai.services.artifacts import get_refund_artifact
+    from jai.services.pdf import build_content_disposition
+    artifact = await get_refund_artifact(session, refund_id=refund_id, artifact_id=artifact_id, company_id=_require_company_id(user))
+    return Response(content=artifact.pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": build_content_disposition(artifact.filename)})
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +505,9 @@ async def send_payment_receipt_email_endpoint(
     await set_rls_company(session, company_id)
 
     payment_result = await session.execute(
-        select(Payment).where(Payment.id == payment_id, Payment.company_id == company_id)
+        select(Payment).where(
+            Payment.id == payment_id, Payment.company_id == company_id, Payment.deleted_at.is_(None)
+        )
     )
     payment = payment_result.scalar_one_or_none()
     if payment is None:
@@ -563,6 +620,11 @@ async def send_payment_receipt_email_endpoint(
     company_snapshot = SimpleNamespace(id=company.id, name=company.name)
     customer_snapshot = SimpleNamespace(name=customer.name)
     await session.rollback()
+
+    # ``set_rls_company`` is transaction-local. The deliberate rollback above
+    # releases the renderer's locks before SMTP I/O, so establish the tenant
+    # again for the subsequent EmailLog INSERT under FORCE RLS.
+    await set_rls_company(session, company_id)
 
     cc = [part.strip() for part in (body.cc or "").split(",") if part.strip()] or None
     log = await send_document_email(

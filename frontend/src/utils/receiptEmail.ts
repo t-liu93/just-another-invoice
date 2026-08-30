@@ -7,7 +7,7 @@ export interface ReceiptCustomer {
 }
 
 export interface ReceiptAuditLog {
-  related_type: 'INVOICE' | 'QUOTE'
+  related_type: 'INVOICE' | 'QUOTE' | 'REFUND'
   related_id: string
 }
 
@@ -21,10 +21,11 @@ export function persistedReceiptCustomer(
 export function receiptAuditTarget(
   currentInvoiceId: string,
   log: ReceiptAuditLog,
-): 'refresh-invoice' | { quoteId: string } {
+): 'refresh-invoice' | { quoteId: string } | null {
   if (log.related_type === 'INVOICE' && log.related_id === currentInvoiceId) {
     return 'refresh-invoice'
   }
+  if (log.related_type === 'REFUND') return null
   return { quoteId: log.related_id }
 }
 

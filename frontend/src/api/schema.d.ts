@@ -1370,6 +1370,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/{invoice_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Invoice Artifacts Endpoint */
+        get: operations["list_invoice_artifacts_endpoint_api_v1_invoices__invoice_id__artifacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Invoice Artifact Endpoint */
+        get: operations["download_invoice_artifact_endpoint_api_v1_invoices__invoice_id__artifacts__artifact_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/quotes/{quote_id}/pdf": {
         parameters: {
             query?: never;
@@ -1861,7 +1895,7 @@ export interface paths {
         };
         /**
          * Preview Refund Confirmation Endpoint
-         * @description Frozen Step 7 route contract; the renderer is intentionally Step 9.
+         * @description Render a live Refund Confirmation without retaining an artifact.
          */
         get: operations["preview_refund_confirmation_endpoint_api_v1_payments__refund_id__refund_confirmation_preview_get"];
         put?: never;
@@ -1881,7 +1915,7 @@ export interface paths {
         };
         /**
          * Download Refund Confirmation Endpoint
-         * @description Frozen Step 7 route contract; artifact retention is Step 9.
+         * @description Render, retain, then return exactly the retained PDF bytes.
          */
         get: operations["download_refund_confirmation_endpoint_api_v1_payments__refund_id__refund_confirmation_get"];
         put?: never;
@@ -1903,9 +1937,43 @@ export interface paths {
         put?: never;
         /**
          * Send Refund Confirmation Endpoint
-         * @description Frozen Step 7 route contract; email/artifact delivery is Step 9.
+         * @description Send the exact retained Refund Confirmation attachment.
          */
         post: operations["send_refund_confirmation_endpoint_api_v1_payments__refund_id__send_refund_confirmation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{refund_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Refund Artifacts Endpoint */
+        get: operations["list_refund_artifacts_endpoint_api_v1_payments__refund_id__artifacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{refund_id}/artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Refund Artifact Endpoint */
+        get: operations["download_refund_artifact_endpoint_api_v1_payments__refund_id__artifacts__artifact_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3634,6 +3702,48 @@ export interface components {
          * @enum {string}
          */
         DiscountType: "NONE" | "PERCENTAGE" | "FIXED";
+        /**
+         * DocumentArtifactKind
+         * @description The retained PDF's legal/document purpose.
+         * @enum {string}
+         */
+        DocumentArtifactKind: "FORMAL_DOCUMENT" | "REFUND_CONFIRMATION";
+        /** DocumentArtifactListResponse */
+        DocumentArtifactListResponse: {
+            /** Items */
+            items: components["schemas"]["DocumentArtifactRead"][];
+        };
+        /** DocumentArtifactRead */
+        DocumentArtifactRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            artifact_kind: components["schemas"]["DocumentArtifactKind"];
+            /** Sha256 */
+            sha256: string;
+            /** Render Fingerprint */
+            render_fingerprint: string;
+            /** Locale */
+            locale: string;
+            /** Filename */
+            filename: string;
+            creation_reason: components["schemas"]["DocumentArtifactReason"];
+            /** Renderer Version */
+            renderer_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * DocumentArtifactReason
+         * @description The user-visible action which first retained the exact PDF bytes.
+         * @enum {string}
+         */
+        DocumentArtifactReason: "DOWNLOAD" | "SEND";
         /** DocumentChainAvailableActionRead */
         DocumentChainAvailableActionRead: {
             /** Code */
@@ -4073,6 +4183,8 @@ export interface components {
             body_snapshot: string;
             /** Attachment Filename */
             attachment_filename: string | null;
+            /** Artifact Id */
+            artifact_id: string | null;
             /** Locale */
             locale: string | null;
             status: components["schemas"]["EmailStatus"];
@@ -4096,7 +4208,7 @@ export interface components {
          *     nullable FKs (red-line 6).
          * @enum {string}
          */
-        EmailRelatedType: "INVOICE" | "QUOTE";
+        EmailRelatedType: "INVOICE" | "QUOTE" | "REFUND";
         /**
          * EmailStatus
          * @description Send-attempt status for an email_log row (M9 step 6).
@@ -4143,6 +4255,10 @@ export interface components {
         EmailTemplatesRead: {
             invoice: components["schemas"]["EmailTemplateLocaleMap"];
             quote: components["schemas"]["EmailTemplateLocaleMap"];
+            advance: components["schemas"]["EmailTemplateLocaleMap"];
+            final: components["schemas"]["EmailTemplateLocaleMap"];
+            credit_note: components["schemas"]["EmailTemplateLocaleMap"];
+            refund: components["schemas"]["EmailTemplateLocaleMap"];
         };
         /**
          * EmailTemplatesUpdate
@@ -4151,6 +4267,10 @@ export interface components {
         EmailTemplatesUpdate: {
             invoice: components["schemas"]["EmailTemplateLocaleMap"];
             quote: components["schemas"]["EmailTemplateLocaleMap"];
+            advance?: components["schemas"]["EmailTemplateLocaleMap"];
+            final?: components["schemas"]["EmailTemplateLocaleMap"];
+            credit_note?: components["schemas"]["EmailTemplateLocaleMap"];
+            refund?: components["schemas"]["EmailTemplateLocaleMap"];
         };
         /**
          * EstimateCalculationRead
@@ -5444,6 +5564,8 @@ export interface components {
             /** Issued By User Id */
             issued_by_user_id?: string | null;
             party_snapshot_provenance?: components["schemas"]["PartySnapshotProvenance"] | null;
+            /** Party Snapshot Locale */
+            party_snapshot_locale?: ("en" | "zh") | null;
             /** Source Invoice Id */
             source_invoice_id?: string | null;
             /** Replacement Of Credit Note Id */
@@ -5657,6 +5779,8 @@ export interface components {
             /** Issued By User Id */
             issued_by_user_id?: string | null;
             party_snapshot_provenance?: components["schemas"]["PartySnapshotProvenance"] | null;
+            /** Party Snapshot Locale */
+            party_snapshot_locale?: ("en" | "zh") | null;
             /** Source Invoice Id */
             source_invoice_id?: string | null;
             /** Replacement Of Credit Note Id */
@@ -11719,6 +11843,8 @@ export interface operations {
             query?: {
                 /** @description Document language. When omitted the D2 resolution chain is used: customer.locale → company default → 'en'. */
                 locale?: ("en" | "zh") | null;
+                /** @description Render for the in-app preview only; do not retain an artifact. */
+                preview?: boolean;
             };
             header?: never;
             path: {
@@ -11736,6 +11862,67 @@ export interface operations {
                 content: {
                     "application/pdf": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_invoice_artifacts_endpoint_api_v1_invoices__invoice_id__artifacts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_invoice_artifact_endpoint_api_v1_invoices__invoice_id__artifacts__artifact_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -12761,7 +12948,9 @@ export interface operations {
     };
     preview_refund_confirmation_endpoint_api_v1_payments__refund_id__refund_confirmation_preview_get: {
         parameters: {
-            query?: never;
+            query?: {
+                locale?: ("en" | "zh") | null;
+            };
             header?: never;
             path: {
                 refund_id: string;
@@ -12792,7 +12981,9 @@ export interface operations {
     };
     download_refund_confirmation_endpoint_api_v1_payments__refund_id__refund_confirmation_get: {
         parameters: {
-            query?: never;
+            query?: {
+                locale?: ("en" | "zh") | null;
+            };
             header?: never;
             path: {
                 refund_id: string;
@@ -12844,6 +13035,67 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EmailLogRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_refund_artifacts_endpoint_api_v1_payments__refund_id__artifacts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_refund_artifact_endpoint_api_v1_payments__refund_id__artifacts__artifact_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

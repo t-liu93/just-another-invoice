@@ -27,15 +27,17 @@ wrapping or nl2br).
 
 Supported placeholder tokens:
   Common:   COMPANY_NAME, CUSTOMER_NAME, DATE, DOCUMENT_NUMBER, TOTAL, CURRENCY
-  Invoice:  INVOICE_NUMBER, DUE_DATE, AMOUNT_DUE
+  Invoice:  INVOICE_NUMBER, DUE_DATE, AMOUNT_DUE, DOCUMENT_KIND
   Quote:    QUOTE_NUMBER, VALID_UNTIL
 """
+# ruff: noqa: E501
 
 from __future__ import annotations
 
 import html
 import logging
 import re
+import uuid
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -56,6 +58,38 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("jai.email")
 
+
+def failed_email_log_values(log: EmailLog) -> dict[str, object]:
+    """Capture a failed audit row before rolling back an artifact savepoint."""
+    return {
+        "company_id": log.company_id,
+        "related_type": log.related_type,
+        "related_id": log.related_id,
+        "to_email": log.to_email,
+        "cc": log.cc,
+        "subject": log.subject,
+        "body_snapshot": log.body_snapshot,
+        "attachment_filename": log.attachment_filename,
+        "artifact_id": None,
+        "locale": log.locale,
+        "status": log.status,
+        "error_message": log.error_message,
+        "creator_id": log.creator_id,
+        "sent_at": None,
+    }
+
+
+async def persist_failed_email_log(
+    session: AsyncSession, values: dict[str, object]
+) -> EmailLog:
+    """Persist a failed SMTP audit after its unsent artifact was rolled back."""
+    from jai.models.email_log import EmailLog
+
+    log = EmailLog(id=uuid.uuid4(), **values)
+    session.add(log)
+    await session.flush()
+    return log
+
 # ---------------------------------------------------------------------------
 # Allowed placeholder token names (explicit allowlist — D4)
 # ---------------------------------------------------------------------------
@@ -70,6 +104,7 @@ _ALLOWED_TOKENS: frozenset[str] = frozenset(
         "DOCUMENT_NUMBER",
         "TOTAL",
         "CURRENCY",
+        "DOCUMENT_KIND",
         # Invoice-specific
         "INVOICE_NUMBER",
         "DUE_DATE",
@@ -77,6 +112,8 @@ _ALLOWED_TOKENS: frozenset[str] = frozenset(
         # Quote-specific
         "QUOTE_NUMBER",
         "VALID_UNTIL",
+        "CREDIT_NOTE_NUMBER",
+        "SOURCE_DOCUMENT_NUMBER",
     }
 )
 
@@ -111,6 +148,22 @@ _PAYMENT_RECEIPT_EMAIL_TEMPLATES: dict[str, EmailTemplate] = {
     ),
 }
 
+# Formal document wording is deliberately kind-aware.  Defaults are defined
+# with the typed COMPANY setting; this legacy mapping only declares the stable
+# document-kind -> setting-field identity used at send time.
+_FORMAL_TEMPLATE_FIELDS: dict[str, str] = {
+    "ADVANCE": "advance",
+    "FINAL": "final",
+    "CREDIT_NOTE": "credit_note",
+}
+
+_FORMAL_KIND_LABELS: dict[str, dict[str, str]] = {
+    "STANDARD": {"en": "Standard Invoice", "zh": "普通发票"},
+    "ADVANCE": {"en": "Advance Invoice", "zh": "预付款发票"},
+    "FINAL": {"en": "Final Invoice", "zh": "最终结算发票"},
+    "CREDIT_NOTE": {"en": "Credit Note", "zh": "贷项通知单"},
+}
+
 
 def payment_receipt_email_template(locale: str) -> EmailTemplate:
     """Return the typed, built-in payment-receipt email copy for ``locale``.
@@ -123,6 +176,7 @@ def payment_receipt_email_template(locale: str) -> EmailTemplate:
         locale, _PAYMENT_RECEIPT_EMAIL_TEMPLATES["en"]
     )
     return template.model_copy(deep=True)
+
 
 # ---------------------------------------------------------------------------
 # Jinja2 environment (autoescape ON → red-line 7)
@@ -463,6 +517,7 @@ def _build_template_context(
     doc: object,
     company: object,
     customer: object,
+    document_kind: str | None = None,
 ) -> dict[str, str]:
     """Build the placeholder context dict from document / company / customer objects.
 
@@ -484,9 +539,10 @@ def _build_template_context(
         "CUSTOMER_NAME": _s(getattr(customer, "name", None)),
         "CURRENCY": _s(getattr(doc, "currency", None)),
         "TOTAL": _s(getattr(doc, "total_incl_vat", None)),
+        "DOCUMENT_KIND": _FORMAL_KIND_LABELS.get(document_kind or "", {}).get("en", ""),
     }
 
-    if doc_type == "invoice":
+    if doc_type in {"invoice", "refund"}:
         ctx["DOCUMENT_NUMBER"] = _s(getattr(doc, "invoice_number", None))
         ctx["INVOICE_NUMBER"] = _s(getattr(doc, "invoice_number", None))
         ctx["DATE"] = _s(getattr(doc, "invoice_date", None))
@@ -494,6 +550,11 @@ def _build_template_context(
         ctx["AMOUNT_DUE"] = _s(getattr(doc, "due_amount", None))
         ctx["QUOTE_NUMBER"] = ""
         ctx["VALID_UNTIL"] = ""
+        credit_number = getattr(doc, "credit_note_number", None)
+        if document_kind == "CREDIT_NOTE":
+            credit_number = getattr(doc, "invoice_number", None)
+        ctx["CREDIT_NOTE_NUMBER"] = _s(credit_number)
+        ctx["SOURCE_DOCUMENT_NUMBER"] = _s(getattr(doc, "source_document_number", None))
     elif doc_type == "quote":
         ctx["DOCUMENT_NUMBER"] = _s(getattr(doc, "quote_number", None))
         ctx["QUOTE_NUMBER"] = _s(getattr(doc, "quote_number", None))
@@ -502,6 +563,8 @@ def _build_template_context(
         ctx["INVOICE_NUMBER"] = ""
         ctx["DUE_DATE"] = ""
         ctx["AMOUNT_DUE"] = ""
+        ctx["CREDIT_NOTE_NUMBER"] = ""
+        ctx["SOURCE_DOCUMENT_NUMBER"] = ""
     else:
         ctx["DOCUMENT_NUMBER"] = ""
         ctx["INVOICE_NUMBER"] = ""
@@ -510,6 +573,8 @@ def _build_template_context(
         ctx["AMOUNT_DUE"] = ""
         ctx["QUOTE_NUMBER"] = ""
         ctx["VALID_UNTIL"] = ""
+        ctx["CREDIT_NOTE_NUMBER"] = ""
+        ctx["SOURCE_DOCUMENT_NUMBER"] = ""
 
     return ctx
 
@@ -530,6 +595,8 @@ async def send_document_email(
     creator_id: object | None = None,
     default_template: EmailTemplate | None = None,
     smtp_config: SmtpSettings | None = None,
+    artifact_id: uuid.UUID | None = None,
+    document_kind: object | None = None,
 ) -> EmailLog:
     """Send a document email with PDF attachment and write an EmailLog row.
 
@@ -609,7 +676,9 @@ async def send_document_email(
     assert cfg is not None  # narrowing for type-checker
 
     # -- Resolve doc_type string -----------------------------------------------
-    doc_type = "invoice" if related_type == EmailRelatedType.INVOICE else "quote"
+    doc_type = "invoice" if related_type == EmailRelatedType.INVOICE else "quote" if related_type == EmailRelatedType.QUOTE else "refund"
+    kind_value = getattr(document_kind, "value", document_kind)
+    formal_kind = str(kind_value) if kind_value is not None else "STANDARD"
 
     # -- Resolve template + render subject/body --------------------------------
     # 1. Load company-level email templates (with built-in fallback).
@@ -634,12 +703,14 @@ async def send_document_email(
         if templates_setting is None:
             templates_setting = DEFAULT_EMAIL_TEMPLATES
 
-        locale_map = (
-            templates_setting.invoice
-            if doc_type == "invoice"
-            else templates_setting.quote
-        )
-        stored_template = locale_map.en if locale == "en" else locale_map.zh
+        if doc_type == "invoice" and formal_kind in _FORMAL_TEMPLATE_FIELDS:
+            locale_map = getattr(templates_setting, _FORMAL_TEMPLATE_FIELDS[formal_kind])
+            stored_template = locale_map.en if locale == "en" else locale_map.zh
+        elif doc_type == "refund":
+            stored_template = templates_setting.refund.en if locale == "en" else templates_setting.refund.zh
+        else:
+            locale_map = templates_setting.invoice if doc_type in {"invoice", "refund"} else templates_setting.quote
+            stored_template = locale_map.en if locale == "en" else locale_map.zh
 
     # 2. If caller supplied an explicit subject or body, build a temporary
     #    EmailTemplate from them (so the same render pipeline is always used).
@@ -652,7 +723,9 @@ async def send_document_email(
         render_tmpl = stored_template
 
     # 3. Build placeholder context and render.
-    ctx = _build_template_context(doc_type, doc, company, customer)
+    ctx = _build_template_context(doc_type, doc, company, customer, formal_kind)
+    if formal_kind in _FORMAL_KIND_LABELS:
+        ctx["DOCUMENT_KIND"] = _FORMAL_KIND_LABELS[formal_kind].get(locale, "")
     rendered_subject, html_body = render_email_template(render_tmpl, ctx)
 
     # -- Attempt to send -------------------------------------------------------
@@ -700,6 +773,8 @@ async def send_document_email(
         subject=rendered_subject,
         body_snapshot=html_body,
         attachment_filename=filename,
+        # Only a successfully accepted SMTP attachment may claim an artifact.
+        artifact_id=artifact_id if send_status == EmailStatus.SENT else None,
         locale=locale,
         status=send_status,
         error_message=error_msg,

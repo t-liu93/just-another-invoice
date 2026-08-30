@@ -2,7 +2,7 @@
 <html lang="{{ locale }}">
 <head>
 <meta charset="utf-8">
-<title>{{ labels.invoice }} {{ invoice.invoice_number or labels.draft }}</title>
+<title>{{ document_kind_label }} {{ invoice.invoice_number or labels.draft }}</title>
 <style>
 {{ css | safe }}
 .payments-table {
@@ -61,11 +61,11 @@
     </div>
 
     <div class="doc-title-block">
-        <div class="doc-type-label">{{ labels.invoice|upper }}</div>
+        <div class="doc-type-label">{{ document_kind_label|upper }}</div>
         <table class="doc-meta-table">
             <tbody>
             <tr>
-                <td class="label">{{ labels.invoice_number }}</td>
+                <td class="label">{{ labels.credit_note_number if is_credit_note else labels.invoice_number }}</td>
                 <td class="value">{{ invoice.invoice_number or labels.draft }}</td>
             </tr>
             {% if invoice.reference_number %}
@@ -78,7 +78,19 @@
                 <td class="label">{{ labels.date }}</td>
                 <td class="value">{{ invoice.invoice_date }}</td>
             </tr>
-            {% if invoice.due_date %}
+            {% if source_quote %}
+            <tr>
+                <td class="label">{{ labels.quote_number }}</td>
+                <td class="value">{{ source_quote.quote_number }}</td>
+            </tr>
+            {% endif %}
+            {% if invoice.supply_or_advance_date %}
+            <tr>
+                <td class="label">{{ labels.supply_or_advance_date }}</td>
+                <td class="value">{{ invoice.supply_or_advance_date }}</td>
+            </tr>
+            {% endif %}
+            {% if invoice.due_date and not is_credit_note %}
             <tr>
                 <td class="label">{{ labels.due_date }}</td>
                 <td class="value">{{ invoice.due_date }}</td>
@@ -184,7 +196,7 @@
             <td class="label">{{ labels.total }}</td>
             <td class="amount">{{ invoice.total_incl_vat | money2 }}</td>
         </tr>
-        {% if payments or invoice.due_amount != invoice.total_incl_vat %}
+        {% if not is_credit_note and (payments or invoice.due_amount != invoice.total_incl_vat) %}
         <tr>
             <td class="label">{{ labels.already_paid }}</td>
             <td class="amount">-{{ paid_total | money2 }}</td>
@@ -198,7 +210,7 @@
     </table>
 </div>
 
-{% if payments %}
+{% if payments and not is_credit_note %}
 <!-- Payments affect settlement only; the full invoice subtotal and VAT remain above. -->
 <div class="content-block-title">{{ labels.payments }}</div>
 <table class="payments-table">
@@ -219,6 +231,27 @@
     {% endfor %}
     </tbody>
 </table>
+{% endif %}
+
+{% if source_invoice %}
+<div class="content-block-title">{{ labels.source_document }}</div>
+<table class="payments-table"><tbody><tr><td>{{ source_invoice.invoice_number }}</td><td>{{ source_invoice.invoice_date }}</td></tr></tbody></table>
+{% endif %}
+{% if correction_lines %}
+<div class="content-block-title">{{ labels.corrected_lines }}</div>
+<table class="payments-table"><thead><tr><th>{{ labels.item }}</th><th>{{ labels.quantity }}</th><th class="amount">{{ labels.total }}</th></tr></thead><tbody>{% for line in correction_lines %}<tr><td>{{ line.name }}{% if line.description %}<br><small>{{ line.description }}</small>{% endif %}</td><td>{{ line.quantity | money2 }}</td><td class="amount">{{ line.gross_amount | money2 }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+{% if advance_applications %}
+<div class="content-block-title">{{ labels.advance_applications }}</div>
+<table class="payments-table"><thead><tr><th>{{ labels.invoice_number }}</th><th>{{ labels.date }}</th><th class="amount">{{ labels.total }}</th></tr></thead><tbody>{% for application in advance_applications %}<tr><td>{{ application.advance_invoice_number }}</td><td>{{ application.advance_invoice_date }}</td><td class="amount">{{ application.gross_amount | money2 }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+{% if followup_relations %}
+<div class="content-block-title">{{ labels.correction_provenance }}</div>
+<table class="payments-table"><tbody>{% for relation in followup_relations %}<tr><td>{{ relation.label }}</td><td>{{ relation.invoice_number }}</td><td>{{ relation.invoice_date }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+{% if refunds %}
+<div class="content-block-title">{{ labels.refunds }}</div>
+<table class="payments-table"><thead><tr><th>{{ labels.refund_date }}</th><th>{{ labels.credit_note_reference }}</th><th>{{ labels.refund_reference }}</th><th class="amount">{{ labels.refund_amount }}</th></tr></thead><tbody>{% for refund in refunds %}<tr><td>{{ refund.payment_date }}</td><td>{{ refund.credit_note_number or "" }}</td><td>{{ refund.reference or "" }}</td><td class="amount">{{ refund.amount | money2 }}</td></tr>{% endfor %}</tbody></table>
 {% endif %}
 
 <!-- ── Content blocks ───────────────────────────────────────────────────── -->

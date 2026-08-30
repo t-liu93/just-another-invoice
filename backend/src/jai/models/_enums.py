@@ -248,6 +248,21 @@ class EmailRelatedType(enum.StrEnum):
 
     INVOICE = "INVOICE"
     QUOTE = "QUOTE"
+    REFUND = "REFUND"
+
+
+class DocumentArtifactKind(enum.StrEnum):
+    """The retained PDF's legal/document purpose."""
+
+    FORMAL_DOCUMENT = "FORMAL_DOCUMENT"
+    REFUND_CONFIRMATION = "REFUND_CONFIRMATION"
+
+
+class DocumentArtifactReason(enum.StrEnum):
+    """The user-visible action which first retained the exact PDF bytes."""
+
+    DOWNLOAD = "DOWNLOAD"
+    SEND = "SEND"
 
 
 class EmailStatus(enum.StrEnum):

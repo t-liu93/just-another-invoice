@@ -173,11 +173,11 @@ class TestDefaultEmailTemplates:
     """Validate the built-in default templates and schema fallback."""
 
     def test_default_templates_have_all_locales(self) -> None:
-        """DEFAULT_EMAIL_TEMPLATES covers invoice + quote × en + zh."""
-        assert DEFAULT_EMAIL_TEMPLATES.invoice.en.subject
-        assert DEFAULT_EMAIL_TEMPLATES.invoice.zh.subject
-        assert DEFAULT_EMAIL_TEMPLATES.quote.en.subject
-        assert DEFAULT_EMAIL_TEMPLATES.quote.zh.subject
+        """DEFAULT_EMAIL_TEMPLATES covers every configurable type × en + zh."""
+        for doc_type in ("invoice", "quote", "advance", "final", "credit_note", "refund"):
+            locale_map = getattr(DEFAULT_EMAIL_TEMPLATES, doc_type)
+            assert locale_map.en.subject
+            assert locale_map.zh.subject
 
     def test_default_invoice_en_contains_expected_placeholders(self) -> None:
         """Built-in invoice EN body contains the key placeholder tokens."""
@@ -198,6 +198,9 @@ class TestDefaultEmailTemplates:
         locale_map = EmailTemplateLocaleMap(en=tmpl, zh=tmpl)
         setting = EmailTemplatesSetting(invoice=locale_map, quote=locale_map)
         assert setting.invoice.en.subject == "S"
+        # Existing M9 JSON lacks the M12 fields and must parse into defaults.
+        assert setting.credit_note.en.subject
+        assert setting.refund.zh.body
 
     def test_email_templates_setting_rejects_missing_fields(self) -> None:
         """EmailTemplatesSetting rejects partially missing fields."""

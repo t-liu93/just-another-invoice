@@ -950,3 +950,47 @@ def test_invoice_payment_rows_escape_reference_and_have_zh_settlement_labels() -
     assert "应付款" in html
     assert "8000.00" in html
     assert "1388.43" in html
+
+
+@pytest.mark.parametrize(
+    ("locale", "provenance", "refund_heading"),
+    [
+        ("en", "Replacement for Credit Note", "Refunds"),
+        ("zh", "替换以下贷项通知单", "退款"),
+    ],
+)
+def test_invoice_html_shows_authoritative_followup_and_source_refund_references(
+    locale: str, provenance: str, refund_heading: str
+) -> None:
+    """Formal output only presents the service-projected correction context."""
+    invoice = _make_invoice()
+    html = build_invoice_html(
+        invoice,
+        _make_company(),
+        _make_customer(),
+        locale,
+        None,
+        followup_relations=[
+            SimpleNamespace(
+                label=provenance,
+                invoice_number="C2026-007",
+                invoice_date=date(2026, 2, 4),
+            )
+        ],
+        refunds=[
+            SimpleNamespace(
+                payment_date=date(2026, 2, 5),
+                credit_note_number="C2026-007",
+                reference="refund-007",
+                amount=Decimal("19.000"),
+            )
+        ],
+    )
+
+    assert provenance in html
+    assert "C2026-007" in html
+    assert "2026-02-04" in html
+    assert refund_heading in html
+    assert "2026-02-05" in html
+    assert "refund-007" in html
+    assert "19.00" in html

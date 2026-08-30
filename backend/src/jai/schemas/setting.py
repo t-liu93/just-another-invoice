@@ -509,6 +509,75 @@ class EmailTemplateLocaleMap(BaseModel):
     zh: EmailTemplate
 
 
+def _formal_email_template_defaults() -> dict[str, EmailTemplateLocaleMap]:
+    """Return fresh M12 kind-specific company-template defaults.
+
+    Keeping these in the typed setting (rather than in the send route) makes
+    every output kind configurable at the COMPANY layer.  The factory is also
+    used for old persisted ``email.templates`` JSON that predates M12.
+    """
+    return {
+        "advance": EmailTemplateLocaleMap(
+            en=EmailTemplate(
+                subject="Advance Invoice {INVOICE_NUMBER} from {COMPANY_NAME}",
+                body=("Dear {CUSTOMER_NAME},\n\nPlease find attached Advance Invoice "
+                      "{INVOICE_NUMBER} dated {DATE}.\n\nAmount due: {CURRENCY} "
+                      "{AMOUNT_DUE}\nDue date: {DUE_DATE}\n\nKind regards,\n{COMPANY_NAME}"),
+            ),
+            zh=EmailTemplate(
+                subject="{COMPANY_NAME} 预付款发票 {INVOICE_NUMBER}",
+                body=("尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的预付款发票 "
+                      "{INVOICE_NUMBER}，开票日期：{DATE}。\n\n应付金额：{CURRENCY} "
+                      "{AMOUNT_DUE}\n付款截止日：{DUE_DATE}\n\n此致\n{COMPANY_NAME}"),
+            ),
+        ),
+        "final": EmailTemplateLocaleMap(
+            en=EmailTemplate(
+                subject="Final Invoice {INVOICE_NUMBER} from {COMPANY_NAME}",
+                body=("Dear {CUSTOMER_NAME},\n\nPlease find attached Final Invoice "
+                      "{INVOICE_NUMBER} dated {DATE}.\n\nAmount due: {CURRENCY} "
+                      "{AMOUNT_DUE}\nDue date: {DUE_DATE}\n\nKind regards,\n{COMPANY_NAME}"),
+            ),
+            zh=EmailTemplate(
+                subject="{COMPANY_NAME} 最终结算发票 {INVOICE_NUMBER}",
+                body=("尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的最终结算发票 "
+                      "{INVOICE_NUMBER}，开票日期：{DATE}。\n\n应付金额：{CURRENCY} "
+                      "{AMOUNT_DUE}\n付款截止日：{DUE_DATE}\n\n此致\n{COMPANY_NAME}"),
+            ),
+        ),
+        "credit_note": EmailTemplateLocaleMap(
+            en=EmailTemplate(
+                subject="Credit Note {CREDIT_NOTE_NUMBER} from {COMPANY_NAME}",
+                body=("Dear {CUSTOMER_NAME},\n\nPlease find attached Credit Note "
+                      "{CREDIT_NOTE_NUMBER} dated {DATE}.\n\nCredit amount: {CURRENCY} "
+                      "{TOTAL}\nSource document: {SOURCE_DOCUMENT_NUMBER}\n\n"
+                      "Kind regards,\n{COMPANY_NAME}"),
+            ),
+            zh=EmailTemplate(
+                subject="{COMPANY_NAME} 贷项通知单 {CREDIT_NOTE_NUMBER}",
+                body=("尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的贷项通知单 "
+                      "{CREDIT_NOTE_NUMBER}，开具日期：{DATE}。\n\n贷项金额：{CURRENCY} "
+                      "{TOTAL}\n来源单据：{SOURCE_DOCUMENT_NUMBER}\n\n此致\n{COMPANY_NAME}"),
+            ),
+        ),
+        "refund": EmailTemplateLocaleMap(
+            en=EmailTemplate(
+                subject="Refund confirmation for {CREDIT_NOTE_NUMBER} from {COMPANY_NAME}",
+                body=("Dear {CUSTOMER_NAME},\n\nPlease find the Refund Confirmation for "
+                      "Credit Note {CREDIT_NOTE_NUMBER} (source document "
+                      "{SOURCE_DOCUMENT_NUMBER}) attached.\n\nRefund amount: {CURRENCY} "
+                      "{TOTAL}\n\nKind regards,\n{COMPANY_NAME}"),
+            ),
+            zh=EmailTemplate(
+                subject="{COMPANY_NAME} 的退款确认单（{CREDIT_NOTE_NUMBER}）",
+                body=("尊敬的 {CUSTOMER_NAME}：\n\n随信附上贷项通知单 "
+                      "{CREDIT_NOTE_NUMBER}（来源单据 {SOURCE_DOCUMENT_NUMBER}）的退款确认单。\n\n"
+                      "退款金额：{CURRENCY} {TOTAL}\n\n此致\n{COMPANY_NAME}"),
+            ),
+        ),
+    }
+
+
 class EmailTemplatesSetting(BaseModel):
     """Company-level email template configuration.
 
@@ -523,6 +592,18 @@ class EmailTemplatesSetting(BaseModel):
 
     invoice: EmailTemplateLocaleMap
     quote: EmailTemplateLocaleMap
+    advance: EmailTemplateLocaleMap = Field(
+        default_factory=lambda: _formal_email_template_defaults()["advance"]
+    )
+    final: EmailTemplateLocaleMap = Field(
+        default_factory=lambda: _formal_email_template_defaults()["final"]
+    )
+    credit_note: EmailTemplateLocaleMap = Field(
+        default_factory=lambda: _formal_email_template_defaults()["credit_note"]
+    )
+    refund: EmailTemplateLocaleMap = Field(
+        default_factory=lambda: _formal_email_template_defaults()["refund"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +616,10 @@ class EmailTemplatesRead(BaseModel):
 
     invoice: EmailTemplateLocaleMap
     quote: EmailTemplateLocaleMap
+    advance: EmailTemplateLocaleMap
+    final: EmailTemplateLocaleMap
+    credit_note: EmailTemplateLocaleMap
+    refund: EmailTemplateLocaleMap
 
 
 class EmailTemplatesUpdate(BaseModel):
@@ -542,6 +627,18 @@ class EmailTemplatesUpdate(BaseModel):
 
     invoice: EmailTemplateLocaleMap
     quote: EmailTemplateLocaleMap
+    advance: EmailTemplateLocaleMap = Field(
+        default_factory=lambda: _formal_email_template_defaults()["advance"]
+    )
+    final: EmailTemplateLocaleMap = Field(
+        default_factory=lambda: _formal_email_template_defaults()["final"]
+    )
+    credit_note: EmailTemplateLocaleMap = Field(
+        default_factory=lambda: _formal_email_template_defaults()["credit_note"]
+    )
+    refund: EmailTemplateLocaleMap = Field(
+        default_factory=lambda: _formal_email_template_defaults()["refund"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -598,4 +695,5 @@ DEFAULT_EMAIL_TEMPLATES = EmailTemplatesSetting(
             ),
         ),
     ),
+    **_formal_email_template_defaults(),
 )

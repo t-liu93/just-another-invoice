@@ -376,6 +376,7 @@ async def _quote_chain_totals(session: AsyncSession, quote: Quote) -> DocumentCh
                 select(Payment).where(
                     Payment.company_id == quote.company_id,
                     Payment.quote_id == quote.id,
+                    Payment.deleted_at.is_(None),
                 )
             )
         ).scalars()
@@ -998,7 +999,7 @@ async def convert_to_invoice(
     # transaction so no accepted payment can be missed by a concurrent convert.
     payment_result = await session.execute(
         select(Payment)
-        .where(Payment.quote_id == q.id)
+        .where(Payment.quote_id == q.id, Payment.deleted_at.is_(None))
         .order_by(Payment.payment_date, Payment.created_at, Payment.id)
         .with_for_update()
     )

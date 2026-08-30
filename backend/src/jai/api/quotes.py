@@ -22,7 +22,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
-from jai.db import get_session
+from jai.db import get_session, set_rls_company
 from jai.models._enums import QuoteStatus
 from jai.models.user import User
 from jai.schemas.document_chain import DocumentChainRead
@@ -559,6 +559,7 @@ async def list_quote_emails_endpoint(
 
     _owner_only(user)
     company_id = _require_company_id(user)
+    await set_rls_company(session, company_id)
 
     # Verify quote belongs to company (cross-company → 404).
     quote_result = await session.execute(

@@ -120,6 +120,9 @@ class Payment(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Refunds with retained legal output are tombstoned, not physically
+    # removed. Incoming payments retain their established hard-delete path.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     taxes: Mapped[list[PaymentTax]] = relationship(
         "PaymentTax",

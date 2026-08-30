@@ -28,13 +28,17 @@ const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
 
 // Active tab: doc_type × locale
-const activeDocType = ref<'invoice' | 'quote'>('invoice')
+const activeDocType = ref<'invoice' | 'quote' | 'advance' | 'final' | 'credit_note' | 'refund'>('invoice')
 const activeLocale = ref<'en' | 'zh'>('en')
 
 // Templates state (mirrors the API shape)
 type TemplateMap = {
   invoice: { en: EmailTemplate; zh: EmailTemplate }
   quote: { en: EmailTemplate; zh: EmailTemplate }
+  advance: { en: EmailTemplate; zh: EmailTemplate }
+  final: { en: EmailTemplate; zh: EmailTemplate }
+  credit_note: { en: EmailTemplate; zh: EmailTemplate }
+  refund: { en: EmailTemplate; zh: EmailTemplate }
 }
 
 const templates = ref<TemplateMap>({
@@ -46,6 +50,10 @@ const templates = ref<TemplateMap>({
     en: { subject: '', body: '' },
     zh: { subject: '', body: '' },
   },
+  advance: { en: { subject: '', body: '' }, zh: { subject: '', body: '' } },
+  final: { en: { subject: '', body: '' }, zh: { subject: '', body: '' } },
+  credit_note: { en: { subject: '', body: '' }, zh: { subject: '', body: '' } },
+  refund: { en: { subject: '', body: '' }, zh: { subject: '', body: '' } },
 })
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -66,6 +74,10 @@ onMounted(async () => {
     templates.value = {
       invoice: fromLocaleMap(data.invoice),
       quote: fromLocaleMap(data.quote),
+      advance: fromLocaleMap(data.advance),
+      final: fromLocaleMap(data.final),
+      credit_note: fromLocaleMap(data.credit_note),
+      refund: fromLocaleMap(data.refund),
     }
   } catch {
     // keep blank defaults on error
@@ -97,6 +109,10 @@ async function handleSave() {
     await put<EmailTemplatesRead>('/api/v1/settings/email-templates', {
       invoice: templates.value.invoice,
       quote: templates.value.quote,
+      advance: templates.value.advance,
+      final: templates.value.final,
+      credit_note: templates.value.credit_note,
+      refund: templates.value.refund,
     })
     message.value = t('settings.emailTemplates.saveSuccess')
     messageType.value = 'success'
@@ -125,13 +141,19 @@ const INVOICE_PLACEHOLDERS = [
   '{AMOUNT_DUE}',
 ]
 
+const CREDIT_PLACEHOLDERS = ['{CREDIT_NOTE_NUMBER}', '{SOURCE_DOCUMENT_NUMBER}']
+
 const QUOTE_PLACEHOLDERS = [
   '{QUOTE_NUMBER}',
   '{VALID_UNTIL}',
 ]
 
 function activePlaceholders(): string[] {
-  const extra = activeDocType.value === 'invoice' ? INVOICE_PLACEHOLDERS : QUOTE_PLACEHOLDERS
+  const extra = activeDocType.value === 'quote'
+    ? QUOTE_PLACEHOLDERS
+    : activeDocType.value === 'credit_note' || activeDocType.value === 'refund'
+      ? CREDIT_PLACEHOLDERS
+      : INVOICE_PLACEHOLDERS
   return [...COMMON_PLACEHOLDERS, ...extra]
 }
 </script>
@@ -147,6 +169,10 @@ function activePlaceholders(): string[] {
     <n-tabs v-model:value="activeDocType" type="line" size="small" style="margin-bottom: 8px">
       <n-tab-pane name="invoice" :tab="t('settings.emailTemplates.docTypeInvoice')" />
       <n-tab-pane name="quote" :tab="t('settings.emailTemplates.docTypeQuote')" />
+      <n-tab-pane name="advance" :tab="t('settings.emailTemplates.docTypeAdvance')" />
+      <n-tab-pane name="final" :tab="t('settings.emailTemplates.docTypeFinal')" />
+      <n-tab-pane name="credit_note" :tab="t('settings.emailTemplates.docTypeCreditNote')" />
+      <n-tab-pane name="refund" :tab="t('settings.emailTemplates.docTypeRefund')" />
     </n-tabs>
 
     <!-- Locale tabs -->

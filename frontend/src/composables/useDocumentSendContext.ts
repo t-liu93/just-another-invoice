@@ -1,8 +1,9 @@
 import { ref, watch, type Ref } from 'vue'
+import type { DocumentSendType } from '../utils/documentSend'
 
 export interface DocumentSendContext {
   show: boolean
-  docType: 'invoice' | 'quote' | 'receipt'
+  docType: DocumentSendType
   docId: string
   customerEmail: string | null | undefined
   customerLocale: 'en' | 'zh' | null | undefined

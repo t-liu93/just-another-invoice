@@ -958,7 +958,14 @@ async def update_document_defaults(
 
 def _email_templates_to_read(cfg: EmailTemplatesSetting) -> EmailTemplatesRead:
     """Convert the internal model to the API read response."""
-    return EmailTemplatesRead(invoice=cfg.invoice, quote=cfg.quote)
+    return EmailTemplatesRead(
+        invoice=cfg.invoice,
+        quote=cfg.quote,
+        advance=cfg.advance,
+        final=cfg.final,
+        credit_note=cfg.credit_note,
+        refund=cfg.refund,
+    )
 
 
 @router.get("/email-templates", response_model=EmailTemplatesRead)
@@ -1004,7 +1011,14 @@ async def update_email_templates(
             detail="Company profile must be created first.",
         )
 
-    value = EmailTemplatesSetting(invoice=body.invoice, quote=body.quote)
+    value = EmailTemplatesSetting(
+        invoice=body.invoice,
+        quote=body.quote,
+        advance=body.advance,
+        final=body.final,
+        credit_note=body.credit_note,
+        refund=body.refund,
+    )
     await set_setting(
         session,
         SETTING_KEY_EMAIL_TEMPLATES,

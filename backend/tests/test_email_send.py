@@ -240,6 +240,7 @@ class TestSendDocumentEmail:
         company = self._make_company()
         customer = self._make_customer()
         session = self._make_session()
+        artifact_id = uuid.uuid4()
 
         with (
             patch(
@@ -266,6 +267,7 @@ class TestSendDocumentEmail:
                 pdf_bytes=b"%PDF",
                 filename="INV-001.pdf",
                 creator_id=uuid.uuid4(),
+                artifact_id=artifact_id,
             )
 
         assert log.status == EmailStatus.SENT
@@ -275,6 +277,7 @@ class TestSendDocumentEmail:
         assert log.attachment_filename == "INV-001.pdf"
         assert log.locale == "en"
         assert log.related_type == EmailRelatedType.INVOICE
+        assert log.artifact_id == artifact_id
         assert session.add.called
         assert session.flush.called
 
@@ -287,6 +290,7 @@ class TestSendDocumentEmail:
         company = self._make_company()
         customer = self._make_customer()
         session = self._make_session()
+        artifact_id = uuid.uuid4()
 
         async def _fail(*args: Any, **kwargs: Any) -> None:
             raise ConnectionError("Connection refused")
@@ -309,12 +313,14 @@ class TestSendDocumentEmail:
                 body=None,
                 pdf_bytes=b"%PDF",
                 filename="INV-001.pdf",
+                artifact_id=artifact_id,
             )
 
         assert log.status == EmailStatus.FAILED
         assert log.sent_at is None
         assert log.error_message is not None
         assert "ConnectionError" in log.error_message
+        assert log.artifact_id is None
 
     @pytest.mark.asyncio
     async def test_error_message_does_not_contain_smtp_password(self) -> None:
@@ -756,15 +762,17 @@ class TestEmailSendIntegration:
         await _issue_invoice(db_client, invoice_id)
 
         # Mock SMTP so no real email is sent but the service sees a configured state.
+        captured: dict[str, bytes] = {}
+
+        async def _capture(**kwargs: Any) -> None:
+            captured["attachment"] = kwargs["attachment_bytes"]
+
         with (
             patch(
                 "jai.services.email._get_smtp_config",
                 return_value=_smtp(),
             ),
-            patch(
-                "jai.services.email._send_mail",
-                new_callable=AsyncMock,
-            ),
+            patch("jai.services.email._send_mail", side_effect=_capture),
         ):
             resp = await db_client.post(
                 f"/api/v1/invoices/{invoice_id}/send",
@@ -779,6 +787,15 @@ class TestEmailSendIntegration:
         assert data["related_type"] == "INVOICE"
         assert data["related_id"] == invoice_id
         assert data["attachment_filename"] is not None
+        assert data["artifact_id"] is not None
+        artifacts = await db_client.get(f"/api/v1/invoices/{invoice_id}/artifacts")
+        assert artifacts.status_code == 200
+        assert len(artifacts.json()["items"]) == 1
+        artifact = await db_client.get(
+            f"/api/v1/invoices/{invoice_id}/artifacts/{data['artifact_id']}"
+        )
+        assert artifact.status_code == 200
+        assert artifact.content == captured["attachment"]
         # No sensitive fields exposed.
         assert "company_id" not in data
 
@@ -844,6 +861,7 @@ class TestEmailSendIntegration:
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["status"] == "FAILED"
+        assert data["artifact_id"] is None
         assert data["error_message"] is not None
         assert "ConnectionError" in data["error_message"]
         # Log row created and listable.
