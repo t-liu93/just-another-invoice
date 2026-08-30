@@ -987,7 +987,8 @@ class TestQuotePaymentReporting:
             json={"payment_date": "2026-07-01", "amount": "230.00"},
         )
         assert invalid_edit.status_code == 422, invalid_edit.text
-        assert "later than the final invoice date" in invalid_edit.json()["detail"]
+        assert invalid_edit.json()["detail"]["code"] == "PAYMENT_INVALID_INPUT"
+        assert "later than the final invoice date" in invalid_edit.json()["detail"]["message"]
 
         for quarter, expected in zip((1, 2, 3), reports, strict=True):
             response = await db_client.get(
@@ -1549,7 +1550,8 @@ class TestQuotePaymentConversion:
             json={"payment_date": "2026-02-01", "amount": "100.00"},
         )
         assert response.status_code == 422, response.text
-        assert "VAT buckets" in response.json()["detail"]
+        assert response.json()["detail"]["code"] == "PAYMENT_INVALID_INPUT"
+        assert "VAT buckets" in response.json()["detail"]["message"]
 
 
 @pytest.mark.integration

@@ -92,7 +92,9 @@ from jai.schemas.setting import (
 from jai.services.money import quantize_to_minor_unit
 from jai.services.numbering import NumberSequenceExhaustedError, allocate_invoice_number
 from jai.services.payment import (
+    _settle_refund_chain,
     _write_invoice_state,
+    lock_settlement_chain,
     recompute_payment_state,
     validate_invoice_tax_coverage,
 )
@@ -2139,7 +2141,7 @@ async def _transition_credit_status(
 ) -> InvoiceRead | None:
     """Issue a Credit in global source -> Credit -> numbering lock order."""
     from jai.models.document import InvoiceCorrection
-    from jai.services.credit import CreditConflictError, _lock_credit_source_context, issue_credit
+    from jai.services.credit import CreditConflictError, issue_credit
     from jai.services.document_chain import append_document_chain_event
 
     source_id = await session.scalar(
@@ -2150,29 +2152,43 @@ async def _transition_credit_status(
     if source_id is None:
         return None
     try:
-        # Quote -> sorted formal charge/source Invoices is the mandatory
-        # prefix; only then acquire the sorted Credit Note suffix.
-        await _lock_credit_source_context(
-            session, company_id=company_id, source_id=source_id
+        context = await lock_settlement_chain(
+            session, anchor_invoice_id=source_id, company_id=company_id
         )
-        credits = list(
-            (
-                await session.execute(
-                    select(Invoice)
-                    .join(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
-                    .where(InvoiceCorrection.source_invoice_id == source_id)
-                    .order_by(Invoice.id)
-                    .with_for_update()
-                )
-            ).scalars()
-        )
-        credit = next((item for item in credits if item.id == invoice_id), None)
+        credit = next((item for item in context.credits if item.id == invoice_id), None)
         if credit is None:
             return None
+        source = next((item for item in context.chain_sources if item.id == source_id), None)
+        correction = next(
+            (
+                item
+                for item in context.corrections
+                if item.credit_note_id == invoice_id
+                and item.source_invoice_id == source_id
+            ),
+            None,
+        )
+        if source is None or correction is None:
+            raise CreditConflictError(
+                "Credit source changed while acquiring settlement locks."
+            )
         current_status = InvoiceStatus(credit.status)
         if current_status == InvoiceStatus.DRAFT and body.status == InvoiceStatus.SENT:
             await issue_credit(
-                session, credit=credit, company_id=company_id, actor_user_id=issued_by_user_id
+                session,
+                credit=credit,
+                company_id=company_id,
+                actor_user_id=issued_by_user_id,
+                locked_source=source,
+                locked_correction=correction,
+            )
+            _settle_refund_chain(
+                source=source,
+                chain_sources=context.chain_sources,
+                credits=context.credits,
+                credit_source_ids=context.credit_source_ids,
+                payments=context.payments,
+                quote=context.quote,
             )
         elif (current_status, body.status) in {
             (InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED),

@@ -60,6 +60,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jai.db import set_rls_company
 from jai.models._enums import InvoiceDocumentKind, InvoiceStatus
 from jai.models.expense import Expense
 from jai.models.invoice import Invoice
@@ -374,6 +375,11 @@ async def compute_vat_return(
     date_from, date_to = _quarter_date_range(year, quarter)
     is_last_period = quarter == 4
     company_id: uuid.UUID = company.id
+
+    # Payment and PaymentTax are RLS-protected.  This is the shared entry
+    # point used by both the VAT endpoint and Dashboard, so establish the
+    # transaction-local tenant before either report can read cash VAT events.
+    await set_rls_company(session, company_id)
 
     warnings: list[str] = []
 

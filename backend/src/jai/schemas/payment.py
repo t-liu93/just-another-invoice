@@ -21,6 +21,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from jai.models._enums import InvoicePaidStatus, InvoiceStatus, PaymentDirection
 
+
+class PaymentInputErrorDetail(BaseModel):
+    """Safe, machine-readable 409/422 detail for mutable payment endpoints."""
+
+    code: str
+    message: str
+
+
+class PaymentInputErrorResponse(BaseModel):
+    """Stable error envelope used by Refund CRUD and generic payment mutations."""
+
+    detail: PaymentInputErrorDetail
+
+
 # ---------------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------------
@@ -34,8 +48,8 @@ class PaymentInput(BaseModel):
     (D2: single base currency).
     """
 
-    # Generic payments are incoming Standard-invoice payments only until the
-    # dedicated Credit/refund flow lands.  Do not silently drop that intent.
+    # The route fixes direction and document context: callers provide only
+    # raw cash input for either the incoming-payment or dedicated refund flow.
     model_config = ConfigDict(extra="forbid")
 
     payment_date: date
@@ -68,7 +82,7 @@ class PaymentRead(BaseModel):
     """Full payment record as returned by read endpoints."""
 
     id: uuid.UUID
-    origin_type: Literal["INVOICE", "QUOTE"]
+    origin_type: Literal["INVOICE", "QUOTE", "CREDIT_NOTE"]
     invoice_id: uuid.UUID | None = None
     invoice_number: str | None = None
     quote_id: uuid.UUID | None = None
@@ -138,6 +152,25 @@ class PaymentMutationResponse(BaseModel):
     deleted: bool
     quote: QuotePaymentsResponse | None = None
     invoice: InvoicePaymentsResponse | None = None
+    refund: RefundCollectionRead | None = None
+
+
+class RefundCollectionRead(BaseModel):
+    """Refund cash linked to one issued Credit Note; all money is service-derived."""
+
+    credit_note_id: uuid.UUID
+    credit_note_number: str | None = None
+    source_invoice_id: uuid.UUID
+    currency: str
+    issued_entitlement: Decimal
+    base_issued_entitlement: Decimal
+    refunded_total: Decimal
+    base_refunded_total: Decimal
+    remaining_entitlement: Decimal
+    base_remaining_entitlement: Decimal
+    chain_refund_due_amount: Decimal
+    base_chain_refund_due_amount: Decimal
+    items: list[PaymentRead] = []
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +186,7 @@ class PaymentListItem(BaseModel):
     """
 
     id: uuid.UUID
-    origin_type: Literal["INVOICE", "QUOTE"]
+    origin_type: Literal["INVOICE", "QUOTE", "CREDIT_NOTE"]
     invoice_id: uuid.UUID | None = None
     invoice_number: str | None = None
     quote_id: uuid.UUID | None = None

@@ -702,18 +702,32 @@ async def issue_credit(
     credit: Invoice,
     company_id: uuid.UUID,
     actor_user_id: uuid.UUID | None,
+    locked_source: Invoice | None = None,
+    locked_correction: InvoiceCorrection | None = None,
 ) -> None:
     """Revalidate durable intent under source/Credit locks, then freeze it."""
-    correction = (
-        await session.execute(
-            select(InvoiceCorrection)
-            .where(InvoiceCorrection.credit_note_id == credit.id)
-            .with_for_update()
+    correction = locked_correction
+    if correction is None:
+        correction = (
+            await session.execute(
+                select(InvoiceCorrection)
+                .where(InvoiceCorrection.credit_note_id == credit.id)
+                .with_for_update()
+            )
+        ).scalar_one()
+    source = locked_source
+    if source is None:
+        source = await _lock_credit_source_context(
+            session, company_id=company_id, source_id=correction.source_invoice_id
         )
-    ).scalar_one()
-    source = await _lock_credit_source_context(
-        session, company_id=company_id, source_id=correction.source_invoice_id
-    )
+    if (
+        correction.credit_note_id != credit.id
+        or correction.source_invoice_id != source.id
+        or source.company_id != company_id
+    ):
+        raise CreditConflictError(
+            "Credit source changed while acquiring settlement locks."
+        )
     # The selected correction rows are durable request provenance.  Replay the
     # input exactly, rather than trusting stale derived line amounts.
     selections = list(

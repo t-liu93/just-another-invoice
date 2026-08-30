@@ -14,36 +14,48 @@ from __future__ import annotations
 import uuid
 from datetime import date
 from types import SimpleNamespace
+from typing import Any, Never
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
-from jai.db import get_session
+from jai.db import get_session, set_rls_company
 from jai.models._enums import InvoiceDocumentKind, PaymentDirection
 from jai.models.user import User
 from jai.schemas.email_log import DocumentSendRequest, EmailLogRead
 from jai.schemas.payment import (
     InvoicePaymentsResponse,
     PaymentInput,
+    PaymentInputErrorResponse,
     PaymentListResponse,
     PaymentMutationResponse,
     PaymentRead,
     QuotePaymentsResponse,
+    RefundCollectionRead,
 )
 from jai.services.document_chain import ModeConflictError
 from jai.services.payment import (
+    RefundSettlementError,
+    SettlementConflictError,
     delete_payment,
     get_payment,
+    list_credit_refunds,
     list_invoice_payments,
     list_payments,
     list_quote_payments,
     record_payment,
     record_quote_payment,
+    record_refund,
     update_payment,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["payments"])
+
+_PAYMENT_MUTATION_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    status.HTTP_409_CONFLICT: {"model": PaymentInputErrorResponse},
+    status.HTTP_422_UNPROCESSABLE_ENTITY: {"model": PaymentInputErrorResponse},
+}
 
 
 def _owner_only(user: User) -> None:
@@ -60,6 +72,13 @@ def _require_company_id(user: User) -> uuid.UUID:
             detail="User has no company associated.",
         )
     return user.company_id
+
+
+def _refund_error(exc: RefundSettlementError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={"code": exc.code, "message": str(exc)},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +111,11 @@ async def record_payment_endpoint(
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except SettlementConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "SETTLEMENT_STALE", "message": str(exc)},
         ) from exc
     except ValueError as exc:
         raise HTTPException(
@@ -130,10 +154,136 @@ async def record_quote_payment_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
+    except SettlementConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "SETTLEMENT_STALE", "message": str(exc)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
+
+
+@router.get(
+    "/credit-notes/{credit_note_id}/refunds",
+    response_model=RefundCollectionRead,
+    responses=_PAYMENT_MUTATION_ERROR_RESPONSES,
+)
+async def list_credit_refunds_endpoint(
+    credit_note_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> RefundCollectionRead:
+    _owner_only(user)
+    try:
+        return await list_credit_refunds(session, credit_note_id, _require_company_id(user))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RefundSettlementError as exc:
+        raise _refund_error(exc) from exc
+
+
+@router.post(
+    "/credit-notes/{credit_note_id}/refunds",
+    response_model=RefundCollectionRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=_PAYMENT_MUTATION_ERROR_RESPONSES,
+)
+async def record_refund_endpoint(
+    credit_note_id: uuid.UUID,
+    body: PaymentInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> RefundCollectionRead:
+    _owner_only(user)
+    try:
+        return await record_refund(
+            session, credit_note_id=credit_note_id, company_id=_require_company_id(user),
+            body=body, creator_id=user.id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SettlementConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "SETTLEMENT_STALE", "message": str(exc)},
+        ) from exc
+    except RefundSettlementError as exc:
+        raise _refund_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "REFUND_INVALID_INPUT", "message": str(exc)},
+        ) from exc
+
+
+async def _refund_confirmation_step9(
+    session: AsyncSession, *, refund_id: uuid.UUID, company_id: uuid.UUID
+) -> Never:
+    payment = await get_payment(session, refund_id, company_id)
+    if payment is None or payment.direction != PaymentDirection.REFUND:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Refund not found."
+        )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "code": "REFUND_CONFIRMATION_PENDING_STEP9",
+            "message": "Refund Confirmation rendering is implemented in M12 Step 9.",
+        },
+    )
+
+
+@router.get(
+    "/payments/{refund_id}/refund-confirmation/preview",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def preview_refund_confirmation_endpoint(
+    refund_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Frozen Step 7 route contract; the renderer is intentionally Step 9."""
+    _owner_only(user)
+    await _refund_confirmation_step9(
+        session, refund_id=refund_id, company_id=_require_company_id(user)
+    )
+
+
+@router.get(
+    "/payments/{refund_id}/refund-confirmation",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def download_refund_confirmation_endpoint(
+    refund_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Frozen Step 7 route contract; artifact retention is Step 9."""
+    _owner_only(user)
+    await _refund_confirmation_step9(
+        session, refund_id=refund_id, company_id=_require_company_id(user)
+    )
+
+
+@router.post(
+    "/payments/{refund_id}/send-refund-confirmation",
+    response_model=EmailLogRead,
+)
+async def send_refund_confirmation_endpoint(
+    refund_id: uuid.UUID,
+    body: DocumentSendRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> EmailLogRead:
+    """Frozen Step 7 route contract; email/artifact delivery is Step 9."""
+    _owner_only(user)
+    await _refund_confirmation_step9(
+        session, refund_id=refund_id, company_id=_require_company_id(user)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +447,7 @@ async def send_payment_receipt_email_endpoint(
     _owner_only(user)
     company_id = _require_company_id(user)
     creator_id = user.id
+    await set_rls_company(session, company_id)
 
     payment_result = await session.execute(
         select(Payment).where(Payment.id == payment_id, Payment.company_id == company_id)
@@ -440,7 +591,11 @@ async def send_payment_receipt_email_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.put("/payments/{payment_id}", response_model=PaymentMutationResponse)
+@router.put(
+    "/payments/{payment_id}",
+    response_model=PaymentMutationResponse,
+    responses=_PAYMENT_MUTATION_ERROR_RESPONSES,
+)
 async def update_payment_endpoint(
     payment_id: uuid.UUID,
     body: PaymentInput,
@@ -456,9 +611,17 @@ async def update_payment_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
+    except SettlementConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "SETTLEMENT_STALE", "message": str(exc)},
+        ) from exc
+    except RefundSettlementError as exc:
+        raise _refund_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "PAYMENT_INVALID_INPUT", "message": str(exc)},
         ) from exc
 
 
@@ -467,7 +630,11 @@ async def update_payment_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.delete("/payments/{payment_id}", response_model=PaymentMutationResponse)
+@router.delete(
+    "/payments/{payment_id}",
+    response_model=PaymentMutationResponse,
+    responses=_PAYMENT_MUTATION_ERROR_RESPONSES,
+)
 async def delete_payment_endpoint(
     payment_id: uuid.UUID,
     user: User = Depends(current_mfa_user),
@@ -485,4 +652,16 @@ async def delete_payment_endpoint(
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except SettlementConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "SETTLEMENT_STALE", "message": str(exc)},
+        ) from exc
+    except RefundSettlementError as exc:
+        raise _refund_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "PAYMENT_INVALID_INPUT", "message": str(exc)},
         ) from exc

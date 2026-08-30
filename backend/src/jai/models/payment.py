@@ -136,6 +136,10 @@ class Payment(Base):
             "AND invoice_id IS NULL AND quote_id IS NULL)",
             name="ck_payment_direction_context",
         ),
+        CheckConstraint(
+            "amount > 0 AND base_amount > 0 AND exchange_rate > 0",
+            name="ck_payment_positive_amounts_m12",
+        ),
     )
 
 

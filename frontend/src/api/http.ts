@@ -24,7 +24,7 @@ export class ApiError extends Error {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function humanMessage(status: number, body: unknown): string {
+export function humanMessage(status: number, body: unknown): string {
   if (typeof body === 'string') return body
   if (body && typeof body === 'object') {
     // FastAPI/Pydantic validation error
@@ -42,6 +42,10 @@ function humanMessage(status: number, body: unknown): string {
       }
       if (typeof d === 'object' && d !== null && 'reason' in d) {
         return String((d as { reason: string }).reason)
+      }
+      if (typeof d === 'object' && d !== null && 'message' in d) {
+        const message = (d as { message: unknown }).message
+        if (typeof message === 'string') return message
       }
       return String(d)
     }

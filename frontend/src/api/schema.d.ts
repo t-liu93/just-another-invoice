@@ -1834,6 +1834,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/credit-notes/{credit_note_id}/refunds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Credit Refunds Endpoint */
+        get: operations["list_credit_refunds_endpoint_api_v1_credit_notes__credit_note_id__refunds_get"];
+        put?: never;
+        /** Record Refund Endpoint */
+        post: operations["record_refund_endpoint_api_v1_credit_notes__credit_note_id__refunds_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{refund_id}/refund-confirmation/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Refund Confirmation Endpoint
+         * @description Frozen Step 7 route contract; the renderer is intentionally Step 9.
+         */
+        get: operations["preview_refund_confirmation_endpoint_api_v1_payments__refund_id__refund_confirmation_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{refund_id}/refund-confirmation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Refund Confirmation Endpoint
+         * @description Frozen Step 7 route contract; artifact retention is Step 9.
+         */
+        get: operations["download_refund_confirmation_endpoint_api_v1_payments__refund_id__refund_confirmation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{refund_id}/send-refund-confirmation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Refund Confirmation Endpoint
+         * @description Frozen Step 7 route contract; email/artifact delivery is Step 9.
+         */
+        post: operations["send_refund_confirmation_endpoint_api_v1_payments__refund_id__send_refund_confirmation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments": {
         parameters: {
             query?: never;
@@ -3592,7 +3670,7 @@ export interface components {
          * @description Append-only, safe-to-display lifecycle facts for a document chain.
          * @enum {string}
          */
-        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED" | "REPLACEMENT_CREATED" | "COMPENSATING_INVOICE_CREATED" | "PROJECT_CANCELLATION_CREDIT_CREATED";
+        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED" | "REFUND_CREATED" | "REFUND_UPDATED" | "REFUND_DELETED" | "REPLACEMENT_CREATED" | "COMPENSATING_INVOICE_CREATED" | "PROJECT_CANCELLATION_CREDIT_CREATED";
         /**
          * DocumentChainNodeRead
          * @description A Quote, formal document or cash row in stable chain order.
@@ -6350,6 +6428,23 @@ export interface components {
             note?: string | null;
         };
         /**
+         * PaymentInputErrorDetail
+         * @description Safe, machine-readable 409/422 detail for mutable payment endpoints.
+         */
+        PaymentInputErrorDetail: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /**
+         * PaymentInputErrorResponse
+         * @description Stable error envelope used by Refund CRUD and generic payment mutations.
+         */
+        PaymentInputErrorResponse: {
+            detail: components["schemas"]["PaymentInputErrorDetail"];
+        };
+        /**
          * PaymentListItem
          * @description Minimal overview row for the global payments list (GET /api/v1/payments).
          *
@@ -6366,7 +6461,7 @@ export interface components {
              * Origin Type
              * @enum {string}
              */
-            origin_type: "INVOICE" | "QUOTE";
+            origin_type: "INVOICE" | "QUOTE" | "CREDIT_NOTE";
             /** Invoice Id */
             invoice_id?: string | null;
             /** Invoice Number */
@@ -6473,6 +6568,7 @@ export interface components {
             deleted: boolean;
             quote?: components["schemas"]["QuotePaymentsResponse"] | null;
             invoice?: components["schemas"]["InvoicePaymentsResponse"] | null;
+            refund?: components["schemas"]["RefundCollectionRead"] | null;
         };
         /**
          * PaymentRead
@@ -6488,7 +6584,7 @@ export interface components {
              * Origin Type
              * @enum {string}
              */
-            origin_type: "INVOICE" | "QUOTE";
+            origin_type: "INVOICE" | "QUOTE" | "CREDIT_NOTE";
             /** Invoice Id */
             invoice_id?: string | null;
             /** Invoice Number */
@@ -7737,6 +7833,47 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * RefundCollectionRead
+         * @description Refund cash linked to one issued Credit Note; all money is service-derived.
+         */
+        RefundCollectionRead: {
+            /**
+             * Credit Note Id
+             * Format: uuid
+             */
+            credit_note_id: string;
+            /** Credit Note Number */
+            credit_note_number?: string | null;
+            /**
+             * Source Invoice Id
+             * Format: uuid
+             */
+            source_invoice_id: string;
+            /** Currency */
+            currency: string;
+            /** Issued Entitlement */
+            issued_entitlement: string;
+            /** Base Issued Entitlement */
+            base_issued_entitlement: string;
+            /** Refunded Total */
+            refunded_total: string;
+            /** Base Refunded Total */
+            base_refunded_total: string;
+            /** Remaining Entitlement */
+            remaining_entitlement: string;
+            /** Base Remaining Entitlement */
+            base_remaining_entitlement: string;
+            /** Chain Refund Due Amount */
+            chain_refund_due_amount: string;
+            /** Base Chain Refund Due Amount */
+            base_chain_refund_due_amount: string;
+            /**
+             * Items
+             * @default []
+             */
+            items?: components["schemas"]["PaymentRead"][];
         };
         /**
          * RegisterRequest
@@ -12417,6 +12554,187 @@ export interface operations {
             };
         };
     };
+    list_credit_refunds_endpoint_api_v1_credit_notes__credit_note_id__refunds_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credit_note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefundCollectionRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInputErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInputErrorResponse"];
+                };
+            };
+        };
+    };
+    record_refund_endpoint_api_v1_credit_notes__credit_note_id__refunds_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credit_note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefundCollectionRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInputErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInputErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_refund_confirmation_endpoint_api_v1_payments__refund_id__refund_confirmation_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_refund_confirmation_endpoint_api_v1_payments__refund_id__refund_confirmation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_refund_confirmation_endpoint_api_v1_payments__refund_id__send_refund_confirmation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailLogRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_payments_endpoint_api_v1_payments_get: {
         parameters: {
             query?: {
@@ -12515,13 +12833,22 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentMutationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInputErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PaymentInputErrorResponse"];
                 };
             };
         };
@@ -12546,13 +12873,22 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentMutationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInputErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PaymentInputErrorResponse"];
                 };
             };
         };

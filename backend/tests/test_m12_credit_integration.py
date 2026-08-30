@@ -1424,6 +1424,72 @@ async def test_credit_dates_update_identity_and_paid_source_settlement_are_guard
     assert deleted_state.json()["refund_due_amount"] == "0.000"
 
 
+async def test_refund_crud_date_limit_and_stranded_incoming_rollback(
+    db_client: AsyncClient,
+) -> None:
+    """Step 7: positive refund cash is Credit-bound and revalidates incoming edits."""
+    await _full_auth(db_client)
+    seeds = await _setup_company(db_client)
+    source = await _issued_standard(db_client, seeds["rates"]["NL standard (21%)"]["id"])
+    incoming = await db_client.post(
+        f"/api/v1/invoices/{source['id']}/payments",
+        json={"payment_date": "2026-02-02", "amount": "121.00"},
+    )
+    assert incoming.status_code == 201, incoming.text
+    draft = await db_client.post(
+        f"/api/v1/invoices/{source['id']}/credit-notes",
+        json=_credit_payload(invoice_date="2026-02-03"),
+    )
+    assert draft.status_code == 201, draft.text
+    issued = await db_client.post(
+        f"/api/v1/invoices/{draft.json()['id']}/status", json={"status": "SENT"}
+    )
+    assert issued.status_code == 200, issued.text
+    credit_id = draft.json()["id"]
+    before_date = await db_client.post(
+        f"/api/v1/credit-notes/{credit_id}/refunds",
+        json={"payment_date": "2026-02-02", "amount": "1.00"},
+    )
+    assert before_date.status_code == 422
+    assert before_date.json()["detail"]["code"] == "REFUND_DATE_BEFORE_CREDIT"
+    created = await db_client.post(
+        f"/api/v1/credit-notes/{credit_id}/refunds",
+        json={"payment_date": "2026-02-04", "amount": "60.00", "note": "partial"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["refunded_total"] == "60.000"
+    refund_id = created.json()["items"][0]["id"]
+    assert created.json()["items"][0]["direction"] == "REFUND"
+    assert created.json()["items"][0]["tax_breakdown"] == []
+    over = await db_client.post(
+        f"/api/v1/credit-notes/{credit_id}/refunds",
+        json={"payment_date": "2026-02-04", "amount": "62.00"},
+    )
+    assert over.status_code == 422
+    assert over.json()["detail"]["code"] == "REFUND_COVERAGE_EXCEEDED"
+    updated = await db_client.put(
+        f"/api/v1/payments/{refund_id}",
+        json={"payment_date": "2026-02-04", "amount": "100.00", "note": "updated"},
+    )
+    assert updated.status_code == 200, updated.text
+    stranded = await db_client.put(
+        f"/api/v1/payments/{incoming.json()['items'][0]['id']}",
+        json={"payment_date": "2026-02-02", "amount": "50.00"},
+    )
+    assert stranded.status_code == 422
+    assert stranded.json()["detail"]["code"] == "REFUND_COVERAGE_EXCEEDED"
+    still_present = await db_client.get(f"/api/v1/credit-notes/{credit_id}/refunds")
+    assert still_present.status_code == 200
+    assert still_present.json()["refunded_total"] == "100.000"
+    deleted = await db_client.delete(f"/api/v1/payments/{refund_id}")
+    assert deleted.status_code == 200, deleted.text
+    assert Decimal(
+        (await db_client.get(f"/api/v1/credit-notes/{credit_id}/refunds")).json()[
+            "refunded_total"
+        ]
+    ) == Decimal("0")
+
+
 async def test_advance_and_final_credit_sources_and_final_draft_freeze(
     db_client: AsyncClient,
     db_session_maker: async_sessionmaker[AsyncSession],

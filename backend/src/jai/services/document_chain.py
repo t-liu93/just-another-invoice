@@ -91,6 +91,9 @@ _EVENT_METADATA_MODELS: dict[DocumentChainEventType, type[_EventMetadata]] = {
     DocumentChainEventType.INVOICE_PAYMENT_CREATED: _PaymentMetadata,
     DocumentChainEventType.INVOICE_PAYMENT_UPDATED: _PaymentMetadata,
     DocumentChainEventType.INVOICE_PAYMENT_DELETED: _PaymentMetadata,
+    DocumentChainEventType.REFUND_CREATED: _PaymentMetadata,
+    DocumentChainEventType.REFUND_UPDATED: _PaymentMetadata,
+    DocumentChainEventType.REFUND_DELETED: _PaymentMetadata,
     DocumentChainEventType.REPLACEMENT_CREATED: _CreditRelationMetadata,
     DocumentChainEventType.COMPENSATING_INVOICE_CREATED: _CreditRelationMetadata,
     DocumentChainEventType.PROJECT_CANCELLATION_CREDIT_CREATED: _CancellationCreditMetadata,
@@ -203,19 +206,76 @@ async def conversion_is_available(session: AsyncSession, quote: Quote) -> bool:
     )
 
 
-def _totals(invoices: list[Invoice], quote_payments: list[Payment]) -> DocumentChainTotals:
+def compute_document_chain_totals(
+    invoices: list[Invoice], quote_payments: list[Payment], *, quote: Quote | None = None
+) -> DocumentChainTotals:
+    """Return the one settlement projection shared by chain and Quote reads."""
     zero = Decimal("0")
-    charge = sum((Decimal(str(i.payable_before_payments)) for i in invoices), zero)
-    credit = sum((Decimal(str(i.credited_total)) for i in invoices), zero)
-    incoming = sum((Decimal(str(i.incoming_payment_total)) for i in invoices), zero)
-    refund = sum((Decimal(str(i.refunded_total)) for i in invoices), zero)
-    base_charge = sum((Decimal(str(i.base_payable_before_payments)) for i in invoices), zero)
-    base_credit = sum((Decimal(str(i.base_credited_total)) for i in invoices), zero)
-    base_incoming = sum((Decimal(str(i.base_incoming_payment_total)) for i in invoices), zero)
-    base_refund = sum((Decimal(str(i.base_refunded_total)) for i in invoices), zero)
+    issued_charges = [
+        invoice
+        for invoice in invoices
+        if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.CREDIT_NOTE
+        and InvoiceStatus(invoice.status) in {InvoiceStatus.SENT, InvoiceStatus.COMPLETED}
+    ]
+    # M11.5 receipt-only cash is permanently linked to its one complete
+    # Standard Invoice at conversion, including while it remains a DRAFT. It
+    # must therefore carry that pending settlement basis in this projection;
+    # otherwise the exact same cash becomes a false ``refund_due_amount``.
+    # No ordinary DRAFT or unissued formal document is admitted here.
+    receipt_only_draft_charges: list[Invoice] = []
+    receipt_only_pending_quote_charge = False
+    if (
+        quote is not None
+        and QuoteSettlementMode(quote.settlement_mode) == QuoteSettlementMode.RECEIPT_ONLY
+    ):
+        receipt_only_draft_charges = [
+            invoice
+            for invoice in invoices
+            if InvoiceDocumentKind(invoice.document_kind) == InvoiceDocumentKind.STANDARD
+            and InvoiceStatus(invoice.status) == InvoiceStatus.DRAFT
+            and any(payment.invoice_id == invoice.id for payment in quote_payments)
+        ]
+        # Before conversion, or after deleting that DRAFT, quote-origin cash
+        # has no Invoice row but is still deferred M11.5 settlement cash—not
+        # an available refund. Pair it with the accepted Quote basis until a
+        # complete Standard DRAFT takes ownership again.
+        receipt_only_pending_quote_charge = not invoices and bool(quote_payments)
+    settlement_charges = [*issued_charges, *receipt_only_draft_charges]
+    positive_documents = [
+        invoice
+        for invoice in invoices
+        if InvoiceDocumentKind(invoice.document_kind) != InvoiceDocumentKind.CREDIT_NOTE
+    ]
+    charge = sum(
+        (Decimal(str(i.payable_before_payments)) for i in settlement_charges), zero
+    )
+    credit = sum((Decimal(str(i.credited_total)) for i in settlement_charges), zero)
+    # Receipt-only cash can already be attached to its complete Standard while
+    # that document is a DRAFT. Cash caches therefore use every positive node;
+    # the narrow receipt-only pairing above supplies its settlement basis.
+    incoming = sum(
+        (Decimal(str(i.incoming_payment_total)) for i in positive_documents), zero
+    )
+    refund = sum((Decimal(str(i.refunded_total)) for i in settlement_charges), zero)
+    base_charge = sum(
+        (Decimal(str(i.base_payable_before_payments)) for i in settlement_charges), zero
+    )
+    base_credit = sum(
+        (Decimal(str(i.base_credited_total)) for i in settlement_charges), zero
+    )
+    base_incoming = sum(
+        (Decimal(str(i.base_incoming_payment_total)) for i in positive_documents), zero
+    )
+    base_refund = sum(
+        (Decimal(str(i.base_refunded_total)) for i in settlement_charges), zero
+    )
     if not invoices:
         incoming = sum((Decimal(str(p.amount)) for p in quote_payments), zero)
         base_incoming = sum((Decimal(str(p.base_amount)) for p in quote_payments), zero)
+        if receipt_only_pending_quote_charge:
+            assert quote is not None
+            charge = Decimal(str(quote.total_incl_vat))
+            base_charge = Decimal(str(quote.base_total_incl_vat))
     return DocumentChainTotals(
         charge_total=charge,
         credit_total=credit,
@@ -229,6 +289,53 @@ def _totals(invoices: list[Invoice], quote_payments: list[Payment]) -> DocumentC
         base_refund_total=base_refund,
         base_due_amount=max(base_charge - base_credit - base_incoming + base_refund, zero),
         base_refund_due_amount=max(base_incoming - base_refund - base_charge + base_credit, zero),
+    )
+
+
+async def direct_document_component_ids(
+    session: AsyncSession, *, company_id: uuid.UUID, invoice_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Return the Step 6 direct correction/follow-up component in ID order.
+
+    This is discovery only.  Mutating callers must subsequently lock every
+    returned Invoice in canonical order before making a business decision.
+    """
+    return list(
+        (
+            await session.execute(
+                text(
+                    "WITH RECURSIVE component(id, path) AS ("
+                    " SELECT CAST(:invoice_id AS uuid), ARRAY[CAST(:invoice_id AS uuid)]"
+                    " UNION ALL "
+                    " SELECT edge.id, component.path || edge.id "
+                    " FROM component "
+                    " JOIN LATERAL ("
+                    "   SELECT correction.credit_note_id AS id "
+                    "   FROM invoice_correction AS correction "
+                    "   WHERE correction.company_id = CAST(:company_id AS uuid) "
+                    "     AND correction.source_invoice_id = component.id "
+                    "   UNION "
+                    "   SELECT correction.source_invoice_id AS id "
+                    "   FROM invoice_correction AS correction "
+                    "   WHERE correction.company_id = CAST(:company_id AS uuid) "
+                    "     AND correction.credit_note_id = component.id "
+                    "   UNION "
+                    "   SELECT relation.invoice_id AS id "
+                    "   FROM invoice_relation AS relation "
+                    "   WHERE relation.company_id = CAST(:company_id AS uuid) "
+                    "     AND relation.related_credit_note_id = component.id "
+                    "   UNION "
+                    "   SELECT relation.related_credit_note_id AS id "
+                    "   FROM invoice_relation AS relation "
+                    "   WHERE relation.company_id = CAST(:company_id AS uuid) "
+                    "     AND relation.invoice_id = component.id"
+                    " ) AS edge ON TRUE "
+                    " WHERE NOT edge.id = ANY(component.path)"
+                    ") SELECT DISTINCT id FROM component ORDER BY id"
+                ),
+                {"invoice_id": invoice_id, "company_id": company_id},
+            )
+        ).scalars()
     )
 
 
@@ -269,6 +376,7 @@ async def get_document_chain(
                     or_(
                         Payment.quote_id == quote.id,
                         Payment.invoice_id.in_(invoice_ids or [uuid.uuid4()]),
+                        Payment.credit_note_id.in_(invoice_ids or [uuid.uuid4()]),
                     ),
                 )
                 .order_by(Payment.created_at, Payment.id)
@@ -291,7 +399,7 @@ async def get_document_chain(
         ).scalars()
     )
     quote_payments = [payment for payment in payments if payment.quote_id == quote.id]
-    totals = _totals(invoices, quote_payments)
+    totals = compute_document_chain_totals(invoices, quote_payments, quote=quote)
     node_rows: list[tuple[tuple[object, int, str], DocumentChainNodeRead]] = [
         (
             (quote.created_at, 0, str(quote.id)),
@@ -331,7 +439,14 @@ async def get_document_chain(
                 node_type="PAYMENT",
                 number=None,
                 occurred_on=payment.payment_date,
-                incoming_payment_amount=Decimal(str(payment.amount)),
+                incoming_payment_amount=(
+                    Decimal(str(payment.amount))
+                    if payment.direction.value == "INCOMING" else Decimal("0")
+                ),
+                refund_amount=(
+                    Decimal(str(payment.amount))
+                    if payment.direction.value == "REFUND" else Decimal("0")
+                ),
             ),
         )
         for payment in payments
@@ -377,6 +492,14 @@ async def get_document_chain(
                 DocumentChainRelationRead(
                     relation_type="INVOICE_TO_PAYMENT",
                     from_node_id=payment.invoice_id,
+                    to_node_id=payment.id,
+                )
+            )
+        if payment.credit_note_id is not None and payment.credit_note_id in invoice_ids:
+            relations.append(
+                DocumentChainRelationRead(
+                    relation_type="CREDIT_NOTE_TO_REFUND",
+                    from_node_id=payment.credit_note_id,
                     to_node_id=payment.id,
                 )
             )
@@ -472,42 +595,8 @@ async def get_invoice_document_chain(
         # One company-scoped recursive CTE finds the complete component from
         # any member.  The UUID path prevents corrupted/cyclic provenance from
         # causing an unbounded walk; all subsequent reads are fixed bulk queries.
-        component_ids = list(
-            (
-                await session.execute(
-                    text(
-                        "WITH RECURSIVE component(id, path) AS ("
-                        " SELECT CAST(:invoice_id AS uuid), ARRAY[CAST(:invoice_id AS uuid)]"
-                        " UNION ALL "
-                        " SELECT edge.id, component.path || edge.id "
-                        " FROM component "
-                        " JOIN LATERAL ("
-                        "   SELECT correction.credit_note_id AS id "
-                        "   FROM invoice_correction AS correction "
-                        "   WHERE correction.company_id = CAST(:company_id AS uuid) "
-                        "     AND correction.source_invoice_id = component.id "
-                        "   UNION "
-                        "   SELECT correction.source_invoice_id AS id "
-                        "   FROM invoice_correction AS correction "
-                        "   WHERE correction.company_id = CAST(:company_id AS uuid) "
-                        "     AND correction.credit_note_id = component.id "
-                        "   UNION "
-                        "   SELECT relation.invoice_id AS id "
-                        "   FROM invoice_relation AS relation "
-                        "   WHERE relation.company_id = CAST(:company_id AS uuid) "
-                        "     AND relation.related_credit_note_id = component.id "
-                        "   UNION "
-                        "   SELECT relation.related_credit_note_id AS id "
-                        "   FROM invoice_relation AS relation "
-                        "   WHERE relation.company_id = CAST(:company_id AS uuid) "
-                        "     AND relation.invoice_id = component.id"
-                        " ) AS edge ON TRUE "
-                        " WHERE NOT edge.id = ANY(component.path)"
-                        ") SELECT DISTINCT id FROM component ORDER BY id"
-                    ),
-                    {"invoice_id": invoice.id, "company_id": company_id},
-                )
-            ).scalars()
+        component_ids = await direct_document_component_ids(
+            session, company_id=company_id, invoice_id=invoice.id
         )
         direct_invoices = list(
             (
@@ -554,7 +643,10 @@ async def get_invoice_document_chain(
                     select(Payment)
                     .where(
                         Payment.company_id == company_id,
-                        Payment.invoice_id.in_(direct_invoice_ids),
+                        or_(
+                            Payment.invoice_id.in_(direct_invoice_ids),
+                            Payment.credit_note_id.in_(direct_invoice_ids),
+                        ),
                     )
                     .order_by(Payment.created_at, Payment.id)
                 )
@@ -595,7 +687,14 @@ async def get_invoice_document_chain(
                     id=payment.id,
                     node_type="PAYMENT",
                     occurred_on=payment.payment_date,
-                    incoming_payment_amount=Decimal(str(payment.amount)),
+                    incoming_payment_amount=(
+                        Decimal(str(payment.amount))
+                        if payment.direction.value == "INCOMING" else Decimal("0")
+                    ),
+                    refund_amount=(
+                        Decimal(str(payment.amount))
+                        if payment.direction.value == "REFUND" else Decimal("0")
+                    ),
                 )
                 for payment in payments
             ],
@@ -612,6 +711,15 @@ async def get_invoice_document_chain(
                 )
                 for payment in payments
                 if payment.invoice_id is not None
+            ]
+            + [
+                DocumentChainRelationRead(
+                    relation_type="CREDIT_NOTE_TO_REFUND",
+                    from_node_id=payment.credit_note_id,
+                    to_node_id=payment.id,
+                )
+                for payment in payments
+                if payment.credit_note_id is not None
             ]
             + [
                 DocumentChainRelationRead(
@@ -641,7 +749,7 @@ async def get_invoice_document_chain(
                 )
                 for event in events
             ],
-            totals=_totals(direct_invoices, []),
+            totals=compute_document_chain_totals(direct_invoices, []),
             available_actions=[
                 DocumentChainAvailableActionRead(code="CREATE_ADVANCE", available=False),
                 DocumentChainAvailableActionRead(code="CREATE_CREDIT_NOTE", available=False),

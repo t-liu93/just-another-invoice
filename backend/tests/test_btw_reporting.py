@@ -587,6 +587,10 @@ def _build_session(
 
     invoke_results: list[MagicMock] = []
 
+    # compute_vat_return is also the shared RLS entry point for PaymentTax.
+    # The SET LOCAL result is intentionally ignored by the service.
+    invoke_results.append(MagicMock())
+
     # Result 1: invoices
     inv_result = MagicMock()
     inv_result.scalars.return_value.all.return_value = invoices

@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 from starlette.types import Scope
@@ -41,6 +42,33 @@ from jai.db import get_engine, get_session_maker
 from jai.startup import check_db_migration
 
 logger = logging.getLogger("jai")
+
+
+def _m12_refund_validation_code(request: Request) -> str | None:
+    """Return the stable input code for the public Step 7 payment paths.
+
+    Request-model validation happens before a route's ``try``/``except``
+    blocks. Keep the compatibility adjustment deliberately route-local: all
+    other APIs retain FastAPI's normal field-error response.
+    """
+    parts = request.url.path.strip("/").split("/")
+    if (
+        request.method in {"GET", "POST"}
+        and len(parts) == 5
+        and parts[:3] == ["api", "v1", "credit-notes"]
+        and parts[4] == "refunds"
+    ):
+        return "REFUND_INVALID_INPUT"
+    if (
+        request.method in {"PUT", "DELETE"}
+        and len(parts) == 4
+        and parts[:3] == ["api", "v1", "payments"]
+    ):
+        # These generic mutation routes also serve existing Incoming payments.
+        # They cannot know persisted direction before validation, so the
+        # stable payment-input code deliberately remains direction-neutral.
+        return "PAYMENT_INVALID_INPUT"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +187,28 @@ def create_app() -> FastAPI:
         openapi_url="/api/v1/openapi.json",
         lifespan=lifespan,
     )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Keep the locked Step 7 refund error body machine-readable."""
+        code = _m12_refund_validation_code(request)
+        if code is not None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": {
+                        "code": code,
+                        "message": "The payment input is invalid.",
+                    }
+                },
+            )
+        # Match FastAPI's built-in RequestValidationError handler exactly for
+        # every route outside the intentionally narrow M12 compatibility path.
+        from fastapi.exception_handlers import request_validation_exception_handler
+
+        return await request_validation_exception_handler(request, exc)
 
     # -- Dev CORS -----------------------------------------------------------
     # Allow the Vite dev server (port 5173) to call the API.

@@ -74,6 +74,7 @@ from jai.schemas.setting import (
 )
 from jai.services.document_chain import (
     append_document_chain_event,
+    compute_document_chain_totals,
     conversion_is_available,
     lock_quote_mode,
     quote_has_converted_invoice,
@@ -358,12 +359,7 @@ def _quote_to_read(
 
 
 async def _quote_chain_totals(session: AsyncSession, quote: Quote) -> DocumentChainTotals:
-    """Return the compact M12 chain projection for legacy DIRECT/RECEIPT_ONLY.
-
-    Step 1 has no formal applications, Credits, or refunds yet, but keeps all
-    seven transaction/base concepts explicit so later steps extend one typed
-    projection instead of changing Quote arithmetic client-side.
-    """
+    """Load inputs for the authoritative M12 compact chain projection."""
     invoices = list(
         (
             await session.execute(
@@ -374,54 +370,17 @@ async def _quote_chain_totals(session: AsyncSession, quote: Quote) -> DocumentCh
             )
         ).scalars()
     )
-    if invoices:
-        charge = sum((Decimal(str(i.payable_before_payments)) for i in invoices), Decimal("0"))
-        incoming = sum((Decimal(str(i.incoming_payment_total)) for i in invoices), Decimal("0"))
-        credit = sum((Decimal(str(i.credited_total)) for i in invoices), Decimal("0"))
-        refund = sum((Decimal(str(i.refunded_total)) for i in invoices), Decimal("0"))
-        base_charge = sum(
-            (Decimal(str(i.base_payable_before_payments)) for i in invoices), Decimal("0")
-        )
-        base_incoming = sum(
-            (Decimal(str(i.base_incoming_payment_total)) for i in invoices), Decimal("0")
-        )
-        base_credit = sum((Decimal(str(i.base_credited_total)) for i in invoices), Decimal("0"))
-        base_refund = sum((Decimal(str(i.base_refunded_total)) for i in invoices), Decimal("0"))
-    else:
-        # RECEIPT_ONLY before conversion has cash but no issued charge. It is
-        # intentionally not a formal document charge and therefore cannot be
-        # mistaken for an Advance in later chain totals.
-        payment_totals = (
+    quote_payments = list(
+        (
             await session.execute(
-                select(
-                    func.coalesce(func.sum(Payment.amount), 0),
-                    func.coalesce(func.sum(Payment.base_amount), 0),
-                ).where(Payment.quote_id == quote.id)
+                select(Payment).where(
+                    Payment.company_id == quote.company_id,
+                    Payment.quote_id == quote.id,
+                )
             )
-        ).one()
-        charge = credit = refund = base_charge = base_credit = base_refund = Decimal("0")
-        incoming = Decimal(str(payment_totals[0]))
-        base_incoming = Decimal(str(payment_totals[1]))
-    net_charge = charge - credit
-    net_cash = incoming - refund
-    base_net_charge = base_charge - base_credit
-    base_net_cash = base_incoming - base_refund
-    return DocumentChainTotals(
-        charge_total=charge,
-        credit_total=credit,
-        incoming_payment_total=incoming,
-        refund_total=refund,
-        application_total=Decimal("0"),
-        due_amount=max(net_charge - net_cash, Decimal("0")),
-        refund_due_amount=max(net_cash - net_charge, Decimal("0")),
-        base_charge_total=base_charge,
-        base_credit_total=base_credit,
-        base_incoming_payment_total=base_incoming,
-        base_refund_total=base_refund,
-        base_application_total=Decimal("0"),
-        base_due_amount=max(base_net_charge - base_net_cash, Decimal("0")),
-        base_refund_due_amount=max(base_net_cash - base_net_charge, Decimal("0")),
+        ).scalars()
     )
+    return compute_document_chain_totals(invoices, quote_payments, quote=quote)
 
 
 def _quote_to_list_item(q: Quote, *, customer_name: str) -> QuoteListItem:
@@ -763,6 +722,9 @@ async def get_quote(
 
     Applies read-time expiry check before returning.
     """
+    # Compact totals can read quote-origin Payment rows.  The runtime role is
+    # NOBYPASSRLS, so establish the tenant context before any such read.
+    await set_rls_company(session, company_id)
     stmt = select(Quote).where(
         Quote.id == quote_id,
         Quote.company_id == company_id,
