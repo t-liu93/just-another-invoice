@@ -54,6 +54,7 @@ const props = defineProps<{
   convertedInvoiceId?: string | null
   customerEmail?: string | null
   customerLocale?: 'en' | 'zh' | null
+  canRecordPayment?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -109,6 +110,8 @@ const mutationBusy = computed(() => isPaymentMutationBusy(
 ))
 
 const quoteAllowsMutations = computed(() =>
+  props.canRecordPayment !== false
+  &&
   props.quoteStatus === 'ACCEPTED'
   && !props.convertedInvoiceId
   && !aggregate.value?.converted_invoice_id

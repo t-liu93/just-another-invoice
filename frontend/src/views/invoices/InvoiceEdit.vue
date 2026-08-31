@@ -7,11 +7,12 @@ import {
   useMessage,
   NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert,
   NDivider, NInputNumber, NSelect, NSwitch, NTag, NDatePicker,
-  NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown,
+  NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown, NEmpty,
 } from 'naive-ui'
 import { AddOutline, TrashOutline, DocumentTextOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import InvoicePaymentPanel from '../../components/InvoicePaymentPanel.vue'
+import DocumentWorkflowPanel from '../../components/DocumentWorkflowPanel.vue'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import EmailLogPanel from '../../components/EmailLogPanel.vue'
@@ -26,6 +27,7 @@ import type { components } from '../../api/schema'
 import { persistedReceiptCustomer, receiptAuditTarget } from '../../utils/receiptEmail'
 import { invoiceDocumentKindLabelKey } from '../../utils/documentKind'
 import { invoiceDocumentSendType } from '../../utils/documentSend'
+import { useRouteEntityReload } from '../../composables/useRouteEntityReload'
 
 type CustomerRead = components['schemas']['CustomerRead']
 type VatRateRead = components['schemas']['VatRateRead']
@@ -86,6 +88,7 @@ const {
   paymentRefreshError,
   loadInitialDocumentChain,
   refreshAfterPayment,
+  resetDocumentChain,
 } = useDocumentChainRefresh<DocumentChainRead>(async () => {
   const invoiceId = existingInvoice.value?.id
   if (!invoiceId) throw new Error('Invoice document chain is unavailable')
@@ -372,6 +375,10 @@ function buildWritePayload(): InvoiceWrite | null {
 }
 
 async function handleSave() {
+  // Formal documents intentionally do not share the legacy invoice write
+  // contract.  Their dedicated controls in DocumentWorkflowPanel submit raw
+  // intent to the kind-specific endpoints.
+  if (existingInvoice.value?.document_kind === 'ADVANCE' || existingInvoice.value?.document_kind === 'CREDIT_NOTE') return
   const payload = buildWritePayload()
   if (!payload) {
     message.error(t('invoices.validationError'))
@@ -438,7 +445,21 @@ function populateFromInvoice(inv: InvoiceRead) {
   }))
 }
 
-onMounted(async () => {
+let loadGeneration = 0
+
+function resetInvoiceContext(): void {
+  resetDocumentChain()
+  pageLoading.value = false
+  existingInvoice.value = null
+  preview.value = null
+  previewError.value = null
+  pageError.value = null
+  customerId.value = null
+  lines.value = [emptyLine()]
+}
+
+async function loadPage(id = route.params.id as string | undefined): Promise<void> {
+  const generation = ++loadGeneration
   pageLoading.value = true
   try {
     await Promise.all([
@@ -448,33 +469,52 @@ onMounted(async () => {
       store.fetchProductOptions().then(opts => { productOptions.value = opts }),
     ])
 
-    const id = route.params.id as string | undefined
     if (id && id !== 'new') {
       isEdit.value = true
       const inv = await store.fetchInvoice(id)
+      if (generation !== loadGeneration) return
       populateFromInvoice(inv)
       await loadInitialDocumentChain()
+      if (generation !== loadGeneration) return
       // Ensure the selected customer is in the list even if not returned by the initial search.
       if (!customers.value.find(c => c.id === inv.customer_id)) {
         const custRes = await get<CustomerRead>(`/api/v1/customers/${inv.customer_id}`)
+        if (generation !== loadGeneration) return
         customers.value = [custRes, ...customers.value]
       }
     } else {
+      isEdit.value = false
       applyDefaultContentBlocks()
     }
   } catch (e: unknown) {
-    pageError.value = e instanceof Error ? e.message : String(e)
+    if (generation === loadGeneration) pageError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    pageLoading.value = false
+    if (generation === loadGeneration) pageLoading.value = false
   }
-})
+}
 
-const isReadOnly = computed(() => existingInvoice.value?.status !== 'DRAFT' && isEdit.value)
+const routeEntityId = computed(() => typeof route.params.id === 'string' ? route.params.id : undefined)
+const routeEntityReload = useRouteEntityReload(routeEntityId, resetInvoiceContext, async (id) => {
+  await loadPage(id)
+})
+onMounted(() => { void routeEntityReload.reload() })
+
+const isReadOnly = computed(() =>
+  (existingInvoice.value?.status !== 'DRAFT' && isEdit.value)
+  || (isEdit.value && existingInvoice.value?.document_kind !== 'STANDARD' && existingInvoice.value?.document_kind !== 'FINAL'),
+)
+// D7: a Final keeps its accepted Quote party/currency/treatment boundary.
+// Currency has no generic editor in this screen; lock the remaining mutable
+// selectors up front instead of relying on a rejected PUT.
+const isFinalDraft = computed(() => isEdit.value
+  && existingInvoice.value?.document_kind === 'FINAL'
+  && existingInvoice.value.status === 'DRAFT')
 
 // Show payment panel only when editing an existing invoice that is SENT or COMPLETED
 const showPaymentPanel = computed(() =>
   isEdit.value &&
   existingInvoice.value !== null &&
+  existingInvoice.value.document_kind !== 'CREDIT_NOTE' &&
   (existingInvoice.value.status === 'SENT' || existingInvoice.value.status === 'COMPLETED' || existingInvoice.value.status === 'DRAFT' || existingInvoice.value.status === 'CANCELLED'),
 )
 
@@ -499,6 +539,16 @@ const handlePaymentsChanged = createDocumentChainPaymentChangeHandler<InvoicePay
   }
   },
 )
+
+async function retryInitialDocumentChain(): Promise<void> {
+  if (chainRefreshing.value) return
+  await loadInitialDocumentChain()
+}
+
+async function retryPaymentDocumentChain(): Promise<void> {
+  if (chainRefreshing.value) return
+  await refreshAfterPayment()
+}
 
 const fmtMoney = (v: string | number) => Number(v).toFixed(2)
 
@@ -662,44 +712,40 @@ function handleReceiptSent(log: EmailLogRead) {
               </n-space>
             </div>
 
-            <n-card v-if="documentChain || chainRefreshing || initialChainError || paymentRefreshError" size="small" class="chain-card">
-              <n-space vertical size="small">
-                <n-text v-if="documentChain" strong>{{ t('chain.billingMode') }}: {{ documentChain.settlement_mode }}</n-text>
-                <n-text depth="3">{{ t('chain.readOnly') }}</n-text>
-                <n-spin v-if="chainRefreshing" size="small" />
-                <n-alert v-if="initialChainError" type="error">
-                  {{ t('chain.initialLoadFailed') }}
-                </n-alert>
-                <n-button v-if="initialChainError" text type="primary" :loading="chainRefreshing" @click="loadInitialDocumentChain">
-                  {{ t('chain.retry') }}
-                </n-button>
-                <n-alert v-if="paymentRefreshError" type="error">
-                  {{ t('chain.paymentRefreshFailed') }}
-                </n-alert>
-                <n-button v-if="paymentRefreshError" text type="primary" :loading="chainRefreshing" @click="refreshAfterPayment">
-                  {{ t('chain.retry') }}
-                </n-button>
-                <template v-if="documentChain?.relations.length">
-                  <n-text strong>{{ t('chain.relations') }}</n-text>
-                  <n-list bordered>
-                    <n-list-item v-for="relation in documentChain.relations" :key="`${relation.relation_type}:${relation.from_node_id}:${relation.to_node_id}`">
-                      {{ relation.relation_type }} · {{ relation.from_node_id }} → {{ relation.to_node_id }}
-                    </n-list-item>
-                  </n-list>
-                </template>
-                <n-list v-if="documentChain" bordered>
-                  <n-list-item v-for="event in documentChain.events" :key="event.id">
-                    {{ event.event_type }} · {{ event.occurred_at }}
-                  </n-list-item>
-                </n-list>
-              </n-space>
-            </n-card>
+            <n-alert v-if="initialChainError && !documentChain" type="error" style="margin-bottom: 16px">
+              {{ t('chain.initialLoadFailed') }}
+              <n-button text type="primary" :loading="chainRefreshing" :disabled="chainRefreshing" @click="retryInitialDocumentChain">
+                {{ t('chain.retry') }}
+              </n-button>
+            </n-alert>
+            <n-alert v-if="paymentRefreshError" type="warning" style="margin-bottom: 16px">
+              {{ t('chain.paymentRefreshFailed') }}
+              <n-button text type="primary" :loading="chainRefreshing" :disabled="chainRefreshing" @click="retryPaymentDocumentChain">
+                {{ t('chain.retry') }}
+              </n-button>
+            </n-alert>
+
+            <DocumentWorkflowPanel
+              v-if="existingInvoice && documentChain"
+              :invoice="existingInvoice"
+              :document-chain="documentChain"
+              :refresh-chain="loadInitialDocumentChain"
+              :chain-loading="chainRefreshing"
+              :chain-error="initialChainError ? t('chain.initialLoadFailed') : null"
+              @changed="loadInitialDocumentChain"
+            />
+            <n-empty
+              v-else-if="existingInvoice && initialChainError && !chainRefreshing"
+              :description="t('chain.initialLoadFailed')"
+              size="small"
+              style="margin-bottom: 16px"
+            />
 
             <n-alert v-if="pageError" type="error" style="margin-bottom: 16px">
               {{ pageError }}
             </n-alert>
 
-            <n-form label-placement="top" :disabled="isReadOnly">
+            <n-form v-if="!isEdit || existingInvoice?.document_kind === 'STANDARD' || existingInvoice?.document_kind === 'FINAL'" label-placement="top" :disabled="isReadOnly">
 
               <!-- Invoice header -->
               <n-card :title="t('invoices.headerSection')" style="margin-bottom: 16px">
@@ -708,6 +754,7 @@ function handleReceiptSent(log: EmailLogRead) {
                     <n-form-item :label="t('invoices.customer')" required>
                       <n-select
                         v-model:value="customerId"
+                        :disabled="isFinalDraft"
                         filterable
                         clearable
                         remote
@@ -771,6 +818,7 @@ function handleReceiptSent(log: EmailLogRead) {
                     <n-form-item :label="t('invoices.vatTreatment')">
                       <n-select
                         v-model:value="vatTreatmentId"
+                        :disabled="isFinalDraft"
                         :options="vatTreatmentOptions"
                         :placeholder="t('invoices.vatTreatmentAuto')"
                         clearable

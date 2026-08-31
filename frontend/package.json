@@ -9,7 +9,7 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "codegen": "node scripts/codegen.mjs",
-    "test:unit": "node --experimental-strip-types --test test/*.test.ts"
+    "test:unit": "node --experimental-strip-types --test test/*.test.ts && vitest run test/components --environment happy-dom"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",
@@ -27,11 +27,14 @@
     "@types/node": "^24.12.4",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.5.0",
     "@vue/tsconfig": "^0.9.1",
+    "happy-dom": "^20.12.0",
     "openapi-typescript": "^7.13.0",
     "typescript": "~6.0.2",
     "unplugin-vue-components": "^32.1.0",
     "vite": "^8.0.16",
+    "vitest": "^4.1.11",
     "vue-tsc": "^3.3.3"
   }
 }

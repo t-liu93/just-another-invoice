@@ -320,6 +320,24 @@ class CreditCalculationLineRead(BaseModel):
     base_gross_amount: Decimal
 
 
+class CreditDraftIntentLineRead(BaseModel):
+    """Persisted user selection provenance for editing a Credit DRAFT."""
+
+    source_basis_line_id: uuid.UUID
+    input_mode: CreditLineInputMode
+    quantity: Decimal | None = None
+    gross_amount: Decimal | None = None
+
+
+class CreditDraftIntentRead(BaseModel):
+    """Exact persisted Credit DRAFT input, including its selection mode."""
+
+    full_remaining: bool | None
+    requires_confirmation: bool = False
+    provenance: Literal["NATIVE", "MIGRATED_AMBIGUOUS"] = "NATIVE"
+    lines: list[CreditDraftIntentLineRead] = []
+
+
 class CreditDraftCreate(CreditCalculationRequest):
     model_config = ConfigDict(extra="forbid")
 
@@ -608,7 +626,12 @@ class InvoiceRead(BaseModel):
     issued_by_user_id: uuid.UUID | None = None
     party_snapshot_provenance: PartySnapshotProvenance | None = None
     party_snapshot_locale: Literal["en", "zh"] | None = None
+    party_snapshot_customer_email: str | None = None
     source_invoice_id: uuid.UUID | None = None
+    credit_draft_intent: CreditDraftIntentRead | None = None
+    advance_input_mode: AdvanceInputMode | None = None
+    advance_gross_amount: Decimal | None = None
+    advance_percentage: Decimal | None = None
     replacement_of_credit_note_id: uuid.UUID | None = None
     compensates_credit_note_id: uuid.UUID | None = None
     original_quote_totals: FinalTotalsRead | None = None

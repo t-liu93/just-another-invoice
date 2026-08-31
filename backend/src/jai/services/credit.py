@@ -42,6 +42,7 @@ from jai.schemas.invoice import (
     InvoiceRead,
 )
 from jai.schemas.setting import SETTING_KEY_CREDIT_NUMBERING, CreditNumberingConfig
+from jai.services.document_actions import credit_note_eligibility
 from jai.services.document_chain import append_document_chain_event
 from jai.services.invoice import _load_invoice_read
 from jai.services.numbering import allocate_credit_number
@@ -148,24 +149,33 @@ async def _lock_credit_source_context(
     return await _load_source(session, company_id, source_id, lock=True)
 
 
-async def _assert_advance_not_final_frozen(session: AsyncSession, source: Invoice) -> None:
-    if (
-        InvoiceDocumentKind(source.document_kind) != InvoiceDocumentKind.ADVANCE
-        or source.quote_id is None
-    ):
+async def _assert_advance_not_final_frozen(
+    session: AsyncSession, source: Invoice, *, allow_stale_exhaustion: bool = False
+) -> None:
+    final_draft_exists = False
+    if source.quote_id is not None:
+        final_draft_exists = (
+            await session.scalar(
+                select(Invoice.id)
+                .where(
+                    Invoice.quote_id == source.quote_id,
+                    Invoice.document_kind == InvoiceDocumentKind.FINAL,
+                    Invoice.status == InvoiceStatus.DRAFT,
+                )
+                .limit(1)
+            )
+    ) is not None
+    eligibility = credit_note_eligibility(source, final_draft_exists=final_draft_exists)
+    # An issue command must replay a pre-existing DRAFT intent under locks.
+    # If a competing Credit consumed the last basis in the meantime, let the
+    # replay turn that into CREDIT_STALE_BASIS rather than replacing it with
+    # the calculate/create projection reason.
+    if allow_stale_exhaustion and eligibility.reason_code == "CREDIT_NO_REMAINING_BASIS":
         return
-    final_draft = await session.scalar(
-        select(Invoice.id)
-        .where(
-            Invoice.quote_id == source.quote_id,
-            Invoice.document_kind == InvoiceDocumentKind.FINAL,
-            Invoice.status == InvoiceStatus.DRAFT,
-        )
-        .limit(1)
-    )
-    if final_draft is not None:
+    if not eligibility.available:
         raise CreditConflictError(
-            "Formal Final DRAFT freezes Advance Credits.", code="FINAL_DRAFT_FREEZE"
+            "This source cannot create a Credit Note in the current chain state.",
+            code=eligibility.reason_code or "CREDIT_ACTION_UNAVAILABLE",
         )
 
 
@@ -312,10 +322,13 @@ async def calculate_credit(
     company_id: uuid.UUID,
     source_id: uuid.UUID,
     request: CreditCalculationRequest,
+    allow_stale_exhaustion: bool = False,
 ) -> CreditCalculationRead:
     await set_rls_company(session, company_id)
     source = await _load_source(session, company_id, source_id, lock=False)
-    await _assert_advance_not_final_frozen(session, source)
+    await _assert_advance_not_final_frozen(
+        session, source, allow_stale_exhaustion=allow_stale_exhaustion
+    )
     issued = await _issued_lines_by_basis(session, company_id, source.id)
     intents = {line.source_basis_line_id: line for line in request.lines}
     known = {line.id for line in source.credit_basis_lines}
@@ -476,6 +489,8 @@ async def _persist_credit_draft(
         session.add(correction)
         correction.lines = []
         await session.flush()
+    correction.full_remaining = body.full_remaining
+    correction.intent_provenance = "NATIVE"
     basis_map = {x.id: x for x in source.credit_basis_lines}
     input_map = {line.source_basis_line_id: line for line in body.lines}
     line_tax_rows: list[tuple[InvoiceLine, CreditCalculationLineRead, InvoiceCreditBasisLine]] = []
@@ -728,8 +743,15 @@ async def issue_credit(
         raise CreditConflictError(
             "Credit source changed while acquiring settlement locks."
         )
-    # The selected correction rows are durable request provenance.  Replay the
-    # input exactly, rather than trusting stale derived line amounts.
+    if correction.full_remaining is None or correction.intent_provenance == "MIGRATED_AMBIGUOUS":
+        raise CreditConflictError(
+            "This migrated Credit DRAFT needs an explicit intent confirmation.",
+            code="CREDIT_DRAFT_INTENT_CONFIRMATION_REQUIRED",
+        )
+    # The selected correction rows are durable request provenance.  A native
+    # full-remaining DRAFT deliberately replays its semantic mode, rather
+    # than its old materialised rows, so it covers the actual remaining basis
+    # at issue time.  Explicit selections replay exactly.
     selections = list(
         (
             await session.execute(
@@ -741,8 +763,8 @@ async def issue_credit(
         ).scalars()
     )
     request = CreditCalculationRequest(
-        full_remaining=False,
-        lines=[
+        full_remaining=bool(correction.full_remaining),
+        lines=[] if correction.full_remaining else [
             CreditCalculationLineInput(
                 source_basis_line_id=x.source_basis_line_id,
                 input_mode=CreditLineInputMode(x.input_mode),
@@ -756,7 +778,11 @@ async def issue_credit(
     )
     try:
         calculation = await calculate_credit(
-            session, company_id=company_id, source_id=source.id, request=request
+            session,
+            company_id=company_id,
+            source_id=source.id,
+            request=request,
+            allow_stale_exhaustion=True,
         )
     except CreditValidationError as exc:
         # A DRAFT was valid when it was saved.  Once a competing issued Credit
@@ -767,7 +793,7 @@ async def issue_credit(
         ) from exc
     selected_by_basis = {row.source_basis_line_id: row for row in selections}
     calculated_by_basis = {row.source_basis_line_id: row for row in calculation.lines}
-    if set(selected_by_basis) != set(calculated_by_basis) or any(
+    if not correction.full_remaining and (set(selected_by_basis) != set(calculated_by_basis) or any(
         (
             Decimal(str(selected.quantity)),
             Decimal(str(selected.net_amount)),
@@ -788,9 +814,31 @@ async def issue_credit(
         )
         for basis_id, selected in selected_by_basis.items()
         for calculated in [calculated_by_basis[basis_id]]
-    ):
+    )):
         raise CreditConflictError(
             "Credit basis changed after the DRAFT was calculated.", code="CREDIT_STALE_BASIS"
+        )
+    if correction.full_remaining:
+        # ``full_remaining`` is semantic intent, not a reservation of the
+        # materialised DRAFT snapshot.  Rebuild *all* owned snapshots from the
+        # issue-time calculation while the source and Credit are locked.  The
+        # same authoritative draft builder owns invoice lines/taxes,
+        # correction lines and all invoice/base totals, so no alternate money
+        # calculation can drift from create/update.
+        await session.refresh(credit, attribute_names=["lines", "taxes"])
+        await _persist_credit_draft(
+            session,
+            source=source,
+            calculation=calculation,
+            body=CreditDraftUpdate(
+                full_remaining=True,
+                invoice_date=credit.invoice_date,
+                due_date=credit.due_date,
+                supply_or_advance_date=credit.supply_or_advance_date,
+                reference_number=credit.reference_number,
+            ),
+            creator_id=credit.creator_id,
+            existing=credit,
         )
     # Freeze source party identity, never current master data.
     snapshot = source.party_snapshot

@@ -148,6 +148,24 @@ test('latest document-chain request wins when deferred responses resolve out of 
   assert.equal(chain.chainRefreshing.value, false)
 })
 
+test('route reset clears its own chain and invalidates both late success and failure', async () => {
+  for (const outcome of ['success', 'failure'] as const) {
+    const request = deferred<Chain>()
+    const chain = useDocumentChainRefresh(() => request.promise)
+    chain.documentChain.value = { settlement_mode: 'A', events: ['OLD'] }
+    const pending = chain.loadInitialDocumentChain()
+    chain.resetDocumentChain()
+    assert.equal(chain.documentChain.value, null)
+    assert.equal(chain.chainRefreshing.value, false)
+    if (outcome === 'success') request.resolve({ settlement_mode: 'B', events: ['NEW'] })
+    else request.reject(new Error('late B failure'))
+    assert.equal(await pending, false)
+    assert.equal(chain.documentChain.value, null)
+    assert.equal(chain.initialChainError.value, null)
+    assert.equal(chain.chainRefreshing.value, false)
+  }
+})
+
 test('scope disposal invalidates deferred success and failure without further state writes', async () => {
   for (const outcome of ['success', 'failure'] as const) {
     const request = deferred<Chain>()

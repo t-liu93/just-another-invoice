@@ -35,6 +35,7 @@ from sqlalchemy.orm import selectinload
 
 from jai.db import set_rls_company
 from jai.models._enums import (
+    AdvanceInputMode,
     DiscountType,
     DocumentChainEventType,
     InvoiceCreditStatus,
@@ -56,6 +57,7 @@ from jai.models.dictionary import Unit
 from jai.models.document import (
     FinalAdvanceApplication,
     FinalAdvanceApplicationTax,
+    InvoiceCorrection,
     InvoiceCreditBasisLine,
     InvoicePartySnapshot,
     InvoiceRelation,
@@ -67,6 +69,8 @@ from jai.models.quote import Quote as _Quote
 from jai.models.quote import QuoteLine as _QuoteLine
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.invoice import (
+    CreditDraftIntentLineRead,
+    CreditDraftIntentRead,
     FinalAdvanceApplicationRead,
     FinalAdvanceApplicationTaxRead,
     FinalTotalsRead,
@@ -369,11 +373,44 @@ def _invoice_to_read(inv: Invoice) -> InvoiceRead:
             if (snapshot := inv.__dict__.get("party_snapshot")) is not None
             else None
         ),
+        party_snapshot_customer_email=(
+            snapshot.buyer_email
+            if (snapshot := inv.__dict__.get("party_snapshot")) is not None
+            else None
+        ),
         source_invoice_id=(
             correction.source_invoice_id
             if (correction := inv.__dict__.get("correction")) is not None
             else None
         ),
+        credit_draft_intent=(
+            CreditDraftIntentRead(
+                full_remaining=correction.full_remaining,
+                requires_confirmation=(
+                    correction.full_remaining is None
+                    or correction.intent_provenance == "MIGRATED_AMBIGUOUS"
+                ),
+                provenance=(
+                    "MIGRATED_AMBIGUOUS"
+                    if correction.intent_provenance == "MIGRATED_AMBIGUOUS"
+                    else "NATIVE"
+                ),
+                lines=[
+                    CreditDraftIntentLineRead(
+                        source_basis_line_id=line.source_basis_line_id,
+                        input_mode=line.input_mode,
+                        quantity=(Decimal(str(line.input_quantity)) if line.input_quantity is not None else None),
+                        gross_amount=(Decimal(str(line.input_gross_amount)) if line.input_gross_amount is not None else None),
+                    )
+                    for line in correction.lines
+                ],
+            )
+            if correction is not None
+            else None
+        ),
+        advance_input_mode=(AdvanceInputMode(inv.advance_input_mode) if inv.advance_input_mode is not None else None),
+        advance_gross_amount=(Decimal(str(inv.advance_gross_amount)) if inv.advance_gross_amount is not None else None),
+        advance_percentage=(Decimal(str(inv.advance_percentage)) if inv.advance_percentage is not None else None),
         replacement_of_credit_note_id=(
             replacement_relation.related_credit_note_id
             if replacement_relation is not None
@@ -598,7 +635,7 @@ async def _load_invoice_read(session: AsyncSession, inv: Invoice) -> InvoiceRead
             selectinload(Invoice.taxes),
             selectinload(Invoice.party_snapshot),
             selectinload(Invoice.credit_basis_lines),
-            selectinload(Invoice.correction),
+            selectinload(Invoice.correction).selectinload(InvoiceCorrection.lines),
             selectinload(Invoice.positive_relations),
             selectinload(Invoice.final_advance_applications).selectinload(
                 FinalAdvanceApplication.taxes
@@ -907,9 +944,9 @@ async def _credit_basis_rows(session: AsyncSession, inv: Invoice) -> list[Invoic
     line_taxes = list(
         (
             await session.execute(
-                select(InvoiceLineTax).join(
-                    InvoiceLine, InvoiceLineTax.invoice_line_id == InvoiceLine.id
-                ).where(InvoiceLine.invoice_id == inv.id)
+                select(InvoiceLineTax)
+                .join(InvoiceLine, InvoiceLineTax.invoice_line_id == InvoiceLine.id)
+                .where(InvoiceLine.invoice_id == inv.id)
             )
         ).scalars()
     )
@@ -1835,7 +1872,10 @@ async def transition_status(
     probe_quote_id = probe.quote_id
     if probe_kind == InvoiceDocumentKind.CREDIT_NOTE:
         return await _transition_credit_status(
-            session, invoice_id=invoice_id, company_id=company_id, body=body,
+            session,
+            invoice_id=invoice_id,
+            company_id=company_id,
+            body=body,
             issued_by_user_id=issued_by_user_id,
         )
     related_standard = (
@@ -1926,10 +1966,7 @@ async def transition_status(
         raise
     if inv is None:
         return None
-    if (
-        InvoiceDocumentKind(inv.document_kind) != probe_kind
-        or inv.quote_id != probe_quote_id
-    ):
+    if InvoiceDocumentKind(inv.document_kind) != probe_kind or inv.quote_id != probe_quote_id:
         raise InvoiceLifecycleConflictError(
             "Invoice changed while acquiring its Quote lock prefix."
         )
@@ -2175,15 +2212,12 @@ async def _transition_credit_status(
             (
                 item
                 for item in context.corrections
-                if item.credit_note_id == invoice_id
-                and item.source_invoice_id == source_id
+                if item.credit_note_id == invoice_id and item.source_invoice_id == source_id
             ),
             None,
         )
         if source is None or correction is None:
-            raise CreditConflictError(
-                "Credit source changed while acquiring settlement locks."
-            )
+            raise CreditConflictError("Credit source changed while acquiring settlement locks.")
         current_status = InvoiceStatus(credit.status)
         if current_status == InvoiceStatus.DRAFT and body.status == InvoiceStatus.SENT:
             await issue_credit(
@@ -2244,6 +2278,7 @@ async def _transition_credit_status(
                 "Concurrent invoice lifecycle mutation; retry the command."
             ) from exc
         raise
+
 
 async def list_invoice_product_options(
     session: AsyncSession,

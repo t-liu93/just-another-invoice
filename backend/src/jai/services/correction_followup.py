@@ -48,7 +48,6 @@ from jai.schemas.invoice import (
     ProjectCancellationSourceRead,
 )
 from jai.services.advance import (
-    AdvanceBucket,
     _remaining_buckets,
     assess_advance_creation,
     is_retryable_transaction_conflict,
@@ -56,11 +55,15 @@ from jai.services.advance import (
 from jai.services.credit import (
     CreditConflictError,
     CreditValidationError,
-    _assert_advance_not_final_frozen,
     _issued_lines_by_basis,
     _persist_credit_draft,
     _remaining_basis,
     calculate_credit,
+)
+from jai.services.document_actions import (
+    advance_replacement_capacity_eligibility,
+    cancellation_eligibility,
+    followup_eligibility,
 )
 from jai.services.document_chain import append_document_chain_event
 from jai.services.invoice import _load_invoice_read
@@ -348,16 +351,15 @@ def _bucket_amounts(invoice: Invoice) -> dict[uuid.UUID, tuple[Decimal, Decimal]
 async def _assert_advance_snapshot_capacity(
     session: AsyncSession, quote: Quote, invoice: Invoice
 ) -> None:
-    available: dict[uuid.UUID, AdvanceBucket] = {
-        bucket.vat_rate_id: bucket for bucket in await _remaining_buckets(session, quote)
+    capacity = {
+        bucket.vat_rate_id: (bucket.taxable_amount, bucket.vat_amount)
+        for bucket in await _remaining_buckets(session, quote)
     }
-    for rate_id, (net, vat) in _bucket_amounts(invoice).items():
-        bucket = available.get(rate_id)
-        if bucket is None or net > bucket.taxable_amount or vat > bucket.vat_amount:
-            raise CorrectionFollowupValidationError(
-                "ADVANCE_REPLACEMENT_CAPACITY",
-                "The credited VAT basis no longer fits the available Advance capacity.",
-            )
+    if not advance_replacement_capacity_eligibility(capacity, _bucket_amounts(invoice)):
+        raise CorrectionFollowupValidationError(
+            "ADVANCE_REPLACEMENT_CAPACITY",
+            "The credited VAT basis no longer fits the available Advance capacity.",
+        )
 
 
 async def _create_followup(
@@ -373,14 +375,35 @@ async def _create_followup(
         quote, charges, source, credit = await _lock_credit_context(
             session, company_id=company_id, credit_id=credit_id
         )
-        if await _existing_relation(session, credit.id):
+        has_final = any(
+            InvoiceDocumentKind(item.document_kind) == InvoiceDocumentKind.FINAL
+            for item in charges
+        )
+        open_advance_draft_exists = any(
+            InvoiceDocumentKind(item.document_kind) == InvoiceDocumentKind.ADVANCE
+            and InvoiceStatus(item.status) == InvoiceStatus.DRAFT
+            for item in charges
+        )
+        replacement, compensation = followup_eligibility(
+            credit,
+            source,
+            mode=QuoteSettlementMode(quote.settlement_mode) if quote is not None else None,
+            final_exists=has_final,
+            open_advance_draft_exists=open_advance_draft_exists,
+            existing_followup=await _existing_relation(session, credit.id),
+        )
+        selected = replacement if relation_type == InvoiceRelationType.REPLACEMENT_OF else compensation
+        if not selected.available:
+            if selected.reason_code == "REPLACEMENT_NOT_ELIGIBLE":
+                raise CorrectionFollowupValidationError(
+                    selected.reason_code,
+                    "Only a direct Standard or safely pre-Final Advance can be replaced.",
+                )
             raise CorrectionFollowupConflictError(
-                "FOLLOWUP_ALREADY_EXISTS", "This Credit Note already has a positive follow-up."
+                selected.reason_code or "FOLLOWUP_CONFLICT",
+                "This Credit Note cannot create that follow-up in the current chain state.",
             )
         source_kind = InvoiceDocumentKind(source.document_kind)
-        has_final = any(
-            InvoiceDocumentKind(item.document_kind) == InvoiceDocumentKind.FINAL for item in charges
-        )
         if relation_type == InvoiceRelationType.REPLACEMENT_OF:
             if source_kind == InvoiceDocumentKind.STANDARD:
                 if (
@@ -514,6 +537,38 @@ async def create_compensating_invoice_draft(
     )
 
 
+async def assess_credit_followup(
+    session: AsyncSession, *, company_id: uuid.UUID, credit_id: uuid.UUID,
+    relation_type: InvoiceRelationType,
+) -> tuple[bool, str | None]:
+    """Read-only counterpart of the follow-up command eligibility guards."""
+    # A savepoint contains the guard's SELECT ... FOR UPDATE work.  Never
+    # rollback the caller's transaction/RLS setting from a projection read.
+    async with session.begin_nested():
+        await set_rls_company(session, company_id)
+        try:
+            quote, charges, source, credit = await _lock_credit_context(
+                session, company_id=company_id, credit_id=credit_id
+            )
+            if await _existing_relation(session, credit.id):
+                return False, "FOLLOWUP_ALREADY_EXISTS"
+            source_kind = InvoiceDocumentKind(source.document_kind)
+            has_final = any(InvoiceDocumentKind(item.document_kind) == InvoiceDocumentKind.FINAL for item in charges)
+            if relation_type == InvoiceRelationType.REPLACEMENT_OF:
+                if source_kind == InvoiceDocumentKind.STANDARD and (quote is None or QuoteSettlementMode(quote.settlement_mode) == QuoteSettlementMode.DIRECT_INVOICE):
+                    return True, None
+                if source_kind == InvoiceDocumentKind.ADVANCE and quote is not None and not has_final:
+                    availability = await assess_advance_creation(session, quote, lock_open_draft=True)
+                    return (not availability.has_open_draft), ("ADVANCE_DRAFT_EXISTS" if availability.has_open_draft else None)
+                return False, "REPLACEMENT_NOT_ELIGIBLE"
+            if source_kind == InvoiceDocumentKind.ADVANCE and quote is not None and not has_final:
+                availability = await assess_advance_creation(session, quote, lock_open_draft=True)
+                return (not availability.has_open_draft), ("ADVANCE_DRAFT_EXISTS" if availability.has_open_draft else None)
+            return True, None
+        except (CorrectionFollowupConflictError, CorrectionFollowupValidationError, CreditConflictError) as exc:
+            return False, exc.code
+
+
 async def _lock_formal_chain(
     session: AsyncSession, *, company_id: uuid.UUID, quote_id: uuid.UUID
 ) -> tuple[Quote, list[Invoice]]:
@@ -598,7 +653,6 @@ async def _formal_cancellation_sources(
         if kind in {InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL} or (
             kind == InvoiceDocumentKind.STANDARD and invoice.id in supplemental_ids
         ):
-            await _assert_advance_not_final_frozen(session, invoice)
             result.append(invoice)
     return sorted(result, key=lambda item: (item.invoice_date, item.invoice_number or "", item.id))
 
@@ -611,9 +665,36 @@ async def _build_cancellation_preview(
     request: ProjectCancellationRequest,
 ) -> ProjectCancellationPreview:
     invoice_date = request.invoice_date or date.today()
+    final_draft_exists = any(
+        InvoiceDocumentKind(item.document_kind) == InvoiceDocumentKind.FINAL
+        and InvoiceStatus(item.status) == InvoiceStatus.DRAFT
+        for item in charges
+    )
+    # The same pure predicate is used by the chain projection.  We do this
+    # before immutable-basis expansion so a Final DRAFT never yields a preview
+    # which create will later reject.
+    formal_sources = await _formal_cancellation_sources(session, quote, charges)
+    structural = cancellation_eligibility(
+        mode=QuoteSettlementMode(quote.settlement_mode),
+        final_draft_exists=final_draft_exists,
+        has_remaining_formal_charge=any(
+            Decimal(str(item.credited_total)) < Decimal(str(item.payable_before_payments))
+            for item in formal_sources
+        ),
+    )
+    if not structural.available:
+        if structural.reason_code == "FINAL_DRAFT_FREEZE":
+            raise CorrectionFollowupConflictError(
+                structural.reason_code,
+                "A Final DRAFT freezes project cancellation.",
+            )
+        raise CorrectionFollowupValidationError(
+            structural.reason_code or "NO_REMAINING_FORMAL_CHARGE",
+            "Project cancellation is unavailable in the current document chain.",
+        )
     sources: list[ProjectCancellationSourceRead] = []
     token_sources: list[dict[str, object]] = []
-    for source in await _formal_cancellation_sources(session, quote, charges):
+    for source in formal_sources:
         if invoice_date < source.invoice_date:
             raise CorrectionFollowupValidationError(
                 "CANCELLATION_DATE_BEFORE_SOURCE",
@@ -714,6 +795,22 @@ async def preview_project_cancellation(
     # Preview is read-only.  End the lock-bearing transaction without writes.
     await session.rollback()
     return preview
+
+
+async def assess_project_cancellation(
+    session: AsyncSession, *, company_id: uuid.UUID, quote_id: uuid.UUID
+) -> tuple[bool, str | None]:
+    """Use the cancellation preview's same chain guard without mutating caller state."""
+    async with session.begin_nested():
+        await set_rls_company(session, company_id)
+        try:
+            quote, charges = await _lock_formal_chain(session, company_id=company_id, quote_id=quote_id)
+            preview = await _build_cancellation_preview(
+                session, quote=quote, charges=charges, request=ProjectCancellationRequest()
+            )
+            return bool(preview.sources), (None if preview.sources else "CANCELLATION_NO_REMAINING_BASIS")
+        except (CorrectionFollowupConflictError, CorrectionFollowupValidationError, CreditConflictError) as exc:
+            return False, exc.code
 
 
 async def create_project_cancellation_drafts(

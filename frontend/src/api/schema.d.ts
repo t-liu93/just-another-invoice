@@ -3397,6 +3397,46 @@ export interface components {
             /** Reference Number */
             reference_number?: string | null;
         };
+        /**
+         * CreditDraftIntentLineRead
+         * @description Persisted user selection provenance for editing a Credit DRAFT.
+         */
+        CreditDraftIntentLineRead: {
+            /**
+             * Source Basis Line Id
+             * Format: uuid
+             */
+            source_basis_line_id: string;
+            input_mode: components["schemas"]["CreditLineInputMode"];
+            /** Quantity */
+            quantity?: string | null;
+            /** Gross Amount */
+            gross_amount?: string | null;
+        };
+        /**
+         * CreditDraftIntentRead
+         * @description Exact persisted Credit DRAFT input, including its selection mode.
+         */
+        CreditDraftIntentRead: {
+            /** Full Remaining */
+            full_remaining: boolean | null;
+            /**
+             * Requires Confirmation
+             * @default false
+             */
+            requires_confirmation?: boolean;
+            /**
+             * Provenance
+             * @default NATIVE
+             * @enum {string}
+             */
+            provenance?: "NATIVE" | "MIGRATED_AMBIGUOUS";
+            /**
+             * Lines
+             * @default []
+             */
+            lines?: components["schemas"]["CreditDraftIntentLineRead"][];
+        };
         /** CreditDraftUpdate */
         CreditDraftUpdate: {
             /**
@@ -3744,12 +3784,43 @@ export interface components {
          * @enum {string}
          */
         DocumentArtifactReason: "DOWNLOAD" | "SEND";
+        /** DocumentChainApplicationRead */
+        DocumentChainApplicationRead: {
+            /**
+             * Final Invoice Id
+             * Format: uuid
+             */
+            final_invoice_id: string;
+            /**
+             * Advance Invoice Id
+             * Format: uuid
+             */
+            advance_invoice_id: string;
+            /**
+             * Occurred On
+             * Format: date
+             */
+            occurred_on: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+        };
         /** DocumentChainAvailableActionRead */
         DocumentChainAvailableActionRead: {
             /** Code */
             code: string;
             /** Available */
             available: boolean;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Target Id */
+            target_id?: string | null;
+            /** Target Type */
+            target_type?: ("QUOTE" | "INVOICE") | null;
+            followup_context?: components["schemas"]["FollowupContextRead"] | null;
         };
         /** DocumentChainEventRead */
         DocumentChainEventRead: {
@@ -3764,6 +3835,8 @@ export interface components {
              * Format: date-time
              */
             occurred_at: string;
+            /** Event Order */
+            event_order: number;
             /** Quote Id */
             quote_id?: string | null;
             /** Invoice Id */
@@ -3851,6 +3924,11 @@ export interface components {
             relations: components["schemas"]["DocumentChainRelationRead"][];
             /** Events */
             events: components["schemas"]["DocumentChainEventRead"][];
+            /**
+             * Timeline
+             * @default []
+             */
+            timeline?: (components["schemas"]["DocumentChainTimelineNodeRead"] | components["schemas"]["DocumentChainTimelineEventRead"] | components["schemas"]["DocumentChainTimelineRelationRead"] | components["schemas"]["DocumentChainTimelineApplicationRead"])[];
             totals: components["schemas"]["DocumentChainTotals"];
             /**
              * Quote Total
@@ -3881,6 +3959,50 @@ export interface components {
              * Format: uuid
              */
             to_node_id: string;
+        };
+        /** DocumentChainTimelineApplicationRead */
+        DocumentChainTimelineApplicationRead: {
+            /** Order */
+            order: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "APPLICATION";
+            application: components["schemas"]["DocumentChainApplicationRead"];
+        };
+        /** DocumentChainTimelineEventRead */
+        DocumentChainTimelineEventRead: {
+            /** Order */
+            order: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "EVENT";
+            event: components["schemas"]["DocumentChainEventRead"];
+        };
+        /** DocumentChainTimelineNodeRead */
+        DocumentChainTimelineNodeRead: {
+            /** Order */
+            order: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "NODE";
+            node: components["schemas"]["DocumentChainNodeRead"];
+        };
+        /** DocumentChainTimelineRelationRead */
+        DocumentChainTimelineRelationRead: {
+            /** Order */
+            order: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "RELATION";
+            relation: components["schemas"]["DocumentChainRelationRead"];
         };
         /**
          * DocumentChainTotals
@@ -5146,6 +5268,30 @@ export interface components {
             gross_amount: string;
         };
         /**
+         * FollowupContextRead
+         * @description Frozen display facts for a Credit follow-up confirmation.
+         */
+        FollowupContextRead: {
+            /**
+             * Credit Note Id
+             * Format: uuid
+             */
+            credit_note_id: string;
+            /**
+             * Source Invoice Id
+             * Format: uuid
+             */
+            source_invoice_id: string;
+            /**
+             * Relation Type
+             * @enum {string}
+             */
+            relation_type: "REPLACEMENT_OF" | "COMPENSATES_CREDIT";
+            target_document_kind: components["schemas"]["InvoiceDocumentKind"];
+            /** Gross Amount */
+            gross_amount: string;
+        };
+        /**
          * ForgotPasswordRequest
          * @description Body for ``POST /auth/forgot-password``.
          */
@@ -5781,8 +5927,16 @@ export interface components {
             party_snapshot_provenance?: components["schemas"]["PartySnapshotProvenance"] | null;
             /** Party Snapshot Locale */
             party_snapshot_locale?: ("en" | "zh") | null;
+            /** Party Snapshot Customer Email */
+            party_snapshot_customer_email?: string | null;
             /** Source Invoice Id */
             source_invoice_id?: string | null;
+            credit_draft_intent?: components["schemas"]["CreditDraftIntentRead"] | null;
+            advance_input_mode?: components["schemas"]["AdvanceInputMode"] | null;
+            /** Advance Gross Amount */
+            advance_gross_amount?: string | null;
+            /** Advance Percentage */
+            advance_percentage?: string | null;
             /** Replacement Of Credit Note Id */
             replacement_of_credit_note_id?: string | null;
             /** Compensates Credit Note Id */

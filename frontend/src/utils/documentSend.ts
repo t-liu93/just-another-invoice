@@ -10,6 +10,7 @@ export type DocumentSendType =
   | 'credit_note'
   | 'quote'
   | 'receipt'
+  | 'refund'
 
 export type DocumentTemplateKey = Exclude<DocumentSendType, 'receipt'>
 
@@ -40,6 +41,7 @@ export function isFormalInvoiceSendType(type: DocumentSendType): boolean {
     || type === 'advance'
     || type === 'final'
     || type === 'credit_note'
+    || type === 'refund'
 }
 
 /**

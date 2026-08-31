@@ -642,6 +642,10 @@ async def test_cancellation_includes_issued_supplemental_standard_and_keeps_appl
     final = await _issued_final(db_client, quote["id"])
     applications = final["final_advance_applications"]
     final_credit = await _issue_credit(db_client, final["id"], invoice_date="2026-03-03")
+    # Exhaust every original Formal charge first.  The compensating Standard
+    # must be the sole cancellation source, not merely one row beside an
+    # uncredited Advance.
+    await _issue_credit(db_client, advance["id"], invoice_date="2026-03-03")
     supplemental = await db_client.post(
         f"/api/v1/credit-notes/{final_credit['id']}/compensating-invoice"
     )
@@ -655,9 +659,20 @@ async def test_cancellation_includes_issued_supplemental_standard_and_keeps_appl
         json={"invoice_date": "2026-03-10"},
     )
     assert preview.status_code == 200, preview.text
-    assert {row["source_invoice_id"] for row in preview.json()["sources"]} == {
-        advance["id"],
-        supplemental.json()["id"],
+    assert [row["source_invoice_id"] for row in preview.json()["sources"]] == [
+        supplemental.json()["id"]
+    ]
+    chain = await db_client.get(f"/api/v1/quotes/{quote['id']}/document-chain")
+    projected = next(
+        item for item in chain.json()["available_actions"]
+        if item["code"] == "CREATE_PROJECT_CANCELLATION"
+    )
+    assert projected == {
+        "code": "CREATE_PROJECT_CANCELLATION",
+        "available": True,
+        "reason_code": None,
+        "target_id": quote["id"],
+        "target_type": "QUOTE",
     }
     assert (await db_client.get(f"/api/v1/invoices/{final['id']}")).json()[
         "final_advance_applications"

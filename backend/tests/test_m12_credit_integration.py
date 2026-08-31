@@ -6,20 +6,158 @@ import asyncio
 import uuid
 from decimal import Decimal
 
+import pypdfium2
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
+from sqlalchemy.engine import URL
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from test_m12_advance_integration import _additional_formal_quote
 from test_m12_final_integration import _issued_advance
+from test_migrations import _run_alembic
 from test_quote_payment_integration import _create_customer, _full_auth, _setup_company
 
+from jai.config import get_settings
 from jai.db import set_rls_company
 from jai.schemas.invoice import CreditDraftCreate, CreditDraftUpdate
 from jai.services import credit as credit_service
 
 pytestmark = pytest.mark.integration
+
+
+async def test_0040_credit_draft_intents_become_ambiguous_then_api_round_trip_native(
+    db_client: AsyncClient,
+    runtime_db_engine: AsyncEngine,
+) -> None:
+    """A 0040 materialised draft has no honest Full/selected provenance."""
+    await _full_auth(db_client)
+    seeds = await _setup_company(db_client)
+    sources = [
+        await _issued_mixed_standard(db_client, seeds["rates"]) for _ in range(4)
+    ]
+    bases: list[list[dict[str, object]]] = []
+    for source in sources:
+        calculated = await db_client.post(
+            f"/api/v1/invoices/{source['id']}/credit-notes/calculate",
+            json={"full_remaining": True},
+        )
+        assert calculated.status_code == 200, calculated.text
+        basis = calculated.json()["lines"]
+        assert len(basis) >= 3
+        bases.append(basis)
+    bodies = [
+        {"full_remaining": True, "invoice_date": "2026-02-03"},
+        {
+            "full_remaining": False,
+            "invoice_date": "2026-02-03",
+            "lines": [{
+                "source_basis_line_id": bases[1][0]["source_basis_line_id"],
+                "input_mode": "QUANTITY",
+                "quantity": "1",
+            }],
+        },
+        {
+            "full_remaining": False,
+            "invoice_date": "2026-02-03",
+            "lines": [{
+                "source_basis_line_id": bases[2][1]["source_basis_line_id"],
+                "input_mode": "GROSS_AMOUNT",
+                "gross_amount": "5",
+            }],
+        },
+        {
+            "full_remaining": False,
+            "invoice_date": "2026-02-03",
+            "lines": [{
+                "source_basis_line_id": row["source_basis_line_id"],
+                "input_mode": "GROSS_AMOUNT",
+                "gross_amount": row["gross_amount"],
+            } for row in bases[3]],
+        },
+    ]
+    created = []
+    for source, body in zip(sources, bodies, strict=True):
+        response = await db_client.post(f"/api/v1/invoices/{source['id']}/credit-notes", json=body)
+        assert response.status_code == 201, response.text
+        created.append(response.json()["id"])
+
+    settings = get_settings()
+    migration_url = URL.create(
+        drivername="postgresql+asyncpg",
+        username=settings.postgres_migration_user,
+        password=settings.postgres_migration_password,
+        host=settings.postgres_host,
+        port=settings.postgres_port,
+        database=runtime_db_engine.url.database,
+    ).render_as_string(hide_password=False)
+    assert _run_alembic("downgrade", "0040", url=migration_url).returncode == 0
+    assert _run_alembic("upgrade", "0041", url=migration_url).returncode == 0
+
+    for credit_id, source, body in zip(created, sources, bodies, strict=True):
+        legacy = await db_client.get(f"/api/v1/invoices/{credit_id}")
+        assert legacy.status_code == 200, legacy.text
+        intent = legacy.json()["credit_draft_intent"]
+        assert intent["full_remaining"] is None
+        assert intent["provenance"] == "MIGRATED_AMBIGUOUS"
+        assert intent["requires_confirmation"] is True
+        blocked_issue = await db_client.post(
+            f"/api/v1/invoices/{credit_id}/status", json={"status": "SENT"}
+        )
+        assert blocked_issue.status_code == 409, blocked_issue.text
+        assert blocked_issue.json()["detail"]["code"] == "CREDIT_DRAFT_INTENT_CONFIRMATION_REQUIRED"
+        unchanged = await db_client.get(f"/api/v1/invoices/{credit_id}")
+        assert unchanged.json()["status"] == "DRAFT"
+        assert unchanged.json()["invoice_number"] is None
+        source_before_confirmation = await db_client.get(f"/api/v1/invoices/{source['id']}")
+        assert Decimal(source_before_confirmation.json()["credited_total"]) == Decimal()
+        chosen = {"full_remaining": body["full_remaining"], "invoice_date": body["invoice_date"]}
+        if not body["full_remaining"]:
+            chosen["lines"] = body["lines"]
+        calculation_request = {key: value for key, value in chosen.items() if key != "invoice_date"}
+        preview = await db_client.post(
+            f"/api/v1/invoices/{source['id']}/credit-notes/calculate",
+            json=calculation_request,
+        )
+        assert preview.status_code == 200, preview.text
+        updated = await db_client.put(f"/api/v1/credit-notes/{credit_id}", json=chosen)
+        assert updated.status_code == 200, updated.text
+        reread = await db_client.get(f"/api/v1/invoices/{credit_id}")
+        intent = reread.json()["credit_draft_intent"]
+        assert intent["full_remaining"] is body["full_remaining"]
+        assert intent["provenance"] == "NATIVE"
+        assert intent["requires_confirmation"] is False
+        # Round-trip each migrated intent's real source-basis identity and
+        # raw author input, not only its aggregate/issuability flag.
+        expected_lines = body.get("lines", [])
+        if body["full_remaining"]:
+            expected_lines = [{
+                "source_basis_line_id": row["source_basis_line_id"],
+                "input_mode": "GROSS_AMOUNT",
+                "gross_amount": row["gross_amount"],
+            } for row in preview.json()["lines"]]
+        assert len(intent["lines"]) == len(expected_lines)
+        for persisted, requested in zip(intent["lines"], expected_lines, strict=True):
+            assert persisted["source_basis_line_id"] == requested["source_basis_line_id"]
+            assert persisted["input_mode"] == requested["input_mode"]
+            if requested["input_mode"] == "QUANTITY":
+                assert Decimal(persisted["quantity"]) == Decimal(requested["quantity"])
+                assert persisted["gross_amount"] is None
+            else:
+                assert Decimal(persisted["gross_amount"]) == Decimal(requested["gross_amount"])
+                assert persisted["quantity"] is None
+        # Each of the four persisted intent forms becomes an actually issuable
+        # native correction, not merely a read-model confirmation flag.
+        issued = await db_client.post(
+            f"/api/v1/invoices/{credit_id}/status", json={"status": "SENT"}
+        )
+        assert issued.status_code == 200, issued.text
+        assert issued.json()["invoice_number"]
+        assert issued.json()["credit_draft_intent"] == intent
+        source_after = await db_client.get(f"/api/v1/invoices/{source['id']}")
+        assert Decimal(source_after.json()["credited_total"]) == Decimal(
+            issued.json()["total_incl_vat"]
+        )
 
 
 async def _issued_standard(client: AsyncClient, rate_id: str) -> dict[str, object]:
@@ -318,10 +456,13 @@ async def test_credit_draft_lifecycle_events_are_atomic_ordered_and_rls_isolated
             ),
         ]
         await set_rls_company(session, foreign_company_id)
-        assert await session.scalar(
-            text("SELECT count(*) FROM document_chain_event WHERE invoice_id = :credit_id"),
-            {"credit_id": credit["id"]},
-        ) == 0
+        assert (
+            await session.scalar(
+                text("SELECT count(*) FROM document_chain_event WHERE invoice_id = :credit_id"),
+                {"credit_id": credit["id"]},
+            )
+            == 0
+        )
 
 
 async def test_credit_draft_event_failures_roll_back_create_and_update(
@@ -477,6 +618,141 @@ async def test_credit_drafts_do_not_reserve_and_stale_loser_rolls_back(
     assert replacement_state.json()["status"] == "DRAFT"
 
 
+async def test_semantic_full_draft_rebuilds_all_snapshots_at_issue_time(
+    db_client: AsyncClient,
+    admin_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """A semantic Full replay makes every durable reader observe 100−20=80."""
+    await _full_auth(db_client)
+    seeds = await _setup_company(db_client)
+    source = await _issued_standard(db_client, seeds["rates"]["Zero (0%)"]["id"])
+    assert Decimal(source["total_incl_vat"]) == Decimal("100.00")
+    full = await db_client.post(
+        f"/api/v1/invoices/{source['id']}/credit-notes", json=_credit_payload()
+    )
+    assert full.status_code == 201, full.text
+    basis = await db_client.post(
+        f"/api/v1/invoices/{source['id']}/credit-notes/calculate", json={"full_remaining": True}
+    )
+    partial = await db_client.post(
+        f"/api/v1/invoices/{source['id']}/credit-notes",
+        json={
+            "full_remaining": False,
+            "invoice_date": "2026-02-02",
+            "lines": [{
+                "source_basis_line_id": basis.json()["lines"][0]["source_basis_line_id"],
+                "input_mode": "GROSS_AMOUNT",
+                "gross_amount": "20.00",
+            }],
+        },
+    )
+    assert partial.status_code == 201, partial.text
+    issued_partial = await db_client.post(
+        f"/api/v1/invoices/{partial.json()['id']}/status", json={"status": "SENT"}
+    )
+    assert issued_partial.status_code == 200, issued_partial.text
+    issued_full = await db_client.post(
+        f"/api/v1/invoices/{full.json()['id']}/status", json={"status": "SENT"}
+    )
+    assert issued_full.status_code == 200, issued_full.text
+    assert Decimal(issued_partial.json()["total_incl_vat"]) == Decimal("20.00")
+    expected = Decimal("80.00")
+    assert Decimal(issued_full.json()["total_incl_vat"]) == expected
+    # Invoice lines are the PDF-facing materialisation and must agree with
+    # correction/report aggregates after semantic Full replay.
+    rendered_total = sum(
+        (Decimal(row["total_incl_vat"]) for row in issued_full.json()["lines"]), Decimal()
+    )
+    assert rendered_total == expected
+    source_after = await db_client.get(f"/api/v1/invoices/{source['id']}")
+    assert Decimal(source_after.json()["credited_total"]) == Decimal(source["total_incl_vat"])
+    assert Decimal(source_after.json()["due_amount"]) == Decimal("0")
+    # Every independent consumer observes the same rebuilt remainder, rather
+    # than only the top-level Credit total.
+    line_taxable = sum(
+        (Decimal(row["taxable_amount"]) for row in issued_full.json()["lines"]), Decimal()
+    )
+    line_vat = sum(
+        (
+            Decimal(tax["tax_amount"])
+            for row in issued_full.json()["lines"]
+            for tax in row["line_taxes"]
+        ),
+        Decimal(),
+    )
+    assert line_taxable == Decimal(issued_full.json()["taxable_amount"])
+    assert line_vat == Decimal(issued_full.json()["vat_total"])
+    # The HTTP read is not enough: inspect the normalized correction rows,
+    # source cache and invoice tax materialisation that PDF/report readers use.
+    async with admin_session_maker() as session:
+        correction = (await session.execute(text("""
+            SELECT c.issued_net_amount, c.issued_vat_amount, c.issued_gross_amount,
+                   c.issued_base_net_amount, c.issued_base_vat_amount, c.issued_base_gross_amount,
+                   c.affects_revenue, l.input_mode, l.input_gross_amount,
+                   l.net_amount, l.vat_amount, l.gross_amount,
+                   l.base_net_amount, l.base_vat_amount, l.base_gross_amount
+              FROM invoice_correction c
+              JOIN invoice_correction_line l ON l.correction_id = c.id
+             WHERE c.credit_note_id = :credit_id
+        """), {"credit_id": issued_full.json()["id"]})).mappings().all()
+        assert len(correction) == 1
+        row = correction[0]
+        assert tuple(Decimal(row[key]) for key in (
+            "issued_net_amount", "issued_vat_amount", "issued_gross_amount",
+            "issued_base_net_amount", "issued_base_vat_amount", "issued_base_gross_amount",
+        )) == (Decimal("80"), Decimal(), Decimal("80"), Decimal("80"), Decimal(), Decimal("80"))
+        assert row["affects_revenue"] is True
+        # Full is a document-level semantic intent; its normalized per-basis
+        # row carries the issue-time raw gross allocation that was replayed.
+        assert row["input_mode"] == "GROSS_AMOUNT"
+        assert Decimal(row["input_gross_amount"]) == Decimal("80")
+        assert tuple(Decimal(row[key]) for key in (
+            "net_amount", "vat_amount", "gross_amount",
+            "base_net_amount", "base_vat_amount", "base_gross_amount",
+        )) == (Decimal("80"), Decimal(), Decimal("80"), Decimal("80"), Decimal(), Decimal("80"))
+        cache = (await session.execute(text("""
+            SELECT net_amount, vat_amount, gross_amount,
+                   base_net_amount, base_vat_amount, base_gross_amount
+              FROM invoice_credit_basis_line WHERE invoice_id = :source_id
+        """), {"source_id": source["id"]})).one()
+        assert tuple(Decimal(value) for value in cache) == (
+            Decimal("100"), Decimal(), Decimal("100"),
+            Decimal("100"), Decimal(), Decimal("100"),
+        )
+        line_taxes = (await session.execute(text("""
+            SELECT count(*), coalesce(sum(t.taxable_amount), 0), coalesce(sum(t.tax_amount), 0)
+              FROM invoice_line_tax t JOIN invoice_line l ON l.id = t.invoice_line_id
+             WHERE l.invoice_id = :credit_id
+        """), {"credit_id": issued_full.json()["id"]})).one()
+        document_taxes = (await session.execute(text("""
+            SELECT count(*) FROM invoice_tax WHERE invoice_id = :credit_id
+        """), {"credit_id": issued_full.json()["id"]})).scalar_one()
+    assert tuple(Decimal(value) for value in line_taxes[1:]) == (Decimal("80"), Decimal())
+    assert line_taxes[0] == 1
+    assert document_taxes == 0
+    chain = await db_client.get(f"/api/v1/invoices/{source['id']}/document-chain")
+    assert chain.status_code == 200, chain.text
+    assert Decimal(chain.json()["totals"]["credit_total"]) == Decimal(source["total_incl_vat"])
+    vat, profit_loss, pdf = await asyncio.gather(
+        db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1"),
+        db_client.get("/api/v1/reports/profit-loss?from=2026-01-01&to=2026-03-31"),
+        db_client.get(f"/api/v1/invoices/{issued_full.json()['id']}/pdf?locale=en"),
+    )
+    assert vat.status_code == profit_loss.status_code == pdf.status_code == 200
+    assert pdf.headers["content-type"].startswith("application/pdf")
+    document = pypdfium2.PdfDocument(pdf.content)
+    try:
+        assert "80.00" in "\n".join(
+            document[index].get_textpage().get_text_range() for index in range(len(document))
+        )
+    finally:
+        document.close()
+    assert profit_loss.json()["revenue_net"] == "0.00"
+    assert {key: Decimal(value) for key, value in vat.json()["boxes"]["box_1a"].items()} == {
+        "base": Decimal(), "vat": Decimal(),
+    }
+
+
 async def test_credit_draft_cancel_reactivate_never_reserves_or_numbers(
     db_client: AsyncClient,
 ) -> None:
@@ -520,9 +796,7 @@ async def test_concurrent_credit_issue_has_one_number_event_and_aggregate(
     source = await _issued_standard(db_client, seeds["rates"]["NL standard (21%)"]["id"])
     drafts = await asyncio.gather(
         *[
-            db_client.post(
-                f"/api/v1/invoices/{source['id']}/credit-notes", json=_credit_payload()
-            )
+            db_client.post(f"/api/v1/invoices/{source['id']}/credit-notes", json=_credit_payload())
             for _ in range(2)
         ]
     )
@@ -566,9 +840,7 @@ async def test_runtime_rls_and_correction_trigger_reject_wrong_source(
     await _full_auth(db_client)
     seeds = await _setup_company(db_client)
     source = await _issued_standard(db_client, seeds["rates"]["NL standard (21%)"]["id"])
-    other_source = await _issued_standard(
-        db_client, seeds["rates"]["NL standard (21%)"]["id"]
-    )
+    other_source = await _issued_standard(db_client, seeds["rates"]["NL standard (21%)"]["id"])
     draft = await db_client.post(
         f"/api/v1/invoices/{source['id']}/credit-notes", json=_credit_payload()
     )
@@ -645,9 +917,7 @@ async def test_runtime_rls_and_correction_trigger_reject_wrong_source(
         )
         assert other_basis_id is not None
 
-        async def rejected(
-            statement: str, params: dict[str, object], *, sqlstate: str
-        ) -> None:
+        async def rejected(statement: str, params: dict[str, object], *, sqlstate: str) -> None:
             await set_rls_company(session, seeds["company_id"])
             with pytest.raises(DBAPIError) as failure:
                 await session.execute(text(statement), params)
@@ -740,14 +1010,18 @@ async def test_runtime_rls_and_correction_trigger_reject_wrong_source(
         # runtime/NOBYPASSRLS: trigger and RLS agree on the same source.
         await set_rls_company(session, seeds["company_id"])
         await session.execute(
-            text("UPDATE invoice_correction SET source_invoice_id = source_invoice_id "
-                 "WHERE credit_note_id = :credit_id"),
+            text(
+                "UPDATE invoice_correction SET source_invoice_id = source_invoice_id "
+                "WHERE credit_note_id = :credit_id"
+            ),
             {"credit_id": draft.json()["id"]},
         )
         await session.execute(
-            text("UPDATE invoice_correction_line SET sort_order = sort_order "
-                 "WHERE correction_id = (SELECT id FROM invoice_correction "
-                 "WHERE credit_note_id = :credit_id)"),
+            text(
+                "UPDATE invoice_correction_line SET sort_order = sort_order "
+                "WHERE correction_id = (SELECT id FROM invoice_correction "
+                "WHERE credit_note_id = :credit_id)"
+            ),
             {"credit_id": draft.json()["id"]},
         )
         await session.commit()
@@ -777,21 +1051,30 @@ async def test_credit_draft_delete_cascades_correction_and_selection_rows(
             {"id": draft.json()["id"]},
         )
         assert correction_id is not None
-        assert await session.scalar(
-            text("SELECT count(*) FROM invoice_correction_line WHERE correction_id = :id"),
-            {"id": correction_id},
-        ) == 1
+        assert (
+            await session.scalar(
+                text("SELECT count(*) FROM invoice_correction_line WHERE correction_id = :id"),
+                {"id": correction_id},
+            )
+            == 1
+        )
     assert (await db_client.delete(f"/api/v1/invoices/{draft.json()['id']}")).status_code == 204
     async with db_session_maker() as session:
         await set_rls_company(session, seeds["company_id"])
-        assert await session.scalar(
-            text("SELECT count(*) FROM invoice_correction WHERE id = :id"),
-            {"id": correction_id},
-        ) == 0
-        assert await session.scalar(
-            text("SELECT count(*) FROM invoice_correction_line WHERE correction_id = :id"),
-            {"id": correction_id},
-        ) == 0
+        assert (
+            await session.scalar(
+                text("SELECT count(*) FROM invoice_correction WHERE id = :id"),
+                {"id": correction_id},
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                text("SELECT count(*) FROM invoice_correction_line WHERE correction_id = :id"),
+                {"id": correction_id},
+            )
+            == 0
+        )
 
 
 async def test_credit_mixed_lines_quantity_gross_and_discount_keep_snapshot_totals(
@@ -855,9 +1138,7 @@ async def test_credit_document_tax_source_uses_frozen_document_snapshot(
 ) -> None:
     await _full_auth(db_client)
     seeds = await _setup_company(db_client)
-    source = await _issued_document_standard(
-        db_client, seeds["rates"]["NL standard (21%)"]["id"]
-    )
+    source = await _issued_document_standard(db_client, seeds["rates"]["NL standard (21%)"]["id"])
     preview = await db_client.post(
         f"/api/v1/invoices/{source['id']}/credit-notes/calculate", json={"full_remaining": True}
     )
@@ -994,20 +1275,26 @@ async def test_credit_issue_exhaustion_rolls_back_draft_and_sequence_state(
                 {"id": draft.json()["id"]},
             )
         ).one() == (None, None, None, None, None, None, None)
-        assert await session.scalar(
-            text(
-                "SELECT count(*) FROM document_chain_event "
-                "WHERE invoice_id = :id AND event_type = 'INVOICE_ISSUED'"
-            ),
-            {"id": draft.json()["id"]},
-        ) == 0
-        assert await session.scalar(
-            text(
-                "SELECT count(*) FROM number_sequence "
-                "WHERE company_id = :company_id AND document_type = 'CREDIT_NOTE'"
-            ),
-            {"company_id": seeds["company_id"]},
-        ) == 0
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM document_chain_event "
+                    "WHERE invoice_id = :id AND event_type = 'INVOICE_ISSUED'"
+                ),
+                {"id": draft.json()["id"]},
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM number_sequence "
+                    "WHERE company_id = :company_id AND document_type = 'CREDIT_NOTE'"
+                ),
+                {"company_id": seeds["company_id"]},
+            )
+            == 0
+        )
     # The failed issue left the request/session usable: editing the DRAFT is
     # still a legal, atomic command even though its configured issue series
     # remains exhausted.
@@ -1088,16 +1375,16 @@ async def test_gross_credit_allocation_preserves_three_decimal_quantity(
         await set_rls_company(session, seeds["company_id"])
         credited = (
             await session.execute(
-            text(
-                "SELECT sum(l.quantity), sum(l.net_amount), sum(l.vat_amount), "
-                "sum(l.gross_amount), sum(l.base_net_amount), sum(l.base_vat_amount), "
-                "sum(l.base_gross_amount) FROM invoice_correction_line l "
-                "JOIN invoice_correction c ON c.id = l.correction_id "
-                "JOIN invoice i ON i.id = c.credit_note_id "
-                "WHERE c.source_invoice_id = :source_id AND i.status = 'SENT'"
-            ),
-            {"source_id": source["id"]},
-        )
+                text(
+                    "SELECT sum(l.quantity), sum(l.net_amount), sum(l.vat_amount), "
+                    "sum(l.gross_amount), sum(l.base_net_amount), sum(l.base_vat_amount), "
+                    "sum(l.base_gross_amount) FROM invoice_correction_line l "
+                    "JOIN invoice_correction c ON c.id = l.correction_id "
+                    "JOIN invoice i ON i.id = c.credit_note_id "
+                    "WHERE c.source_invoice_id = :source_id AND i.status = 'SENT'"
+                ),
+                {"source_id": source["id"]},
+            )
         ).one()
         expected = (
             Decimal("1.005"),
@@ -1163,7 +1450,9 @@ async def test_partial_gross_credit_keeps_single_currency_base_parity_and_remain
     row = preview.json()["lines"][0]
     assert Decimal(row["net_amount"]) + Decimal(row["vat_amount"]) == Decimal("0.61")
     assert (
-        Decimal(row["net_amount"]), Decimal(row["vat_amount"]), Decimal(row["gross_amount"])
+        Decimal(row["net_amount"]),
+        Decimal(row["vat_amount"]),
+        Decimal(row["gross_amount"]),
     ) == (
         Decimal(row["base_net_amount"]),
         Decimal(row["base_vat_amount"]),
@@ -1285,8 +1574,7 @@ async def test_credit_read_list_chain_and_reports_project_issued_credit_once(
     assert vat_before["boxes"]["box_1a"] == {"base": "100.00", "vat": "21.00"}
     assert vat_after["boxes"]["box_1a"] == {"base": "0.00", "vat": "0.00"}
     report_events = [
-        (row["document_kind"], row["source_document_id"])
-        for row in vat_after["event_rows"]
+        (row["document_kind"], row["source_document_id"]) for row in vat_after["event_rows"]
     ]
     # The BTW event ledger exposes every event included in the period: the
     # legacy Standard source exactly once and the dated Credit correction once.
@@ -1294,14 +1582,18 @@ async def test_credit_read_list_chain_and_reports_project_issued_credit_once(
         ("STANDARD", None),
         ("CREDIT_NOTE", source["id"]),
     ]
-    assert icp_after == icp_before == {
-        "year": 2026,
-        "quarter": 1,
-        "lines": [],
-        "total_net": "0",
-        "warnings": [],
-        "correction_warnings": [],
-    }
+    assert (
+        icp_after
+        == icp_before
+        == {
+            "year": 2026,
+            "quarter": 1,
+            "lines": [],
+            "total_net": "0",
+            "warnings": [],
+            "correction_warnings": [],
+        }
+    )
     assert pl_before["revenue_net"] == "100.00"
     assert pl_after["revenue_net"] == "0.00"
     # Dashboard has no separate accounting path: it uses P/L and BTW service
@@ -1519,9 +1811,7 @@ async def test_refund_crud_date_limit_and_stranded_incoming_rollback(
     deleted = await db_client.delete(f"/api/v1/payments/{refund_id}")
     assert deleted.status_code == 200, deleted.text
     assert Decimal(
-        (await db_client.get(f"/api/v1/credit-notes/{credit_id}/refunds")).json()[
-            "refunded_total"
-        ]
+        (await db_client.get(f"/api/v1/credit-notes/{credit_id}/refunds")).json()["refunded_total"]
     ) == Decimal("0")
 
 
@@ -1555,13 +1845,16 @@ async def test_advance_and_final_credit_sources_and_final_draft_freeze(
     assert advance_credit_issue.status_code == 200, advance_credit_issue.text
     async with db_session_maker() as session:
         await set_rls_company(session, seeds["company_id"])
-        assert await session.scalar(
-            text(
-                "SELECT affects_revenue FROM invoice_correction "
-                "WHERE credit_note_id = :credit_id"
-            ),
-            {"credit_id": advance_credit.json()["id"]},
-        ) is False
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT affects_revenue FROM invoice_correction "
+                    "WHERE credit_note_id = :credit_id"
+                ),
+                {"credit_id": advance_credit.json()["id"]},
+            )
+            is False
+        )
     post_final_advance = await _issued_advance(db_client, quote["id"], "10")
     final = await db_client.post(
         f"/api/v1/quotes/{quote['id']}/final-invoice", json={"invoice_date": "2026-03-01"}
@@ -1603,9 +1896,10 @@ async def test_advance_and_final_credit_sources_and_final_draft_freeze(
         issued_final.json()["payable_before_payments"]
     )
     assert final_after_credit.json()["credit_status"] == "CREDITED"
-    assert final_after_credit.json()["final_advance_applications"] == issued_final.json()[
-        "final_advance_applications"
-    ]
+    assert (
+        final_after_credit.json()["final_advance_applications"]
+        == issued_final.json()["final_advance_applications"]
+    )
     assert final_after_credit.json()["final_totals"] == issued_final.json()["final_totals"]
     formal_chain = await db_client.get(f"/api/v1/invoices/{final.json()['id']}/document-chain")
     assert formal_chain.status_code == 200, formal_chain.text
@@ -1621,24 +1915,33 @@ async def test_advance_and_final_credit_sources_and_final_draft_freeze(
         await set_rls_company(session, seeds["company_id"])
         # Later Final and Credit actions do not reinterpret the pre-Final
         # event: affects_revenue is an issue-time fact, not a live projection.
-        assert await session.scalar(
-            text(
-                "SELECT affects_revenue FROM invoice_correction "
-                "WHERE credit_note_id = :credit_id"
-            ),
-            {"credit_id": advance_credit.json()["id"]},
-        ) is False
-        assert await session.scalar(
-            text(
-                "SELECT affects_revenue FROM invoice_correction "
-                "WHERE credit_note_id = :credit_id"
-            ),
-            {"credit_id": post_final_advance_credit.json()["id"]},
-        ) is True
-        assert await session.scalar(
-            text(
-                "SELECT affects_revenue FROM invoice_correction "
-                "WHERE credit_note_id = :credit_id"
-            ),
-            {"credit_id": final_credit.json()["id"]},
-        ) is True
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT affects_revenue FROM invoice_correction "
+                    "WHERE credit_note_id = :credit_id"
+                ),
+                {"credit_id": advance_credit.json()["id"]},
+            )
+            is False
+        )
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT affects_revenue FROM invoice_correction "
+                    "WHERE credit_note_id = :credit_id"
+                ),
+                {"credit_id": post_final_advance_credit.json()["id"]},
+            )
+            is True
+        )
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT affects_revenue FROM invoice_correction "
+                    "WHERE credit_note_id = :credit_id"
+                ),
+                {"credit_id": final_credit.json()["id"]},
+            )
+            is True
+        )

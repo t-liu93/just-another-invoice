@@ -74,6 +74,15 @@ export function useDocumentChainRefresh<T>(loadDocumentChain: () => Promise<T>) 
     return refreshDocumentChain('payment')
   }
 
+  /** Invalidate a reused page's old owner before its replacement loads. */
+  function resetDocumentChain(): void {
+    requestVersion += 1
+    documentChain.value = null
+    chainRefreshing.value = false
+    initialChainError.value = null
+    paymentRefreshError.value = null
+  }
+
   return {
     documentChain,
     chainRefreshing,
@@ -81,5 +90,6 @@ export function useDocumentChainRefresh<T>(loadDocumentChain: () => Promise<T>) 
     paymentRefreshError,
     loadInitialDocumentChain,
     refreshAfterPayment,
+    resetDocumentChain,
   }
 }

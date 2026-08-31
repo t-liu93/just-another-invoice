@@ -191,6 +191,8 @@ async function handleSend() {
     })
     const endpoint = frozen.context.docType === 'receipt'
       ? `/api/v1/payments/${frozen.context.docId}/send-receipt`
+      : frozen.context.docType === 'refund'
+        ? `/api/v1/payments/${frozen.context.docId}/send-refund-confirmation`
       : `${isFormalInvoiceSendType(frozen.context.docType) ? '/api/v1/invoices' : '/api/v1/quotes'}/${frozen.context.docId}/send`
     const log = await post<EmailLogRead>(endpoint, body)
     emit('sent', log)

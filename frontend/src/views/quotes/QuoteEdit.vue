@@ -7,7 +7,7 @@ import {
   useMessage, useDialog,
   NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert,
   NDivider, NInputNumber, NSelect, NSwitch, NTag, NDatePicker,
-  NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown,
+  NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown, NEmpty,
 } from 'naive-ui'
 import { AddOutline, TrashOutline, DocumentTextOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
@@ -15,6 +15,7 @@ import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import EmailLogPanel from '../../components/EmailLogPanel.vue'
 import QuotePaymentPanel from '../../components/QuotePaymentPanel.vue'
+import DocumentWorkflowPanel from '../../components/DocumentWorkflowPanel.vue'
 import { useQuotesStore } from '../../stores/quotes'
 import { useInvoicesStore } from '../../stores/invoices'
 import { get, downloadBlob } from '../../api/http'
@@ -86,11 +87,41 @@ const {
   paymentRefreshError,
   loadInitialDocumentChain,
   refreshAfterPayment,
+  resetDocumentChain,
 } = useDocumentChainRefresh<DocumentChainRead>(async () => {
   const quoteId = existingQuote.value?.id
   if (!quoteId) throw new Error('Quote document chain is unavailable')
   return get<DocumentChainRead>(`/api/v1/quotes/${quoteId}/document-chain`)
 })
+const canConvertFromProjection = computed(() => documentChain.value?.available_actions.some(action => action.code === 'CONVERT_TO_INVOICE' && action.available && action.target_id === existingQuote.value?.id && action.target_type === 'QUOTE') ?? false)
+const canRecordQuotePaymentFromProjection = computed(() => documentChain.value?.available_actions.some(action => action.code === 'RECORD_QUOTE_PAYMENT' && action.available && action.target_id === existingQuote.value?.id) ?? false)
+const advanceActionReason = computed(() => {
+  const reason = documentChain.value?.available_actions.find(action => action.code === 'CREATE_ADVANCE' && action.target_id === existingQuote.value?.id)?.reason_code
+  return reason ? t(`workflow.reasons.${reason}`, reason) : null
+})
+// The chain, not the Quote row, owns settlement-mode state.  In particular a
+// missing projection is not evidence that a Quote is still UNSET.
+const settlementMode = computed(() => documentChain.value?.settlement_mode ?? null)
+// An UNSET Quote has exactly one selected continuation at a time.  This is
+// transient UI state only: the first successful backend command locks mode.
+const selectedModeContinuation = ref<'RECEIPT_ONLY' | 'FORMAL_ADVANCE' | null>(null)
+// A successful first Quote payment atomically locks UNSET -> RECEIPT_ONLY on
+// the backend.  Keep that fact until the authoritative projection confirms
+// it: retaining a stale UNSET chain after a refresh failure must never reopen
+// Direct or Formal paths.
+const receiptModeLockCommitted = ref(false)
+const advanceCardSignal = ref(0)
+const showModeCards = computed(() => isEdit.value && existingQuote.value?.status === 'ACCEPTED' && documentChain.value !== null && settlementMode.value === 'UNSET' && selectedModeContinuation.value === null)
+// An accepted UNSET quote chooses its direct path from the mode card. It must
+// remain unavailable in the header while that Quote is in either transient
+// continuation, so only a single mode path can be started at once. Other
+// status/mode combinations use the single projected conversion command in
+// the header; do not infer that command from Quote status or local mode state.
+const showHeaderConvert = computed(() => canConvertFromProjection.value
+  && selectedModeContinuation.value === null
+  && !(existingQuote.value?.status === 'ACCEPTED' && settlementMode.value === 'UNSET'))
+const showFormalContinuation = computed(() => settlementMode.value === 'FORMAL_ADVANCE' || (settlementMode.value === 'UNSET' && selectedModeContinuation.value === 'FORMAL_ADVANCE'))
+const showReceiptContinuation = computed(() => settlementMode.value === 'RECEIPT_ONLY' || (settlementMode.value === 'UNSET' && selectedModeContinuation.value === 'RECEIPT_ONLY'))
 
 // Quote header fields
 const customerId = ref<string | null>(null)
@@ -492,6 +523,19 @@ async function handleConvert() {
   }
 }
 
+function beginFormalAdvance(): void {
+  selectedModeContinuation.value = 'FORMAL_ADVANCE'
+  advanceCardSignal.value += 1
+}
+
+function beginReceiptOnly(): void {
+  selectedModeContinuation.value = 'RECEIPT_ONLY'
+}
+
+function abandonModeContinuation(): void {
+  if (settlementMode.value === 'UNSET' && !receiptModeLockCommitted.value) selectedModeContinuation.value = null
+}
+
 function handleReactivate() {
   if (!existingQuote.value) return
   reactivateDate.value = null
@@ -549,7 +593,23 @@ function populateFromQuote(q: QuoteRead) {
   cleanSnapshot.value = currentFormState()
 }
 
-onMounted(async () => {
+let routeGeneration = 0
+function resetRouteState(): void {
+  isEdit.value = false
+  existingQuote.value = null
+  resetDocumentChain()
+  selectedModeContinuation.value = null
+  receiptModeLockCommitted.value = false
+  advanceCardSignal.value = 0
+  pageError.value = null
+  preview.value = null
+  previewError.value = null
+  cleanSnapshot.value = null
+  lines.value = [emptyLine()]
+}
+async function loadRoute(): Promise<void> {
+  const generation = ++routeGeneration
+  resetRouteState()
   pageLoading.value = true
   try {
     await Promise.all([
@@ -563,10 +623,13 @@ onMounted(async () => {
     if (id && id !== 'new') {
       isEdit.value = true
       const q = await store.fetchQuote(id)
+      if (generation !== routeGeneration || route.params.id !== id) return
       populateFromQuote(q)
       await loadInitialDocumentChain()
+      if (generation !== routeGeneration || route.params.id !== id) return
       if (!customers.value.find(c => c.id === q.customer_id)) {
         const custRes = await get<CustomerRead>(`/api/v1/customers/${q.customer_id}`)
+        if (generation !== routeGeneration || route.params.id !== id) return
         customers.value = [custRes, ...customers.value]
       }
     } else {
@@ -584,11 +647,13 @@ onMounted(async () => {
       applyDefaultContentBlocks()
     }
   } catch (e: unknown) {
-    pageError.value = e instanceof Error ? e.message : String(e)
+    if (generation === routeGeneration) pageError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    pageLoading.value = false
+    if (generation === routeGeneration) pageLoading.value = false
   }
-})
+}
+onMounted(() => { void loadRoute() })
+watch(() => route.params.id, () => { void loadRoute() })
 
 // ACCEPTED is the only read-only state; expired/rejected can still be edited
 const isReadOnly = computed(() => existingQuote.value?.status === 'ACCEPTED' && isEdit.value)
@@ -603,7 +668,30 @@ const receiptCustomer = computed(() =>
   persistedReceiptCustomer(existingQuote.value?.customer_id, customers.value),
 )
 
-const handlePaymentsChanged = createDocumentChainPaymentChangeHandler(refreshAfterPayment)
+const handlePaymentsChanged = createDocumentChainPaymentChangeHandler(async () => {
+  // QuotePaymentPanel emits only after its mutation succeeds.  When this is
+  // the first Receipt-only command from UNSET, its backend transaction has
+  // already committed the mode lock even though the independent chain reload
+  // may still be pending or fail.
+  if (settlementMode.value === 'UNSET' && selectedModeContinuation.value === 'RECEIPT_ONLY') {
+    receiptModeLockCommitted.value = true
+  }
+  const refreshed = await refreshAfterPayment()
+  if (refreshed && settlementMode.value === 'RECEIPT_ONLY') {
+    receiptModeLockCommitted.value = false
+  }
+  return refreshed
+})
+
+async function retryInitialDocumentChain(): Promise<void> {
+  if (chainRefreshing.value) return
+  await loadInitialDocumentChain()
+}
+
+async function retryPaymentDocumentChain(): Promise<void> {
+  if (chainRefreshing.value) return
+  await refreshAfterPayment()
+}
 
 // ---- PDF download ----
 const downloadingPdf = ref(false)
@@ -759,7 +847,7 @@ function handleReceiptSent(log: EmailLogRead) {
                   <n-button size="small" type="error" @click="handleStatusTransition('REJECTED')">
                     {{ t('quotes.markRejected') }}
                   </n-button>
-                  <n-button size="small" type="primary" @click="handleConvert">
+                  <n-button v-if="showHeaderConvert" size="small" type="primary" @click="handleConvert">
                     {{ t('quotes.convertToInvoice') }}
                   </n-button>
                 </template>
@@ -773,7 +861,7 @@ function handleReceiptSent(log: EmailLogRead) {
 
                 <!-- EXPIRED actions -->
                 <template v-else-if="existingQuote.status === 'EXPIRED'">
-                  <n-button size="small" type="primary" @click="handleConvert">
+                  <n-button v-if="showHeaderConvert" size="small" type="primary" @click="handleConvert">
                     {{ t('quotes.convertToInvoice') }}
                   </n-button>
                   <n-button size="small" type="warning" @click="handleReactivate">
@@ -784,7 +872,7 @@ function handleReceiptSent(log: EmailLogRead) {
                 <!-- ACCEPTED actions -->
                 <template v-else-if="existingQuote.status === 'ACCEPTED'">
                   <n-button
-                    v-if="!existingQuote.converted_invoice_id"
+                    v-if="showHeaderConvert"
                     size="small"
                     type="primary"
                     @click="handleConvert"
@@ -795,38 +883,47 @@ function handleReceiptSent(log: EmailLogRead) {
               </n-space>
             </div>
 
-            <n-card v-if="documentChain || chainRefreshing || initialChainError || paymentRefreshError" size="small" class="chain-card">
-              <n-space vertical size="small">
-                <n-text v-if="documentChain" strong>{{ t('chain.billingMode') }}: {{ documentChain.settlement_mode }}</n-text>
-                <n-text depth="3">{{ t('chain.readOnly') }}</n-text>
-                <n-spin v-if="chainRefreshing" size="small" />
-                <n-alert v-if="initialChainError" type="error">
-                  {{ t('chain.initialLoadFailed') }}
-                </n-alert>
-                <n-button v-if="initialChainError" text type="primary" :loading="chainRefreshing" @click="loadInitialDocumentChain">
-                  {{ t('chain.retry') }}
-                </n-button>
-                <n-alert v-if="paymentRefreshError" type="error">
-                  {{ t('chain.paymentRefreshFailed') }}
-                </n-alert>
-                <n-button v-if="paymentRefreshError" text type="primary" :loading="chainRefreshing" @click="refreshAfterPayment">
-                  {{ t('chain.retry') }}
-                </n-button>
-                <template v-if="documentChain?.relations.length">
-                  <n-text strong>{{ t('chain.relations') }}</n-text>
-                  <n-list bordered>
-                    <n-list-item v-for="relation in documentChain.relations" :key="`${relation.relation_type}:${relation.from_node_id}:${relation.to_node_id}`">
-                      {{ relation.relation_type }} · {{ relation.from_node_id }} → {{ relation.to_node_id }}
-                    </n-list-item>
-                  </n-list>
-                </template>
-                <n-list v-if="documentChain" bordered>
-                  <n-list-item v-for="event in documentChain.events" :key="event.id">
-                    {{ event.event_type }} · {{ event.occurred_at }}
-                  </n-list-item>
-                </n-list>
-              </n-space>
+            <n-card v-if="showModeCards" size="small" :title="t('workflow.mode')" class="billing-mode-cards">
+              <n-grid :cols="1" s:cols="3" x-gap="12" y-gap="12" responsive="screen">
+                <n-gi><n-card size="small"><n-text strong>{{ t('workflow.modes.DIRECT_INVOICE') }}</n-text><n-text depth="3">{{ t('quotes.convertToInvoice') }}</n-text><n-button type="primary" :disabled="!canConvertFromProjection" @click="handleConvert">{{ t('quotes.convertToInvoice') }}</n-button></n-card></n-gi>
+                <n-gi><n-card size="small"><n-text strong>{{ t('workflow.modes.RECEIPT_ONLY') }}</n-text><n-text depth="3">{{ t('workflow.receiptOnly') }}</n-text><n-button type="primary" :disabled="!canRecordQuotePaymentFromProjection" @click="beginReceiptOnly">{{ t('payments.addQuotePayment') }}</n-button></n-card></n-gi>
+                <n-gi><n-card size="small"><n-text strong>{{ t('workflow.modes.FORMAL_ADVANCE') }}</n-text><n-text depth="3">{{ advanceActionReason ?? t('workflow.createAdvance') }}</n-text><n-button type="primary" :disabled="!documentChain?.available_actions.some(action => action.code === 'CREATE_ADVANCE' && action.available && action.target_id === existingQuote?.id)" @click="beginFormalAdvance">{{ t('workflow.createAdvance') }}</n-button></n-card></n-gi>
+              </n-grid>
             </n-card>
+
+            <n-spin v-if="existingQuote && !documentChain && chainRefreshing" size="small" style="margin-bottom: 16px" />
+            <n-alert v-if="initialChainError && !documentChain" type="error" style="margin-bottom: 16px">
+              {{ t('chain.initialLoadFailed') }}
+              <n-button text type="primary" :loading="chainRefreshing" :disabled="chainRefreshing" @click="retryInitialDocumentChain">
+                {{ t('chain.retry') }}
+              </n-button>
+            </n-alert>
+            <n-alert v-if="paymentRefreshError" type="warning" style="margin-bottom: 16px">
+              {{ t('chain.paymentRefreshFailed') }}
+              <n-button text type="primary" :loading="chainRefreshing" :disabled="chainRefreshing" @click="retryPaymentDocumentChain">
+                {{ t('chain.retry') }}
+              </n-button>
+            </n-alert>
+
+            <DocumentWorkflowPanel
+              v-if="existingQuote && documentChain && (settlementMode !== 'UNSET' || showFormalContinuation)"
+              :quote-id="existingQuote.id"
+              :document-chain="documentChain"
+              :refresh-chain="loadInitialDocumentChain"
+              :chain-loading="chainRefreshing"
+              :chain-error="initialChainError ? t('chain.initialLoadFailed') : null"
+              :open-advance-signal="advanceCardSignal"
+              @changed="loadInitialDocumentChain"
+              @continuation-cancelled="abandonModeContinuation"
+            />
+            <n-empty
+              v-else-if="existingQuote && initialChainError && !chainRefreshing"
+              :description="t('chain.initialLoadFailed')"
+              size="small"
+              style="margin-bottom: 16px"
+            />
+
+            <n-button v-if="selectedModeContinuation && settlementMode === 'UNSET' && !receiptModeLockCommitted" quaternary size="small" @click="abandonModeContinuation">{{ t('common.cancel') }}</n-button>
 
             <n-alert v-if="pageError" type="error" style="margin-bottom: 16px">
               {{ pageError }}
@@ -1188,10 +1285,11 @@ function handleReceiptSent(log: EmailLogRead) {
             </n-form>
 
             <QuotePaymentPanel
-              v-if="isEdit && existingQuote"
+              v-if="isEdit && existingQuote && showReceiptContinuation"
               :quote-id="existingQuote.id"
               :quote-status="existingQuote.status"
               :converted-invoice-id="existingQuote.converted_invoice_id"
+              :can-record-payment="canRecordQuotePaymentFromProjection"
               :customer-email="receiptCustomer?.email ?? null"
               :customer-locale="receiptCustomer?.locale ?? null"
               @payments-changed="handlePaymentsChanged"

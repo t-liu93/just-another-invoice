@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Numeric,
+    String,
     Text,
     UniqueConstraint,
     text,
@@ -228,6 +229,17 @@ class InvoiceCorrection(Base):
     )
     source_invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    # Preserve whether the author selected the semantic "full remaining" mode
+    # rather than merely selecting every currently visible basis row.  Those
+    # two requests can produce the same lines today but must round-trip with
+    # their distinct future replay semantics.
+    full_remaining: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # ``MIGRATED_AMBIGUOUS`` denotes a pre-0041 DRAFT whose old materialised
+    # rows cannot tell full coverage from explicit-all selection.  New service
+    # writes are always ``NATIVE`` and carry an explicit boolean above.
+    intent_provenance: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="NATIVE"
     )
     issued_net_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
     issued_vat_amount: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)

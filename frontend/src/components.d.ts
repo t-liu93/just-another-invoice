@@ -17,6 +17,7 @@ declare module 'vue' {
     DictionarySettings: typeof import('./components/settings/DictionarySettings.vue')['default']
     DocumentDefaultsSettings: typeof import('./components/settings/DocumentDefaultsSettings.vue')['default']
     DocumentSendDialog: typeof import('./components/DocumentSendDialog.vue')['default']
+    DocumentWorkflowPanel: typeof import('./components/DocumentWorkflowPanel.vue')['default']
     EmailLogPanel: typeof import('./components/EmailLogPanel.vue')['default']
     EmailTemplatesSettings: typeof import('./components/settings/EmailTemplatesSettings.vue')['default']
     InvoicePaymentPanel: typeof import('./components/InvoicePaymentPanel.vue')['default']

@@ -34,6 +34,7 @@ export const useInvoicesStore = defineStore('invoices', () => {
   const customerIdFilter = ref<string | null>(null)
   const statusFilter = ref<string | null>(null)
   const paidStatusFilter = ref<string | null>(null)
+  const documentKindFilter = ref<components['schemas']['InvoiceDocumentKind'] | null>(null)
   const dateFrom = ref<string | null>(null)
   const dateTo = ref<string | null>(null)
   const limit = ref(50)
@@ -49,6 +50,7 @@ export const useInvoicesStore = defineStore('invoices', () => {
       if (customerIdFilter.value) params.set('customer_id', customerIdFilter.value)
       if (statusFilter.value) params.set('status', statusFilter.value)
       if (paidStatusFilter.value) params.set('paid_status', paidStatusFilter.value)
+      if (documentKindFilter.value) params.set('document_kind', documentKindFilter.value)
       if (dateFrom.value) params.set('date_from', dateFrom.value)
       if (dateTo.value) params.set('date_to', dateTo.value)
       params.set('limit', String(limit.value))
@@ -126,6 +128,7 @@ export const useInvoicesStore = defineStore('invoices', () => {
     customerIdFilter,
     statusFilter,
     paidStatusFilter,
+    documentKindFilter,
     dateFrom,
     dateTo,
     limit,

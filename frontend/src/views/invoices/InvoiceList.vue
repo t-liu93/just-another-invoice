@@ -204,6 +204,19 @@ const paidStatusOptions = computed(() => [
   { label: t('invoices.paidStatusPAID'), value: 'PAID' },
 ])
 
+const documentKindOptions = computed(() => [
+  { label: t('invoices.documentKindSTANDARD'), value: 'STANDARD' },
+  { label: t('invoices.documentKindADVANCE'), value: 'ADVANCE' },
+  { label: t('invoices.documentKindFINAL'), value: 'FINAL' },
+  { label: t('invoices.documentKindCREDIT_NOTE'), value: 'CREDIT_NOTE' },
+])
+
+function handleDocumentKindFilter(val: components['schemas']['InvoiceDocumentKind'] | null) {
+  store.documentKindFilter = val
+  store.offset = 0
+  store.fetchInvoices()
+}
+
 function handleSortChange(val: 'invoice_date' | 'created_at' | 'invoice_number') {
   store.sortBy = val
   store.offset = 0
@@ -239,6 +252,14 @@ function paidStatusTagType(ps: string): 'default' | 'warning' | 'success' {
     PAID: 'success',
   }
   return map[ps] ?? 'default'
+}
+
+function chainStatusTagType(status: string): 'default' | 'warning' | 'success' | 'error' {
+  if (status === 'NOT_APPLICABLE') return 'default'
+  if (status === 'SETTLED' || status === 'CREDITED') return 'success'
+  if (status === 'NOT_CREDITED') return 'default'
+  if (status === 'REFUND_DUE') return 'error'
+  return 'warning'
 }
 
 const columns = computed(() => [
@@ -283,6 +304,18 @@ const columns = computed(() => [
     render(row: InvoiceListItem) {
       return h(NTag, { type: paidStatusTagType(row.paid_status), size: 'small' }, () => t(`invoices.paidStatus${row.paid_status}`))
     },
+  },
+  {
+    title: t('invoices.settlementStatus'), key: 'settlement_status', width: 150,
+    render(row: InvoiceListItem) { return h(NTag, { type: chainStatusTagType(row.settlement_status), size: 'small' }, () => t(`invoices.settlementStatus${row.settlement_status}`)) },
+  },
+  {
+    title: t('invoices.creditStatus'), key: 'credit_status', width: 150,
+    render(row: InvoiceListItem) { return h(NTag, { type: chainStatusTagType(row.credit_status), size: 'small' }, () => t(`invoices.creditStatus${row.credit_status}`)) },
+  },
+  {
+    title: t('invoices.chainAmounts'), key: 'due_amount', width: 170,
+    render(row: InvoiceListItem) { return h('span', {}, `${t('invoices.due')}: ${row.currency} ${row.due_amount} · ${t('invoices.refundDue')}: ${row.refund_due_amount}`) },
   },
   {
     title: t('invoices.totalInclVat'),
@@ -428,6 +461,14 @@ const columns = computed(() => [
                 @update:value="handlePaidStatusFilter"
               />
               <n-select
+                :value="store.documentKindFilter"
+                :options="documentKindOptions"
+                :placeholder="t('invoices.documentKindAll')"
+                style="width: 150px"
+                clearable
+                @update:value="handleDocumentKindFilter"
+              />
+              <n-select
                 :value="store.sortBy"
                 :options="sortOptions"
                 style="width: 140px"
@@ -449,15 +490,16 @@ const columns = computed(() => [
           <n-spin :show="store.loading">
             <template v-if="!store.loading && store.items.length === 0">
               <n-empty
-                v-if="store.total === 0 && !store.query && !store.statusFilter && !store.customerIdFilter && !store.paidStatusFilter"
+                v-if="store.total === 0 && !store.query && !store.statusFilter && !store.customerIdFilter && !store.paidStatusFilter && !store.documentKindFilter"
                 :description="t('invoices.empty')"
               />
               <n-empty v-else :description="t('invoices.noResults')" />
             </template>
 
-            <n-data-table
+      <n-data-table
               v-else
-              :columns="columns"
+        :columns="columns"
+        :scroll-x="1300"
               :data="store.items"
               :bordered="false"
               :row-key="(row: InvoiceListItem) => row.id"

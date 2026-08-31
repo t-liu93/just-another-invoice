@@ -9,7 +9,7 @@ the API and Vue layer from performing settlement arithmetic.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, time
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
@@ -20,24 +20,116 @@ from jai.db import set_rls_company
 from jai.models._enums import (
     DocumentChainEventType,
     InvoiceDocumentKind,
+    InvoiceRelationType,
     InvoiceStatus,
     QuoteSettlementMode,
     QuoteStatus,
 )
-from jai.models.document import DocumentChainEvent, InvoiceCorrection, InvoiceRelation
-from jai.models.invoice import Invoice
+from jai.models.document import (
+    DocumentChainEvent,
+    FinalAdvanceApplication,
+    InvoiceCorrection,
+    InvoiceRelation,
+)
+from jai.models.invoice import Invoice, InvoiceLine
 from jai.models.payment import Payment
 from jai.models.quote import Quote
 from jai.schemas.document_chain import (
+    DocumentChainApplicationRead,
     DocumentChainAvailableActionRead,
     DocumentChainEventRead,
     DocumentChainNodeRead,
     DocumentChainRead,
     DocumentChainRelationRead,
+    DocumentChainTimelineApplicationRead,
+    DocumentChainTimelineEventRead,
+    DocumentChainTimelineItemRead,
+    DocumentChainTimelineNodeRead,
+    DocumentChainTimelineRelationRead,
+    FollowupContextRead,
 )
 from jai.schemas.quote import DocumentChainTotals
+from jai.services.document_actions import (
+    advance_replacement_capacity_eligibility,
+    cancellation_eligibility,
+    credit_note_eligibility,
+    followup_eligibility,
+)
 
 type SafeValue = object
+
+
+def _action(code: str, available: bool, reason_code: str | None = None, *, target_id: uuid.UUID | None = None, target_type: str | None = None, followup_context: FollowupContextRead | None = None) -> DocumentChainAvailableActionRead:
+    """Keep command eligibility and its safe UI explanation in one projection."""
+    return DocumentChainAvailableActionRead(
+        code=code,
+        available=available,
+        reason_code=None if available else (reason_code or "ACTION_UNAVAILABLE"),
+        target_id=target_id,
+        target_type=target_type,  # type: ignore[arg-type]
+        followup_context=followup_context,
+    )
+
+
+def _followup_context(
+    *, credit: Invoice, source: Invoice | None, relation_type: InvoiceRelationType, mode: QuoteSettlementMode | None, final_exists: bool
+) -> FollowupContextRead | None:
+    """Derive the actual positive target kind once, on the backend."""
+    if source is None:
+        return None
+    source_kind = InvoiceDocumentKind(source.document_kind)
+    target_kind = (
+        source_kind
+        if relation_type == InvoiceRelationType.REPLACEMENT_OF
+        else (
+            InvoiceDocumentKind.ADVANCE
+            if source_kind == InvoiceDocumentKind.ADVANCE
+            and mode == QuoteSettlementMode.FORMAL_ADVANCE
+            and not final_exists
+            else InvoiceDocumentKind.STANDARD
+        )
+    )
+    return FollowupContextRead(
+        credit_note_id=credit.id,
+        source_invoice_id=source.id,
+        relation_type=relation_type.value,
+        target_document_kind=target_kind,
+        gross_amount=Decimal(str(credit.total_incl_vat)),
+    )
+
+
+def _timeline(
+    nodes: list[DocumentChainNodeRead],
+    events: list[DocumentChainEventRead],
+    relations: list[DocumentChainRelationRead],
+    applications: list[DocumentChainApplicationRead] | None = None,
+) -> list[DocumentChainTimelineItemRead]:
+    """Return one stable chronological display order for all chain facts."""
+    node_dates = {node.id: node.occurred_on for node in nodes}
+    # Date-only facts deliberately precede events on that date; events retain
+    # their full timestamp and database sequence, so CREATE → ISSUE → cash
+    # cannot be shuffled by UUID ties.  Relations/applications follow their
+    # date-only endpoints in deterministic domain-key order.
+    ranked: list[tuple[object, int, object, DocumentChainTimelineItemRead]] = []
+    for node in nodes:
+        ranked.append((datetime.combine(node.occurred_on, time.min, tzinfo=UTC), 0, str(node.id), DocumentChainTimelineNodeRead(kind="NODE", order=0, node=node)))
+    for event in events:
+        ranked.append((event.occurred_at, 1, event.event_order, DocumentChainTimelineEventRead(kind="EVENT", order=0, event=event)))
+    for relation in relations:
+        # Relations have no user-entered date; their target document/cash is
+        # the authoritative visible occurrence.  This is deterministic even
+        # for migrated rows without an event record.
+        occurred_on = max(
+            node_dates.get(relation.from_node_id, datetime.min.date()),
+            node_dates.get(relation.to_node_id, datetime.min.date()),
+        )
+        ranked.append((datetime.combine(occurred_on, time.min, tzinfo=UTC), 2, f"{relation.relation_type}:{relation.from_node_id}:{relation.to_node_id}", DocumentChainTimelineRelationRead(kind="RELATION", order=0, relation=relation)))
+    for application in applications or []:
+        ranked.append((datetime.combine(application.occurred_on, time.min, tzinfo=UTC), 3, f"{application.final_invoice_id}:{application.advance_invoice_id}", DocumentChainTimelineApplicationRead(kind="APPLICATION", order=0, application=application)))
+    ordered = [item for _, _, _, item in sorted(ranked, key=lambda row: row[:3])]
+    for order, item in enumerate(ordered):
+        item.order = order
+    return ordered
 
 
 class _EventMetadata(BaseModel):
@@ -399,6 +491,42 @@ async def get_document_chain(
             )
         ).scalars()
     )
+    final_invoice_ids = [
+        invoice.id
+        for invoice in invoices
+        if InvoiceDocumentKind(invoice.document_kind) == InvoiceDocumentKind.FINAL
+    ]
+    application_rows = (
+        list(
+            (
+                await session.execute(
+                    select(FinalAdvanceApplication)
+                    .where(
+                        FinalAdvanceApplication.company_id == company_id,
+                        FinalAdvanceApplication.final_invoice_id.in_(final_invoice_ids),
+                    )
+                    .order_by(FinalAdvanceApplication.final_invoice_id, FinalAdvanceApplication.sort_order)
+                )
+            ).scalars()
+        )
+        if final_invoice_ids
+        else []
+    )
+    applications = [
+        DocumentChainApplicationRead(
+            final_invoice_id=row.final_invoice_id,
+            advance_invoice_id=row.advance_invoice_id,
+            occurred_on=next(
+                invoice.invoice_date
+                for invoice in invoices
+                if invoice.id == row.final_invoice_id
+            ),
+            taxable_amount=Decimal(str(row.taxable_amount)),
+            vat_amount=Decimal(str(row.vat_amount)),
+            gross_amount=Decimal(str(row.gross_amount)),
+        )
+        for row in application_rows
+    ]
     quote_payments = [payment for payment in payments if payment.quote_id == quote.id]
     totals = compute_document_chain_totals(invoices, quote_payments, quote=quote)
     node_rows: list[tuple[tuple[object, int, str], DocumentChainNodeRead]] = [
@@ -525,34 +653,136 @@ async def get_document_chain(
         and InvoiceStatus(invoice.status) == InvoiceStatus.DRAFT
         for invoice in invoices
     )
+    final_draft_exists = any(
+        InvoiceDocumentKind(item.document_kind) == InvoiceDocumentKind.FINAL
+        and InvoiceStatus(item.status) == InvoiceStatus.DRAFT
+        for item in invoices
+    )
+    # One bulk line read gives every Advance-follow-up Credit its exact frozen
+    # VAT bucket demand.  It replaces the former optimistic action card while
+    # preserving the chain GET's constant query shape.
+    credit_ids_for_capacity = [
+        item.id for item in invoices if InvoiceDocumentKind(item.document_kind) == InvoiceDocumentKind.CREDIT_NOTE
+    ]
+    credit_bucket_rows = (
+        list(
+            (
+                await session.execute(
+                    select(
+                        InvoiceLine.invoice_id,
+                        InvoiceLine.vat_rate_id,
+                        InvoiceLine.taxable_amount,
+                        InvoiceLine.vat_total,
+                    ).where(InvoiceLine.invoice_id.in_(credit_ids_for_capacity))
+                )
+            ).all()
+        )
+        if credit_ids_for_capacity
+        else []
+    )
+    credit_bucket_requirements: dict[uuid.UUID, dict[uuid.UUID, tuple[Decimal, Decimal]]] = {}
+    for credit_id, rate_id, taxable, vat in credit_bucket_rows:
+        if rate_id is None:
+            continue
+        required = credit_bucket_requirements.setdefault(credit_id, {})
+        old_net, old_vat = required.get(rate_id, (Decimal("0"), Decimal("0")))
+        required[rate_id] = (old_net + Decimal(str(taxable)), old_vat + Decimal(str(vat)))
+    available_advance_capacity = {
+        bucket.vat_rate_id: (bucket.taxable_amount, bucket.vat_amount)
+        for bucket in advance_creation.remaining_buckets
+    }
+    supplemental_standard_ids = {
+        invoice.id
+        for invoice, _, _, relation_type in invoice_rows
+        if relation_type == InvoiceRelationType.COMPENSATES_CREDIT
+    }
+    cancellation_sources = [
+        item for item in invoices
+        if InvoiceStatus(item.status) in {InvoiceStatus.SENT, InvoiceStatus.COMPLETED}
+        and (
+            InvoiceDocumentKind(item.document_kind)
+            in {InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL}
+            or (
+                InvoiceDocumentKind(item.document_kind) == InvoiceDocumentKind.STANDARD
+                and item.id in supplemental_standard_ids
+            )
+        )
+        and Decimal(str(item.credited_total)) < Decimal(str(item.payable_before_payments))
+    ]
+    cancellation = cancellation_eligibility(
+        mode=mode,
+        final_draft_exists=final_draft_exists,
+        has_remaining_formal_charge=bool(cancellation_sources),
+    )
     actions = [
-        DocumentChainAvailableActionRead(
-            code="CONVERT_TO_INVOICE",
-            available=await conversion_is_available(session, quote),
-        ),
-        DocumentChainAvailableActionRead(
-            code="RECORD_QUOTE_PAYMENT",
-            available=(
+        _action("CONVERT_TO_INVOICE", await conversion_is_available(session, quote), target_id=quote.id, target_type="QUOTE"),
+        _action(
+            "RECORD_QUOTE_PAYMENT",
+            (
                 mode in {QuoteSettlementMode.UNSET, QuoteSettlementMode.RECEIPT_ONLY}
                 and QuoteStatus(quote.status) == QuoteStatus.ACCEPTED
                 and quote.vat_treatment_code == "NL_DOMESTIC"
                 and not invoices
             ),
+            target_id=quote.id, target_type="QUOTE",
         ),
-        DocumentChainAvailableActionRead(
-            code="CREATE_ADVANCE", available=advance_creation.available
-        ),
-        DocumentChainAvailableActionRead(
-            code="CREATE_FINAL",
-            available=(
+        _action("CREATE_ADVANCE", advance_creation.available, getattr(advance_creation, "reason_code", None), target_id=quote.id, target_type="QUOTE"),
+        _action(
+            "CREATE_FINAL",
+            (
                 mode == QuoteSettlementMode.FORMAL_ADVANCE
                 and QuoteStatus(quote.status) == QuoteStatus.ACCEPTED
                 and issued_advance_exists
                 and not final_exists
                 and not open_advance_exists
             ),
+            target_id=quote.id, target_type="QUOTE",
         ),
-        DocumentChainAvailableActionRead(code="CREATE_CREDIT_NOTE", available=False),
+        _action("CREATE_PROJECT_CANCELLATION", cancellation.available, cancellation.reason_code, target_id=quote.id, target_type="QUOTE"),
+    ]
+    source_by_credit = {
+        credit_id: source_id for credit_id, source_id in credit_sources.items()
+    }
+    invoice_by_id = {item.id: item for item in invoices}
+    followed_credit_ids = {
+        related_credit_id
+        for _, _, related_credit_id, relation_type in invoice_rows
+        if related_credit_id is not None and relation_type is not None
+    }
+    for item in invoices:
+        kind = InvoiceDocumentKind(item.document_kind)
+        if kind != InvoiceDocumentKind.CREDIT_NOTE:
+            eligibility = credit_note_eligibility(item, final_draft_exists=final_draft_exists)
+            actions.append(_action("CREATE_CREDIT_NOTE", eligibility.available, eligibility.reason_code, target_id=item.id, target_type="INVOICE"))
+        else:
+            replacement, compensation = followup_eligibility(
+                item,
+                invoice_by_id.get(source_by_credit.get(item.id)),
+                mode=mode,
+                final_exists=final_exists,
+                open_advance_draft_exists=open_advance_exists,
+                existing_followup=item.id in followed_credit_ids,
+                advance_capacity_confirmed=advance_replacement_capacity_eligibility(
+                    available_advance_capacity,
+                    credit_bucket_requirements.get(item.id, {}),
+                ),
+            )
+            actions.extend([
+                _action("CREATE_REPLACEMENT", replacement.available, replacement.reason_code, target_id=item.id, target_type="INVOICE", followup_context=_followup_context(credit=item, source=invoice_by_id.get(source_by_credit.get(item.id)), relation_type=InvoiceRelationType.REPLACEMENT_OF, mode=mode, final_exists=final_exists)),
+                _action("CREATE_COMPENSATING_INVOICE", compensation.available, compensation.reason_code, target_id=item.id, target_type="INVOICE", followup_context=_followup_context(credit=item, source=invoice_by_id.get(source_by_credit.get(item.id)), relation_type=InvoiceRelationType.COMPENSATES_CREDIT, mode=mode, final_exists=final_exists)),
+            ])
+    event_reads = [
+        DocumentChainEventRead(
+            id=event.id,
+            event_type=event.event_type,
+            occurred_at=event.occurred_at,
+            event_order=event.event_order,
+            quote_id=event.quote_id,
+            invoice_id=event.invoice_id,
+            actor_user_id=event.actor_user_id,
+            metadata=event.metadata_json,
+        )
+        for event in events
     ]
     return DocumentChainRead(
         quote_id=quote.id,
@@ -561,18 +791,8 @@ async def get_document_chain(
         settlement_mode_locked_at=quote.settlement_mode_locked_at,
         nodes=nodes,
         relations=relations,
-        events=[
-            DocumentChainEventRead(
-                id=event.id,
-                event_type=event.event_type,
-                occurred_at=event.occurred_at,
-                quote_id=event.quote_id,
-                invoice_id=event.invoice_id,
-                actor_user_id=event.actor_user_id,
-                metadata=event.metadata_json,
-            )
-            for event in events
-        ],
+        events=event_reads,
+        timeline=_timeline(nodes, event_reads, relations, applications),
         totals=totals,
         quote_total=Decimal(str(quote.total_incl_vat)),
         available_actions=actions,
@@ -702,59 +922,89 @@ async def get_invoice_document_chain(
             ],
         ]
         nodes.sort(key=lambda node: (node.occurred_on, str(node.id)))
+        # All action cards are target-scoped even without a Quote root.  The
+        # graph can be opened through its source, Credit, or positive follow-up
+        # so returning actions only for the requested node makes direct chains
+        # needlessly unreachable from their own pages.
+        direct_by_id = {item.id: item for item in direct_invoices}
+        direct_credit_sources = {
+            correction.credit_note_id: correction.source_invoice_id
+            for correction in corrections
+        }
+        direct_followed_credit_ids = {
+            relation.related_credit_note_id for relation in related_positive_rows
+        }
+        direct_actions = [
+            _action("CONVERT_TO_INVOICE", False, "ACTION_REQUIRES_QUOTE"),
+            _action("RECORD_QUOTE_PAYMENT", False, "ACTION_REQUIRES_QUOTE"),
+            _action("CREATE_ADVANCE", False, "ACTION_REQUIRES_QUOTE"),
+            _action("CREATE_FINAL", False, "ACTION_REQUIRES_QUOTE"),
+            _action("CREATE_PROJECT_CANCELLATION", False, "ACTION_REQUIRES_QUOTE"),
+        ]
+        for item in direct_invoices:
+            if InvoiceDocumentKind(item.document_kind) != InvoiceDocumentKind.CREDIT_NOTE:
+                eligibility = credit_note_eligibility(item, final_draft_exists=False)
+                direct_actions.append(
+                    _action(
+                        "CREATE_CREDIT_NOTE", eligibility.available, eligibility.reason_code,
+                        target_id=item.id, target_type="INVOICE",
+                    )
+                )
+                continue
+            replacement, compensation = followup_eligibility(
+                item,
+                direct_by_id.get(direct_credit_sources[item.id])
+                if item.id in direct_credit_sources
+                else None,
+                mode=None,
+                final_exists=False,
+                open_advance_draft_exists=False,
+                existing_followup=item.id in direct_followed_credit_ids,
+            )
+            direct_actions.extend([
+                _action("CREATE_REPLACEMENT", replacement.available, replacement.reason_code, target_id=item.id, target_type="INVOICE", followup_context=_followup_context(credit=item, source=direct_by_id.get(direct_credit_sources[item.id]) if item.id in direct_credit_sources else None, relation_type=InvoiceRelationType.REPLACEMENT_OF, mode=None, final_exists=False)),
+                _action("CREATE_COMPENSATING_INVOICE", compensation.available, compensation.reason_code, target_id=item.id, target_type="INVOICE", followup_context=_followup_context(credit=item, source=direct_by_id.get(direct_credit_sources[item.id]) if item.id in direct_credit_sources else None, relation_type=InvoiceRelationType.COMPENSATES_CREDIT, mode=None, final_exists=False)),
+            ])
+        direct_relations = [
+            DocumentChainRelationRead(
+                relation_type="INVOICE_TO_PAYMENT", from_node_id=payment.invoice_id, to_node_id=payment.id
+            )
+            for payment in payments if payment.invoice_id is not None
+        ] + [
+            DocumentChainRelationRead(
+                relation_type="CREDIT_NOTE_TO_REFUND", from_node_id=payment.credit_note_id, to_node_id=payment.id
+            )
+            for payment in payments if payment.credit_note_id is not None
+        ] + [
+            DocumentChainRelationRead(
+                relation_type="INVOICE_TO_CREDIT_NOTE", from_node_id=correction.source_invoice_id, to_node_id=correction.credit_note_id
+            )
+            for correction in corrections
+        ] + [
+            DocumentChainRelationRead(
+                relation_type=relation.relation_type.value, from_node_id=relation.related_credit_note_id, to_node_id=relation.invoice_id
+            )
+            for relation in related_positive_rows
+        ]
+        direct_events = [
+            DocumentChainEventRead(
+                id=event.id, event_type=event.event_type, occurred_at=event.occurred_at,
+                event_order=event.event_order,
+                quote_id=event.quote_id, invoice_id=event.invoice_id,
+                actor_user_id=event.actor_user_id, metadata=event.metadata_json,
+            )
+            for event in events
+        ]
         return DocumentChainRead(
             settlement_mode=QuoteSettlementMode.UNSET,
             nodes=nodes,
-            relations=[
-                DocumentChainRelationRead(
-                    relation_type="INVOICE_TO_PAYMENT",
-                    from_node_id=payment.invoice_id,
-                    to_node_id=payment.id,
-                )
-                for payment in payments
-                if payment.invoice_id is not None
-            ]
-            + [
-                DocumentChainRelationRead(
-                    relation_type="CREDIT_NOTE_TO_REFUND",
-                    from_node_id=payment.credit_note_id,
-                    to_node_id=payment.id,
-                )
-                for payment in payments
-                if payment.credit_note_id is not None
-            ]
-            + [
-                DocumentChainRelationRead(
-                    relation_type="INVOICE_TO_CREDIT_NOTE",
-                    from_node_id=correction.source_invoice_id,
-                    to_node_id=correction.credit_note_id,
-                )
-                for correction in corrections
-            ]
-            + [
-                DocumentChainRelationRead(
-                    relation_type=relation.relation_type.value,
-                    from_node_id=relation.related_credit_note_id,
-                    to_node_id=relation.invoice_id,
-                )
-                for relation in related_positive_rows
-            ],
-            events=[
-                DocumentChainEventRead(
-                    id=event.id,
-                    event_type=event.event_type,
-                    occurred_at=event.occurred_at,
-                    quote_id=event.quote_id,
-                    invoice_id=event.invoice_id,
-                    actor_user_id=event.actor_user_id,
-                    metadata=event.metadata_json,
-                )
-                for event in events
-            ],
+            relations=direct_relations,
+            events=direct_events,
+            timeline=_timeline(nodes, direct_events, direct_relations),
             totals=compute_document_chain_totals(direct_invoices, []),
-            available_actions=[
-                DocumentChainAvailableActionRead(code="CREATE_ADVANCE", available=False),
-                DocumentChainAvailableActionRead(code="CREATE_CREDIT_NOTE", available=False),
-            ],
+            available_actions=direct_actions,
         )
-    return await get_document_chain(session, company_id=company_id, quote_id=invoice.quote_id)
+    chain = await get_document_chain(session, company_id=company_id, quote_id=invoice.quote_id)
+    if chain is None:
+        return None
+    return chain
