@@ -30,7 +30,7 @@ modal: {
 }))
 vi.mock('../../src/api/http', () => ({ ...http, downloadBlob: vi.fn(), ApiError: class ApiError extends Error {} }))
 vi.mock('naive-ui', () => ({
-  NAlert: naive, NButton: actionButton, NCard: naive, NDatePicker: naive,
+  NAlert: naive, NButton: actionButton, NCard: naive, NCollapse: naive, NCollapseItem: naive, NDatePicker: naive,
   NDescriptions: naive, NDescriptionsItem: naive, NDivider: naive,
   NEmpty: naive, NForm: naive, NFormItem: naive, NInput: semantic.input,
   NList: naive, NListItem: naive, NModal: semantic.modal, NSelect: semantic.select,
@@ -92,6 +92,60 @@ describe('DocumentWorkflowPanel target action projection', () => {
     await flushPromises()
     expect(refreshChain).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('Could not load the document chain')
+  })
+
+  it.each(['STANDARD', 'ADVANCE', 'FINAL', 'CREDIT_NOTE'] as const)(
+    'keeps a Draft %s editor on its chain without requesting issued-only output',
+    async (document_kind) => {
+      http.get.mockReset()
+      const wrapper = mount(DocumentWorkflowPanel, {
+        props: {
+          invoice: { ...invoice, id: `draft-${document_kind}`, document_kind, status: 'DRAFT' },
+          documentChain: { ...baseChain, totals: { due_amount: '100.00' } },
+        },
+        global: { plugins: [i18n], stubs },
+      })
+      await flushPromises()
+
+      const endpoints = http.get.mock.calls.map(([url]) => url as string)
+      expect(endpoints.some(url => url.includes('/artifacts') || url.includes('/refunds'))).toBe(false)
+      expect((wrapper.vm as any).error).toBeNull()
+      expect(wrapper.text()).toContain('100.00')
+    },
+  )
+
+  it('loads and displays retained output once an invoice is issued', async () => {
+    http.get.mockReset()
+    http.get.mockResolvedValue({ items: [{ id: 'artifact', filename: 'issued.pdf', locale: 'en', creation_reason: 'DOWNLOAD' }] })
+    const wrapper = mount(DocumentWorkflowPanel, {
+      props: { invoice: { ...invoice, document_kind: 'STANDARD', status: 'SENT' }, documentChain: baseChain },
+      global: { plugins: [i18n], stubs },
+    })
+    await flushPromises()
+
+    expect(http.get).toHaveBeenCalledWith('/api/v1/invoices/source/artifacts')
+    expect(wrapper.text()).toContain('issued.pdf')
+  })
+
+  it('loads Credit refunds and their retained output only after the Credit is issued', async () => {
+    http.get.mockReset()
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/credit-notes/credit/refunds') return Promise.resolve({ items: [{ id: 'refund-1', payment_date: '2026-03-05', amount: '10.00' }] })
+      if (url === '/api/v1/invoices/credit/artifacts') return Promise.resolve({ items: [{ id: 'credit-artifact', filename: 'credit.pdf', locale: 'en', creation_reason: 'DOWNLOAD' }] })
+      if (url === '/api/v1/payments/refund-1/artifacts') return Promise.resolve({ items: [{ id: 'refund-artifact', filename: 'refund.pdf', locale: 'en', creation_reason: 'DOWNLOAD' }] })
+      return Promise.reject(new Error(`unexpected ${url}`))
+    })
+    const wrapper = mount(DocumentWorkflowPanel, {
+      props: { invoice: credit, documentChain: baseChain },
+      global: { plugins: [i18n], stubs },
+    })
+    await flushPromises()
+
+    expect(http.get).toHaveBeenCalledWith('/api/v1/credit-notes/credit/refunds')
+    expect(http.get).toHaveBeenCalledWith('/api/v1/invoices/credit/artifacts')
+    expect(http.get).toHaveBeenCalledWith('/api/v1/payments/refund-1/artifacts')
+    expect(wrapper.text()).toContain('credit.pdf')
+    expect(wrapper.text()).toContain('refund.pdf')
   })
 
   it.each(['DIRECT_INVOICE', 'RECEIPT_ONLY'] as const)('keeps %s read-only while rendering authoritative totals and every timeline kind', async (mode) => {
@@ -427,10 +481,18 @@ describe('DocumentWorkflowPanel target action projection', () => {
     // Resetting the route makes B usable before A settles.  The next request
     // is deliberately started through the same visible control, never vm.
     expect((wrapper.vm as any).busy).toBe(false)
-    if (kind === 'advance') await action(wrapper, 'Calculate').trigger('click')
-    else if (kind === 'cancellation') await action(wrapper, 'Preview cancellation').trigger('click')
-    else if (kind === 'credit-source') await action(wrapper, 'Selected source lines').trigger('click')
-    else await action(wrapper, 'Calculate').trigger('click')
+    if (kind === 'advance') {
+      await action(wrapper, 'Create advance').trigger('click')
+      await wrapper.find('input').setValue('10')
+      await action(wrapper, 'Calculate').trigger('click')
+    } else if (kind === 'cancellation') {
+      await action(wrapper, 'Cancel formal project').trigger('click')
+      await action(wrapper, 'Preview cancellation').trigger('click')
+    } else {
+      await action(wrapper, 'Create credit note').trigger('click')
+      if (kind === 'credit-source') await action(wrapper, 'Selected source lines').trigger('click')
+      else await action(wrapper, 'Calculate').trigger('click')
+    }
     await flushPromises()
     expect((wrapper.vm as any).busy).toBe(true)
     if (staleOutcome === 'success') old.resolve(kind === 'cancellation'

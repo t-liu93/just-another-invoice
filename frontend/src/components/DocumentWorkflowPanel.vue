@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
   NAlert, NButton, NCard, NDatePicker, NDescriptions, NDescriptionsItem,
-  NDivider, NEmpty, NForm, NFormItem, NInput, NList,
+  NCollapse, NCollapseItem, NDivider, NEmpty, NForm, NFormItem, NInput, NList,
   NListItem, NModal, NSelect, NSpace, NSpin, NTag, NText,
 } from 'naive-ui'
 import { del, get, post, put, downloadBlob, ApiError } from '../api/http'
@@ -44,6 +44,12 @@ const router = useRouter()
 const chain = ref<Chain | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+// Parent-owned chain/actions and child-owned retained output have independent
+// lifetimes.  In particular, a successful chain refresh cannot make a failed
+// artifact/refund read look successful.
+const resourceError = ref<string | null>(null)
+const issuedOutputLoading = ref(false)
+const expandedNames = ref<string[]>([])
 const busy = ref(false)
 const showAdvance = ref(false)
 const showFinal = ref(false)
@@ -98,6 +104,7 @@ let creditPreviewGeneration = 0
 let creditSourceGeneration = 0
 let cancellationGeneration = 0
 let loadGeneration = 0
+let issuedOutputGeneration = 0
 let contextGeneration = 0
 let busyOwner: 'advance-preview' | 'credit-preview' | 'credit-source' | 'cancellation-preview' | null = null
 const paymentMethods = ref<Array<{ id: string; name: string }>>([])
@@ -106,6 +113,16 @@ const quoteId = computed(() => props.quoteId ?? props.invoice?.quote_id ?? null)
 const invoiceId = computed(() => props.invoice?.id ?? null)
 const creditSourceId = computed(() => props.invoice?.source_invoice_id ?? invoiceId.value)
 const isCredit = computed(() => props.invoice?.document_kind === 'CREDIT_NOTE')
+// Retained output is created only when a document is issued.  Draft editors
+// still need their parent-owned chain, totals, and actions, but must not ask
+// issued-only endpoints for resources that do not exist yet.
+const hasIssuedOutput = computed(() => ['SENT', 'COMPLETED'].includes(props.invoice?.status ?? ''))
+// An invoice and a quote can share a UUID in imported data, but they are
+// separate route owners and must not inherit one another's UI state.
+const documentOwnerKey = computed(() => {
+  if (props.invoice?.id) return `invoice:${props.invoice.id}`
+  return props.quoteId ? `quote:${props.quoteId}` : null
+})
 const sourceCanCredit = computed(() => availableAction(actionCodes.value, 'CREATE_CREDIT_NOTE', invoiceId.value, 'INVOICE'))
 const visibleChain = computed(() => props.documentChain ?? chain.value)
 const actionCodes = computed(() => visibleChain.value?.available_actions ?? [])
@@ -205,16 +222,99 @@ async function loadPaymentMethods(): Promise<void> {
     )).items
   } catch (cause) { error.value = errorText(cause) }
 }
+function clearIssuedOutput(): void {
+  refund.value = null
+  artifacts.value = null
+  refundArtifacts.value = {}
+  resourceError.value = null
+  issuedOutputLoading.value = false
+}
+function invalidateIssuedOutput(): number {
+  const generation = ++issuedOutputGeneration
+  clearIssuedOutput()
+  return generation
+}
+function resetWorkflowState(invoice: InvoiceRead | null | undefined): void {
+  // This owns every locally editable or transient workflow value.  Route
+  // owners can both be Quotes (where the invoice watcher never fires), so a
+  // documentOwnerKey transition—not just an invoice id transition—must reset
+  // these values before the new context is displayed.
+  ++advanceGeneration; ++creditPreviewGeneration; ++creditSourceGeneration; ++cancellationGeneration
+  invalidateIssuedOutput()
+  advanceMode.value = 'GROSS_AMOUNT'; advanceRaw.value = ''
+  advancePreview.value = null; advancePreviewRequest.value = null; advancePreviewSignature.value = null
+  advanceDate.value = localDateStr(new Date()); advanceDueDate.value = null; advanceSupplyDate.value = null; advanceReference.value = null
+  creditFull.value = true; creditIntentConfirmation.value = false; creditRows.value = []
+  creditPreview.value = null; creditPreviewRequest.value = null; creditPreviewSignature.value = null; creditSourcePreview.value = null
+  creditDate.value = localDateStr(new Date()); creditDueDate.value = null; creditSupplyDate.value = null; creditReference.value = null
+  finalDate.value = localDateStr(new Date())
+  cancellationPreview.value = null; cancellationPreviewRequest.value = null; cancellationPreviewSignature.value = null
+  refundAmount.value = ''; refundDate.value = localDateStr(new Date()); refundMethodId.value = null; refundReference.value = null; refundNote.value = null
+  editingRefund.value = null; pendingRefundAction.value = null
+  refundSendId.value = null; refundSendShow.value = false; refundPreviewShow.value = false; refundPreviewSrc.value = null
+  pendingFollowup.value = null; showFollowupConfirm.value = false; showRefundConfirm.value = false; showCancellationConfirm.value = false
+  showAdvance.value = false; showFinal.value = false; showCredit.value = false; showCancellation.value = false
+  busy.value = false; busyOwner = null; error.value = null
+  if (invoice?.document_kind === 'ADVANCE') {
+    advanceMode.value = invoice.advance_input_mode ?? 'GROSS_AMOUNT'
+    advanceRaw.value = String(advanceMode.value === 'PERCENTAGE' ? invoice.advance_percentage ?? '' : invoice.advance_gross_amount ?? invoice.total_incl_vat)
+    advanceDate.value = invoice.invoice_date; advanceDueDate.value = invoice.due_date ?? null
+    advanceSupplyDate.value = invoice.supply_or_advance_date ?? null; advanceReference.value = invoice.reference_number ?? null
+  }
+  if (invoice?.document_kind === 'CREDIT_NOTE') {
+    creditDate.value = invoice.invoice_date; creditDueDate.value = invoice.due_date ?? null
+    creditSupplyDate.value = invoice.supply_or_advance_date ?? null; creditReference.value = invoice.reference_number ?? null
+    const intent = invoice.credit_draft_intent
+    creditFull.value = intent?.full_remaining ?? false
+    creditIntentConfirmation.value = intent?.requires_confirmation ?? false
+    creditRows.value = (intent?.lines ?? []).map(line => ({
+      source_basis_line_id: line.source_basis_line_id,
+      input_mode: line.input_mode,
+      raw: String(line.input_mode === 'QUANTITY' ? line.quantity : line.gross_amount),
+    }))
+  }
+}
+async function loadIssuedOutput(generation: number): Promise<void> {
+  issuedOutputLoading.value = true
+  if (!invoiceId.value || !hasIssuedOutput.value) {
+    clearIssuedOutput()
+    if (generation === issuedOutputGeneration) issuedOutputLoading.value = false
+    return
+  }
+  try {
+    if (isCredit.value) {
+      const [collection, history] = await Promise.all([
+        get<RefundCollectionRead>(`/api/v1/credit-notes/${invoiceId.value}/refunds`),
+        get<DocumentArtifactListResponse>(`/api/v1/invoices/${invoiceId.value}/artifacts`),
+      ])
+      if (generation !== issuedOutputGeneration) return
+      refund.value = collection
+      artifacts.value = history
+      const allArtifacts = await Promise.all((collection.items ?? []).map(async item => [item.id, await get<DocumentArtifactListResponse>(`/api/v1/payments/${item.id}/artifacts`)] as const))
+      if (generation !== issuedOutputGeneration) return
+      refundArtifacts.value = Object.fromEntries(allArtifacts)
+    } else {
+      const history = await get<DocumentArtifactListResponse>(`/api/v1/invoices/${invoiceId.value}/artifacts`)
+      if (generation !== issuedOutputGeneration) return
+      artifacts.value = history
+    }
+    if (generation === issuedOutputGeneration) resourceError.value = null
+  } catch (cause) {
+    if (generation === issuedOutputGeneration) resourceError.value = errorText(cause)
+  } finally {
+    if (generation === issuedOutputGeneration) issuedOutputLoading.value = false
+  }
+}
 async function load(): Promise<void> {
   const id = quoteId.value ?? invoiceId.value
   if (!id) return
   const generation = ++loadGeneration
+  invalidateIssuedOutput()
   ++contextGeneration
   ++advanceGeneration; ++creditPreviewGeneration; ++creditSourceGeneration; ++cancellationGeneration
   // A page-provided projection has a single owner.  Keep it visible while
   // this child independently reads invoice-specific refunds/artifacts.
   if (!props.documentChain) chain.value = null
-  refund.value = null; artifacts.value = null; refundArtifacts.value = {}
   advancePreview.value = null; advancePreviewRequest.value = null
   creditPreview.value = null; creditPreviewRequest.value = null; creditSourcePreview.value = null
   // A new route/owner context must never inherit a disabled control or an
@@ -227,43 +327,56 @@ async function load(): Promise<void> {
       if (generation !== loadGeneration) return
       chain.value = nextChain
     }
-    if (isCredit.value && invoiceId.value) {
-      const [collection, history] = await Promise.all([
-        get<RefundCollectionRead>(`/api/v1/credit-notes/${invoiceId.value}/refunds`),
-        get<DocumentArtifactListResponse>(`/api/v1/invoices/${invoiceId.value}/artifacts`),
-      ])
-      if (generation !== loadGeneration) return
-      refund.value = collection; artifacts.value = history
-      const allArtifacts = await Promise.all((collection.items ?? []).map(async item => [item.id, await get<DocumentArtifactListResponse>(`/api/v1/payments/${item.id}/artifacts`)] as const))
-      if (generation !== loadGeneration) return
-      refundArtifacts.value = Object.fromEntries(allArtifacts)
-    } else if (invoiceId.value) {
-      const history = await get<DocumentArtifactListResponse>(`/api/v1/invoices/${invoiceId.value}/artifacts`)
-      if (generation !== loadGeneration) return
-      artifacts.value = history
-    }
   } catch (cause) { if (generation === loadGeneration) error.value = errorText(cause) }
-  finally { if (generation === loadGeneration) loading.value = false }
+  finally {
+    if (generation === loadGeneration) loading.value = false
+  }
+  if (generation === loadGeneration && hasIssuedOutput.value) await loadIssuedOutput(++issuedOutputGeneration)
 }
 async function refresh(): Promise<void> {
   if (loading.value || props.chainLoading) return
   if (props.refreshChain) {
-    const refreshed = await props.refreshChain()
-    // The child must not swallow a failed explicit parent-owned refresh.
-    // Parent pages may retain the last good chain, so surface that outcome
-    // locally as well as through their stale/error banner.
-    error.value = refreshed ? null : (props.chainError ?? t('chain.initialLoadFailed'))
+    const context = contextGeneration
+    const owner = documentOwnerKey.value
+    try {
+      const refreshed = await props.refreshChain()
+      if (context !== contextGeneration || owner !== documentOwnerKey.value) return
+      // The child must not swallow a failed explicit parent-owned refresh.
+      // Parent pages may retain the last good chain, so surface that outcome
+      // locally as well as through their stale/error banner.
+      error.value = refreshed ? null : (props.chainError ?? t('chain.initialLoadFailed'))
+    } catch (cause) {
+      if (context !== contextGeneration || owner !== documentOwnerKey.value) return
+      error.value = errorText(cause)
+    }
+    // An explicit refresh retries both owners.  The output error remains
+    // visible unless this read itself succeeds.
+    if (context !== contextGeneration || owner !== documentOwnerKey.value) return
+    await loadIssuedOutput(++issuedOutputGeneration)
     return
   }
   await load()
 }
-onMounted(() => {
-  // Parents issue the initial authoritative projection read before mounting
-  // this panel.  load() still reads only the child-owned invoice
-  // artifacts/refunds when a page projection is present.
-  void load()
-})
-watch(() => [props.quoteId, props.invoice?.id], () => { void load() })
+// Route-owner changes and lifecycle updates arrive in the same Vue flush.
+// Handle them as one transition: an owner change must finish its reset and
+// draft-intent hydration before it starts the one output read for that owner.
+// Keeping the status case in this watcher also prevents a second watcher from
+// invalidating that new read when two issued invoices are swapped in place.
+watch(
+  () => [documentOwnerKey.value, props.invoice?.status] as const,
+  ([owner, status], previous) => {
+    if (!previous || owner !== previous[0]) {
+      expandedNames.value = []
+      resetWorkflowState(props.invoice)
+      if (owner) void load()
+      return
+    }
+    if (status === previous[1]) return
+    if (hasIssuedOutput.value) void loadIssuedOutput(++issuedOutputGeneration)
+    else invalidateIssuedOutput()
+  },
+  { immediate: true },
+)
 watch(() => props.openAdvanceSignal, signal => {
   if (signal && canAdvance.value) showAdvance.value = true
 }, { immediate: true })
@@ -276,35 +389,6 @@ watch([creditRows, creditDate, creditDueDate, creditSupplyDate, creditReference]
 watch(creditFull, invalidateCreditMode)
 watch(finalDate, () => { ++cancellationGeneration; if (busyOwner === 'cancellation-preview') { busy.value = false; busyOwner = null }; cancellationPreview.value = null; cancellationPreviewRequest.value = null; cancellationPreviewSignature.value = null })
 watch(showAdvance, open => { if (!open && props.openAdvanceSignal && modeLabel.value === 'UNSET') emit('continuationCancelled') })
-watch(() => props.invoice, invoice => {
-  // A route can reuse this component.  Never carry an intent from A into B,
-  // even when the old raw field is non-empty.
-  advanceMode.value = 'GROSS_AMOUNT'; advanceRaw.value = ''
-  advanceDate.value = localDateStr(new Date()); advanceDueDate.value = null; advanceSupplyDate.value = null; advanceReference.value = null
-  creditFull.value = true; creditIntentConfirmation.value = false; creditRows.value = []
-  creditDate.value = localDateStr(new Date()); creditDueDate.value = null; creditSupplyDate.value = null; creditReference.value = null
-  if (invoice?.document_kind === 'ADVANCE') {
-    advanceMode.value = invoice.advance_input_mode ?? 'GROSS_AMOUNT'
-    advanceRaw.value = String(advanceMode.value === 'PERCENTAGE' ? invoice.advance_percentage ?? '' : invoice.advance_gross_amount ?? invoice.total_incl_vat)
-    advanceDate.value = invoice.invoice_date; advanceDueDate.value = invoice.due_date ?? null
-    advanceSupplyDate.value = invoice.supply_or_advance_date ?? null; advanceReference.value = invoice.reference_number ?? null
-  }
-  if (invoice?.document_kind === 'CREDIT_NOTE') {
-    creditDate.value = invoice.invoice_date; creditDueDate.value = invoice.due_date ?? null
-    creditSupplyDate.value = invoice.supply_or_advance_date ?? null; creditReference.value = invoice.reference_number ?? null
-    const intent = invoice.credit_draft_intent
-    // Legacy persisted rows cannot prove whether they originally represented
-    // full coverage or an explicit-all selection.  Do not calculate/save
-    // until the author has made that choice in this editor.
-    creditFull.value = intent?.full_remaining ?? false
-    creditIntentConfirmation.value = intent?.requires_confirmation ?? false
-    creditRows.value = (intent?.lines ?? []).map(line => ({
-      source_basis_line_id: line.source_basis_line_id,
-      input_mode: line.input_mode,
-      raw: String(line.input_mode === 'QUANTITY' ? line.quantity : line.gross_amount),
-    }))
-  }
-}, { immediate: true })
 function goToNode(node: components['schemas']['DocumentChainNodeRead']): void {
   if (node.node_type.toLowerCase().includes('invoice') || node.document_kind) router.push(`/invoices/${node.id}/edit`)
   else if (node.node_type.toLowerCase().includes('quote')) router.push(`/quotes/${node.id}/edit`)
@@ -472,8 +556,9 @@ async function downloadRefundArtifact(paymentId: string, artifactId: string, fil
 
 <template>
   <n-card class="workflow" :title="t('workflow.title')" size="small">
-    <n-spin :show="loading">
-      <n-alert v-if="error" type="error" closable @close="error = null">{{ error }}</n-alert>
+    <n-spin :show="loading || issuedOutputLoading">
+        <n-alert v-if="error" type="error" closable @close="error = null">{{ error }}</n-alert>
+        <n-alert v-if="resourceError" type="error" closable @close="resourceError = null">{{ resourceError }}</n-alert>
       <n-space vertical size="small">
         <n-space justify="space-between" wrap>
           <n-text strong>{{ t('workflow.mode') }}: {{ modeText(modeLabel) }}</n-text>
@@ -525,24 +610,27 @@ async function downloadRefundArtifact(paymentId: string, artifactId: string, fil
           <n-alert v-if="creditPreview" type="info" style="margin-top:8px">{{ creditPreview.gross_amount }} · {{ t('workflow.remaining') }} {{ creditPreview.remaining_gross_amount }}</n-alert>
           <n-text depth="3">{{ t('workflow.creditLockedHint') }}</n-text>
         </template>
-        <n-divider>{{ t('workflow.timeline') }}</n-divider>
-        <n-empty v-if="!timelineRows.length" :description="t('workflow.noTimeline')" size="small" />
-        <n-list v-else bordered class="workflow-scroll">
-          <n-list-item v-for="item in timelineRows" :key="`${item.kind}:${item.order}`">
-            <template v-if="item.kind === 'NODE' && item.node">
-              <template v-for="node in [item.node]" :key="node.id">
-            <n-button text :disabled="!node.document_kind && !node.node_type.toLowerCase().includes('quote')" @click="goToNode(node)">
-              <n-tag v-if="node.document_kind" size="small">{{ t(invoiceDocumentKindLabelKey(node.document_kind)) }}</n-tag>
-              {{ node.number ?? node.node_type }} · {{ node.occurred_on }}
-            </n-button>
-            <n-text depth="3"> · {{ t('workflow.charge') }} {{ fmt(node.charge_amount) }} · {{ t('workflow.credit') }} {{ fmt(node.credit_amount) }} · {{ t('workflow.due') }} {{ fmt(node.due_amount) }} · {{ t('workflow.refundDue') }} {{ fmt(node.refund_due_amount) }}<template v-if="node.incoming_payment_amount && node.incoming_payment_amount !== '0'"> · {{ t('workflow.settlement') }} {{ fmt(node.incoming_payment_amount) }}</template><template v-if="node.refund_amount && node.refund_amount !== '0'"> · {{ t('workflow.refunds') }} {{ fmt(node.refund_amount) }}</template></n-text>
-              </template>
-            </template>
-            <template v-else-if="item.kind === 'EVENT' && item.event">{{ eventText(item.event) }} · {{ item.event.occurred_at }}</template>
-            <template v-else-if="item.kind === 'RELATION' && item.relation">{{ relationText(item.relation) }}</template>
-            <template v-else-if="item.kind === 'APPLICATION' && item.application">{{ t('workflow.finalApplications') }} · {{ item.application.taxable_amount }} + {{ item.application.vat_amount }} = {{ item.application.gross_amount }}</template>
-          </n-list-item>
-        </n-list>
+        <n-collapse v-model:expanded-names="expandedNames">
+          <n-collapse-item name="document-chain" :title="t('workflow.timeline')">
+            <n-empty v-if="!timelineRows.length" :description="t('workflow.noTimeline')" size="small" />
+            <n-list v-else bordered class="workflow-scroll">
+              <n-list-item v-for="item in timelineRows" :key="`${item.kind}:${item.order}`">
+                <template v-if="item.kind === 'NODE' && item.node">
+                  <template v-for="node in [item.node]" :key="node.id">
+                <n-button text :disabled="!node.document_kind && !node.node_type.toLowerCase().includes('quote')" @click="goToNode(node)">
+                  <n-tag v-if="node.document_kind" size="small">{{ t(invoiceDocumentKindLabelKey(node.document_kind)) }}</n-tag>
+                  {{ node.number ?? node.node_type }} · {{ node.occurred_on }}
+                </n-button>
+                <n-text depth="3"> · {{ t('workflow.charge') }} {{ fmt(node.charge_amount) }} · {{ t('workflow.credit') }} {{ fmt(node.credit_amount) }} · {{ t('workflow.due') }} {{ fmt(node.due_amount) }} · {{ t('workflow.refundDue') }} {{ fmt(node.refund_due_amount) }}<template v-if="node.incoming_payment_amount && node.incoming_payment_amount !== '0'"> · {{ t('workflow.settlement') }} {{ fmt(node.incoming_payment_amount) }}</template><template v-if="node.refund_amount && node.refund_amount !== '0'"> · {{ t('workflow.refunds') }} {{ fmt(node.refund_amount) }}</template></n-text>
+                  </template>
+                </template>
+                <template v-else-if="item.kind === 'EVENT' && item.event">{{ eventText(item.event) }} · {{ item.event.occurred_at }}</template>
+                <template v-else-if="item.kind === 'RELATION' && item.relation">{{ relationText(item.relation) }}</template>
+                <template v-else-if="item.kind === 'APPLICATION' && item.application">{{ t('workflow.finalApplications') }} · {{ item.application.taxable_amount }} + {{ item.application.vat_amount }} = {{ item.application.gross_amount }}</template>
+              </n-list-item>
+            </n-list>
+          </n-collapse-item>
+        </n-collapse>
         <template v-if="invoice?.document_kind === 'FINAL'">
           <n-divider>{{ t('workflow.finalApplications') }}</n-divider>
           <n-descriptions :column="1" bordered size="small"><n-descriptions-item :label="t('workflow.quoteTotal')">{{ invoice.original_quote_totals?.taxable_amount ?? '—' }} · {{ invoice.original_quote_totals?.vat_total ?? '—' }} · {{ invoice.original_quote_totals?.gross_amount ?? '—' }}</n-descriptions-item><n-descriptions-item :label="t('workflow.finalTotal')">{{ invoice.final_totals?.taxable_amount ?? '—' }} · {{ invoice.final_totals?.vat_total ?? '—' }} · {{ invoice.final_totals?.gross_amount ?? invoice.total_incl_vat }}</n-descriptions-item><n-descriptions-item :label="t('workflow.residualPayable')">{{ invoice.payable_before_payments }}</n-descriptions-item><n-descriptions-item :label="t('workflow.due')">{{ invoice.due_amount }}</n-descriptions-item><n-descriptions-item :label="t('workflow.variance')">{{ invoice.final_variance?.taxable_amount ?? '—' }} · {{ invoice.final_variance?.vat_amount ?? '—' }} · {{ invoice.final_variance?.gross_amount ?? '—' }}</n-descriptions-item></n-descriptions>

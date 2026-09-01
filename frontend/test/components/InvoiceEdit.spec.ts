@@ -21,7 +21,7 @@ vi.mock('../../src/api/http', () => ({ ...http }))
 vi.mock('../../src/stores/invoices', () => ({ useInvoicesStore: () => store }))
 vi.mock('naive-ui', () => ({
   useMessage: () => messages,
-  NAlert: ui.box, NButton: ui.button, NCard: ui.box, NDatePicker: ui.input, NDivider: ui.box, NDropdown: ui.box,
+  NAlert: ui.box, NButton: ui.button, NCard: ui.box, NCollapse: ui.box, NCollapseItem: ui.box, NDatePicker: ui.input, NDivider: ui.box, NDropdown: ui.box,
   NForm: ui.box, NFormItem: ui.box, NGrid: ui.box, NGi: ui.box, NIcon: ui.box, NInput: ui.input, NInputNumber: ui.input,
   NList: ui.box, NListItem: ui.box, NModal: ui.box, NSpace: ui.box, NSelect: ui.select, NSpin: ui.box, NSwitch: ui.input,
   NTag: ui.box, NText: ui.box, NThing: ui.box, NEmpty: ui.box,

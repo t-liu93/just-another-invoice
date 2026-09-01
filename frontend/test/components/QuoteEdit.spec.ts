@@ -35,7 +35,7 @@ vi.mock('../../src/stores/invoices', () => ({ useInvoicesStore: () => invoices }
 vi.mock('../../src/stores/payments', () => ({ usePaymentsStore: () => payments }))
 vi.mock('naive-ui', () => ({
   useMessage: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }), useDialog: () => ({}),
-  NAlert: ui.box, NButton: ui.button, NCard: ui.box, NDatePicker: ui.box, NDivider: ui.box, NDropdown: ui.box,
+  NAlert: ui.box, NButton: ui.button, NCard: ui.box, NCollapse: ui.box, NCollapseItem: ui.box, NDatePicker: ui.box, NDivider: ui.box, NDropdown: ui.box,
   NForm: ui.box, NFormItem: ui.box, NGrid: ui.box, NGi: ui.box, NIcon: ui.box, NInput: ui.input, NInputNumber: ui.number,
   NList: ui.box, NListItem: ui.box, NModal: ui.modal, NSelect: ui.box, NSpace: ui.box, NSpin: ui.box, NSwitch: ui.box,
   NTag: ui.box, NText: ui.box, NThing: ui.box, NDescriptions: ui.box, NDescriptionsItem: ui.box,
