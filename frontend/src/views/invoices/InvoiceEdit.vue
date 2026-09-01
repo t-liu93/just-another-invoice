@@ -98,7 +98,12 @@ const {
 // Invoice header fields.
 const customerId = ref<string | null>(null)
 const customers = ref<CustomerRead[]>([])
-const selectedCustomer = ref<CustomerRead | null>(null)
+// Derive the selected customer from the form id and the asynchronously loaded
+// options.  Keeping a separate ref here left existing invoices without an
+// email recipient when their customer was appended after the initial search.
+const selectedCustomer = computed(() =>
+  customers.value.find(customer => customer.id === customerId.value) ?? null,
+)
 
 const referenceNumber = ref<string | null>(null)
 const invoiceDate = ref(localDateStr(new Date()))
@@ -228,7 +233,6 @@ const customerOptions = computed(() => customers.value.map(c => ({
 
 function handleCustomerSelect(id: string | null) {
   customerId.value = id
-  selectedCustomer.value = customers.value.find(c => c.id === id) ?? null
   // Auto-derive VAT treatment based on customer
   vatTreatmentId.value = null
 }

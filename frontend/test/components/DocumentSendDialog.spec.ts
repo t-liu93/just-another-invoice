@@ -112,4 +112,22 @@ describe('DocumentSendDialog Refund flow', () => {
       { to: 'snapshot@example.test', cc: null },
     )
   })
+
+  it('keeps a missing customer email empty and enforces the local recipient requirement', async () => {
+    http.post.mockClear()
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/settings/email-templates') return Promise.resolve(templates)
+      if (url === '/api/v1/settings/document-defaults') return Promise.resolve({ locale: 'en' })
+      throw new Error(`unexpected GET ${url}`)
+    })
+    const wrapper = mount(DocumentSendDialog, {
+      props: { show: true, docType: 'invoice', docId: 'invoice-1', customerEmail: null, customerLocale: null },
+    })
+    await flushPromises()
+
+    expect((wrapper.find('input').element as HTMLInputElement).value).toBe('')
+    await wrapper.findAll('button').find(item => item.text() === 'sendDialog.send')!.trigger('click')
+    expect(messages.warning).toHaveBeenCalledWith('sendDialog.toRequired')
+    expect(http.post).not.toHaveBeenCalled()
+  })
 })

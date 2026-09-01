@@ -279,4 +279,83 @@ describe('InvoiceEdit reused route', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Retry')!.trigger('click'); await flushPromises()
     expect(wrapper.find('[data-workflow]').attributes('data-chain')).toBe('quote-B-3')
   })
+
+  it('passes an existing invoice customer email to the mounted send dialog', async () => {
+    store.fetchProductOptions.mockResolvedValue([])
+    store.fetchInvoice.mockResolvedValue({ ...invoice('A', 'STANDARD'), status: 'SENT', party_snapshot_locale: 'zh' })
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/document-templates' || url === '/api/v1/content-blocks' || url === '/api/v1/note-templates') return Promise.resolve([])
+      if (url.startsWith('/api/v1/customers?q=')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/invoices/A/document-chain') return Promise.resolve({ quote_id: null, nodes: [], relations: [], events: [], totals: {}, available_actions: [] })
+      if (url === '/api/v1/customers/customer-A') return Promise.resolve({ id: 'customer-A', name: 'Customer A', email: 'a@example.test' })
+      throw new Error(`unexpected GET ${url}`)
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id/edit', component: InvoiceEdit }] })
+    await router.push('/invoices/A/edit'); await router.isReady()
+    const wrapper = mount(InvoiceEdit, { global: { plugins: [router, i18n], stubs: {
+      InvoicePaymentPanel: { template: '<div />' }, DocumentWorkflowPanel: { template: '<div />' },
+      DocumentSendDialog: { props: ['customerEmail', 'customerLocale'], template: '<div data-send :data-email="customerEmail ?? \'null\'" :data-locale="customerLocale" />' },
+      PdfPreviewDialog: { template: '<div />' }, EmailLogPanel: { template: '<div />' },
+    } } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-send]').attributes()).toMatchObject({
+      'data-email': 'a@example.test', 'data-locale': 'zh',
+    })
+  })
+
+  it('updates the send-dialog customer email when the existing customer arrives after the initial search', async () => {
+    let resolveCustomer!: (customer: { id: string; name: string; email: string }) => void
+    const lateCustomer = new Promise<{ id: string; name: string; email: string }>(resolve => { resolveCustomer = resolve })
+    store.fetchProductOptions.mockResolvedValue([])
+    store.fetchInvoice.mockResolvedValue({ ...invoice('A', 'STANDARD'), status: 'SENT' })
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/document-templates' || url === '/api/v1/content-blocks' || url === '/api/v1/note-templates') return Promise.resolve([])
+      if (url.startsWith('/api/v1/customers?q=')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/invoices/A/document-chain') return Promise.resolve({ quote_id: null, nodes: [], relations: [], events: [], totals: {}, available_actions: [] })
+      if (url === '/api/v1/customers/customer-A') return lateCustomer
+      throw new Error(`unexpected GET ${url}`)
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id/edit', component: InvoiceEdit }] })
+    await router.push('/invoices/A/edit'); await router.isReady()
+    const wrapper = mount(InvoiceEdit, { global: { plugins: [router, i18n], stubs: {
+      InvoicePaymentPanel: { template: '<div />' }, DocumentWorkflowPanel: { template: '<div />' },
+      DocumentSendDialog: { props: ['customerEmail'], template: '<div data-send :data-email="customerEmail ?? \'null\'" />' },
+      PdfPreviewDialog: { template: '<div />' }, EmailLogPanel: { template: '<div />' },
+    } } })
+    await flushPromises()
+    expect(wrapper.find('[data-send]').attributes('data-email')).toBe('null')
+
+    resolveCustomer({ id: 'customer-A', name: 'Customer A', email: 'late@example.test' })
+    await flushPromises()
+    expect(wrapper.find('[data-send]').attributes('data-email')).toBe('late@example.test')
+  })
+
+  it('keeps the send-dialog recipient scoped to the current invoice on a reused A-to-B route', async () => {
+    store.fetchProductOptions.mockResolvedValue([])
+    store.fetchInvoice.mockImplementation((id: string) => Promise.resolve({ ...invoice(id, 'STANDARD'), status: 'SENT' }))
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/document-templates' || url === '/api/v1/content-blocks' || url === '/api/v1/note-templates') return Promise.resolve([])
+      if (url.startsWith('/api/v1/customers?q=')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/invoices/A/document-chain' || url === '/api/v1/invoices/B/document-chain') return Promise.resolve({ quote_id: null, nodes: [], relations: [], events: [], totals: {}, available_actions: [] })
+      if (url === '/api/v1/customers/customer-A') return Promise.resolve({ id: 'customer-A', name: 'Customer A', email: 'a@example.test' })
+      if (url === '/api/v1/customers/customer-B') return Promise.resolve({ id: 'customer-B', name: 'Customer B', email: null })
+      throw new Error(`unexpected GET ${url}`)
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id/edit', component: InvoiceEdit }] })
+    await router.push('/invoices/A/edit'); await router.isReady()
+    const wrapper = mount(InvoiceEdit, { global: { plugins: [router, i18n], stubs: {
+      InvoicePaymentPanel: { template: '<div />' }, DocumentWorkflowPanel: { template: '<div />' },
+      DocumentSendDialog: { props: ['customerEmail'], template: '<div data-send :data-email="customerEmail ?? \'null\'" />' },
+      PdfPreviewDialog: { template: '<div />' }, EmailLogPanel: { template: '<div />' },
+    } } })
+    await flushPromises()
+    expect(wrapper.find('[data-send]').attributes('data-email')).toBe('a@example.test')
+
+    await router.push('/invoices/B/edit'); await flushPromises()
+    expect(wrapper.find('[data-send]').attributes('data-email')).toBe('null')
+  })
 })
