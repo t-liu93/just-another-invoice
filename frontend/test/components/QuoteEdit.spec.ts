@@ -78,6 +78,44 @@ describe('QuoteEdit UNSET mode cards', () => {
     return { promise, resolve, reject }
   }
 
+  it('keeps every billing mode card structured with a separate title, description, and action row', async () => {
+    quotes.fetchQuote.mockResolvedValue(quote)
+    quotes.convertQuote.mockResolvedValue({ id: 'quote-invoice' })
+    invoices.fetchProductOptions.mockResolvedValue([])
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/quotes/quote/document-chain') return Promise.resolve(chain)
+      if (url.startsWith('/api/v1/customers?q=') || url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url.startsWith('/api/v1/document-templates') || url.startsWith('/api/v1/content-blocks') || url.startsWith('/api/v1/note-templates')) return Promise.resolve([])
+      if (url === '/api/v1/customers/customer') return Promise.resolve({ id: 'customer', name: 'Customer' })
+      throw new Error(`unexpected ${url}`)
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/quotes/:id/edit', component: QuoteEdit },
+      { path: '/invoices/:id/edit', component: { template: '<div />' } },
+    ] })
+    await router.push('/quotes/quote/edit'); await router.isReady()
+    const wrapper = mount(QuoteEdit, { global: { plugins: [router, i18n], stubs: {
+      DocumentSendDialog: { template: '<div />' }, PdfPreviewDialog: { template: '<div />' }, EmailLogPanel: { template: '<div />' },
+    } } })
+    await flushPromises()
+
+    const cards = wrapper.findAll('.billing-mode-card')
+    expect(cards).toHaveLength(3)
+    expect(cards.map(card => card.find('.billing-mode-card-title').text())).toEqual([
+      'Direct invoice', 'Receipt-only deposits', 'Formal advance and final',
+    ])
+    for (const card of cards) {
+      expect(card.find('.billing-mode-card-description').exists()).toBe(true)
+      expect(card.find('.billing-mode-card-actions').exists()).toBe(true)
+      expect(card.find('.billing-mode-card-actions button').attributes('disabled')).toBeUndefined()
+    }
+
+    await cards[0].find('.billing-mode-card-actions button').trigger('click')
+    await flushPromises()
+    expect(quotes.convertQuote).toHaveBeenCalledWith('quote')
+    expect(router.currentRoute.value.fullPath).toBe('/invoices/quote-invoice/edit')
+  })
+
   it('uses the actual Formal continuation controls for signal, calculate/create and failure', async () => {
     quotes.fetchQuote.mockResolvedValue(quote)
     invoices.fetchProductOptions.mockResolvedValue([])

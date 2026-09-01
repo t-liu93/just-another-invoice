@@ -885,9 +885,45 @@ function handleReceiptSent(log: EmailLogRead) {
 
             <n-card v-if="showModeCards" size="small" :title="t('workflow.mode')" class="billing-mode-cards">
               <n-grid :cols="1" s:cols="3" x-gap="12" y-gap="12" responsive="screen">
-                <n-gi><n-card size="small"><n-text strong>{{ t('workflow.modes.DIRECT_INVOICE') }}</n-text><n-text depth="3">{{ t('quotes.convertToInvoice') }}</n-text><n-button type="primary" :disabled="!canConvertFromProjection" @click="handleConvert">{{ t('quotes.convertToInvoice') }}</n-button></n-card></n-gi>
-                <n-gi><n-card size="small"><n-text strong>{{ t('workflow.modes.RECEIPT_ONLY') }}</n-text><n-text depth="3">{{ t('workflow.receiptOnly') }}</n-text><n-button type="primary" :disabled="!canRecordQuotePaymentFromProjection" @click="beginReceiptOnly">{{ t('payments.addQuotePayment') }}</n-button></n-card></n-gi>
-                <n-gi><n-card size="small"><n-text strong>{{ t('workflow.modes.FORMAL_ADVANCE') }}</n-text><n-text depth="3">{{ advanceActionReason ?? t('workflow.createAdvance') }}</n-text><n-button type="primary" :disabled="!documentChain?.available_actions.some(action => action.code === 'CREATE_ADVANCE' && action.available && action.target_id === existingQuote?.id)" @click="beginFormalAdvance">{{ t('workflow.createAdvance') }}</n-button></n-card></n-gi>
+                <n-gi class="billing-mode-card-grid-item">
+                  <n-card size="small" class="billing-mode-card">
+                    <div class="billing-mode-card-body">
+                      <div>
+                        <n-text strong class="billing-mode-card-title">{{ t('workflow.modes.DIRECT_INVOICE') }}</n-text>
+                        <n-text depth="3" class="billing-mode-card-description">{{ t('quotes.convertToInvoice') }}</n-text>
+                      </div>
+                      <div class="billing-mode-card-actions">
+                        <n-button type="primary" :disabled="!canConvertFromProjection" @click="handleConvert">{{ t('quotes.convertToInvoice') }}</n-button>
+                      </div>
+                    </div>
+                  </n-card>
+                </n-gi>
+                <n-gi class="billing-mode-card-grid-item">
+                  <n-card size="small" class="billing-mode-card">
+                    <div class="billing-mode-card-body">
+                      <div>
+                        <n-text strong class="billing-mode-card-title">{{ t('workflow.modes.RECEIPT_ONLY') }}</n-text>
+                        <n-text depth="3" class="billing-mode-card-description">{{ t('workflow.receiptOnly') }}</n-text>
+                      </div>
+                      <div class="billing-mode-card-actions">
+                        <n-button type="primary" :disabled="!canRecordQuotePaymentFromProjection" @click="beginReceiptOnly">{{ t('payments.addQuotePayment') }}</n-button>
+                      </div>
+                    </div>
+                  </n-card>
+                </n-gi>
+                <n-gi class="billing-mode-card-grid-item">
+                  <n-card size="small" class="billing-mode-card">
+                    <div class="billing-mode-card-body">
+                      <div>
+                        <n-text strong class="billing-mode-card-title">{{ t('workflow.modes.FORMAL_ADVANCE') }}</n-text>
+                        <n-text depth="3" class="billing-mode-card-description">{{ advanceActionReason ?? t('workflow.createAdvance') }}</n-text>
+                      </div>
+                      <div class="billing-mode-card-actions">
+                        <n-button type="primary" :disabled="!documentChain?.available_actions.some(action => action.code === 'CREATE_ADVANCE' && action.available && action.target_id === existingQuote?.id)" @click="beginFormalAdvance">{{ t('workflow.createAdvance') }}</n-button>
+                      </div>
+                    </div>
+                  </n-card>
+                </n-gi>
               </n-grid>
             </n-card>
 
@@ -1457,5 +1493,43 @@ function handleReceiptSent(log: EmailLogRead) {
 
 .line-row {
   margin-bottom: 8px;
+}
+
+.billing-mode-card-grid-item {
+  display: flex;
+}
+
+.billing-mode-card {
+  width: 100%;
+  height: 100%;
+}
+
+.billing-mode-card :deep(.n-card__content) {
+  display: flex;
+  height: 100%;
+}
+
+.billing-mode-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 132px;
+}
+
+.billing-mode-card-title,
+.billing-mode-card-description {
+  display: block;
+}
+
+.billing-mode-card-description {
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+.billing-mode-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 20px;
 }
 </style>
