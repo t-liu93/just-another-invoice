@@ -2,7 +2,7 @@
 
 > 🌐 [English](M12.md) · **中文**
 
-> **状态**：🟡 已于 2026-08-28 与作者冻结设计；尚未开始实现。本文是 M12 实现时的权威设计。只有所有原子步骤、自动化门禁、盲审和作者最终 walkthrough 全部完成后，才可关闭验收。
+> **状态**：🟡 已于 2026-09-01 完成实现与自动化收尾。本文仍是 M12 实现时的权威设计。盲审收敛和作者最终 walkthrough 完成前，验收保持开放。
 
 ## 执行模式
 
@@ -445,4 +445,4 @@ refund_due_amount = max(net_cash - net_charge, 0)
 
 ## 验收结论
 
-尚未验收。收尾时用完成日期、各步提交、自动化门禁结果、盲审收敛摘要和作者 walkthrough 结论替换本段。只有届时才能在中英文 Roadmap 中把 M12 标为 🟢，并激活 M13。
+已于 2026-09-01 完成实现与自动化收尾。收尾矩阵全部通过：Ruff；strict mypy（116 个文件）；默认 pytest（1125 passed、1065 deselected）；完整 PostgreSQL integration（1065 passed，含单独记录的两个 deployment role/RLS matrix 节点）；权威 FastAPI OpenAPI→TypeScript 重生成且无漂移；前端 Node/Vitest（122 passed）、production build 和 EN/ZH key symmetry（各 1423）；fresh/所有 additive migration 以及 0028→head、0041→0040→0041 路径；Docker build 及镜像内 CJK 两页 WeasyPrint/pypdfium2 冒烟。0041 之后的窄测试修正已由完整复跑覆盖。盲审收敛和作者 walkthrough 仍待完成；不得把 M12 标为 🟢，也不得激活 M13。

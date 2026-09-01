@@ -243,7 +243,7 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **🟢 部署自测点**：接受一张含税 €8,000 的境内报价；记录 €1,600 和 €4,000 定金；下载 EN/ZH 报价收据并分别核对匹配的单语非 VAT 警示；发送本地化收据并查看来源单据的审计日志；仅转换一次得到显示已付 €5,600、应付 €2,400 的 DRAFT 发票；验证编辑/删除/再次转换/发出守卫；发出完整发票并收 €2,400 尾款；确认跨季度 BTW 提前确认定金且项目累计只计税一次。
 
 ### M12 · 发票生命周期扩展：Advance/Final Invoice 与 Credit Note｜单据线扩展
-- **状态**：🟡 已于 2026-08-28 与作者冻结可执行设计；等待实现。详见 `milestones/M12_zh.md`。
+- **状态**：🟡 已于 2026-09-01 完成自动化实现与收尾。盲审收敛和作者最终 walkthrough/验收仍待完成；M12 保持进行中，M13 不激活。详见 `milestones/M12_zh.md`。
 - **目标**：把当前 invoice 模型扩展成可审计的单据家族，覆盖一次性 Standard Invoice、分期正式 Advance/Final Invoice、现有个人客户 receipt-only 定金路径，以及用于更正或冲销已发出发票的关联 Credit Note。
 - **关键内容**：Quote 锁定的 `DIRECT_INVOICE`/`RECEIPT_ONLY`/`FORMAL_ADVANCE` 模式；`STANDARD`/`ADVANCE`/`FINAL`/`CREDIT_NOTE` 类型；gross/percentage Advance 与一张受守卫 Final；规范化 application 和不可变剩余 credit basis；全额/部分且绑定来源的 Credit；独立 Credit 编号；正数且关联 Credit 的 Refund 台账；replacement/compensation/project-cancellation 流程；相互独立的 lifecycle/settlement/credit 状态；BTW/ICP/P&L/Dashboard 只计一次；发出时交易方快照；保留实际 Download/Send 的精确 PDF 成品；统一列表和完整单据链时间线。
 - **冻结边界**：正式 Advance/Final 只支持 `NL_DOMESTIC`；Credit 继承来源现有的全部 VAT treatment。Standalone/unallocated credit、receipt-only Quote 定金退款/重新应用、overpayment、selected-line Advance、多币种/FX、荷兰语 locale 和应用内 VAT filing lock 继续延期。更正只产生结构化 warning。
@@ -368,7 +368,7 @@ docs/
 | M10 | 报表 / 仪表盘（含 VAT 申报） | 🟢 完成（2026-06-15；orchestrator 5 步逐步盲审收敛 [P/L → ⭐BTW 申报汇总 → ICP → 开支报表 → Dashboard]，每步一 commit `89ab353`→`273ed75`；ruff/mypy/单测 966+集成 788/codegen 无漂移/build/docker build 全绿。**税法决策 2026-06-15 与作者对照官方指南 `docs/insight/btw-aangifte-2026-guide.md`（Opus 通读 41 页）逐条共定冻结**：NL ruleset 按 `company.country_code` 选+其它国 fallback+banner、hoog/laag/zero 税率档位落盘默认 21/9/0、5b 全额抵+私用走 1d（年末按 business% 算）、5a/净应缴为辅助合计（官方只命名 5b、不标 5c）、EU 内采购=4b（非 art.23 进口）、非欧盟进口/境内反向征收/OSS/herziening/KOR 均 N/A v1、报表带免责声明。**作者导入 2026 Q1–Q2 数据人工 walkthrough 通过**，walkthrough 发现并已修 [均 Opus 盲审无 finding、各自 commit]：① Expense 日期选择器 off-by-one [`1a5a94a`] ② 对外单据抬头泄漏客户花名→派生 billing_name [`853f07c`] ③ P/L 月/季粒度换成 MTD/QTD/YTD 周期预设+高亮由区间派生 [`df2ba13`]。详见 `milestones/M10.md` 验收结论。**顺延**：多币种 ICP/3b 列分叉留 FX、Dashboard 死常量/未用键留 M13） |
 | M11 | 里程支出（私人交通工具商用） | 🟢 完成（2026-08-21；orchestrator 步骤 1–5 盲审收敛；完整自动化门禁全绿；作者 walkthrough 验收；两项 walkthrough UX 修复均经零 finding 复审；见 `milestones/M11_zh.md`） |
 | M11.5 | 报价定金与最终发票结算 | 🟢 完成（2026-08-28；2026-08-27 base 实现的恢复式编排盲审与里程碑跨步骤总审均收敛至无 finding；编排式收据邮件 refinement 增加本地化单语警示与按来源审计的邮件，经三轮 fixup/复审收敛，并通过 Ruff/mypy/默认 1067/integration 872/migrations 14/codegen 无漂移/build/i18n 1236/Docker；作者人工 walkthrough 验收无 finding；无法重建 base milestone 历史逐 Step commits） |
-| M12 | Advance/Final Invoice 与 Credit Note | 🟡 设计已冻结（2026-08-28；可执行的双语契约、11 个原子步骤和最终 18 项 walkthrough 已完成；等待实现） |
+| M12 | Advance/Final Invoice 与 Credit Note | 🟡 自动化实现收尾完成（2026-09-01；Step 1–11、Ruff/mypy/默认 1125/integration 1065、迁移、codegen 无漂移、前端 Node/Vitest 122 + build + EN/ZH 1423、Docker/CJK PDF 冒烟均已通过）；盲审收敛和作者 walkthrough 待完成 |
 | M13 | 收尾 / GA 前体检 | ⬜ |
 
 > 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）
