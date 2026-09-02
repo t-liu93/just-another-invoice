@@ -452,9 +452,22 @@ async def test_receipt_only_conversion_preserves_tax_and_supports_standard_refun
     _, refunded_chain = await _assert_quote_projection_matches_chain(db_client, quote["id"])
     assert Decimal(refunded_chain["totals"]["refund_total"]) == Decimal("60.50")
     assert Decimal(refunded_chain["totals"]["refund_due_amount"]) == Decimal("0")
-    assert (
+    settled_report = (
         await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1")
-    ).json() == baseline
+    ).json()
+    # Refund cash remains tax-neutral: the authoritative boxes, totals and
+    # immutable tax events do not move.  The receipt-only advisory does move
+    # from warning to info once the linked Standard becomes fully settled.
+    tax_projection_keys = ("boxes", "totals", "event_rows", "correction_warnings")
+    assert {key: settled_report[key] for key in tax_projection_keys} == {
+        key: baseline[key] for key in tax_projection_keys
+    }
+    assert len(baseline["warnings"]) == 1
+    assert "without a fully settled issued Standard" in baseline["warnings"][0]
+    assert baseline["infos"] == []
+    assert settled_report["warnings"] == []
+    assert len(settled_report["infos"]) == 1
+    assert "linked issued Standard is settled" in settled_report["infos"][0]
     async with runtime_session_maker() as session:
         await set_rls_company(session, seeds["company_id"])
         assert await session.scalar(
@@ -1215,14 +1228,14 @@ async def test_runtime_dashboard_and_vat_share_payment_tax_context_and_refunds_a
 
     refund = await db_client.post(
         f"/api/v1/credit-notes/{credit['id']}/refunds",
-        json={"payment_date": "2026-09-01", "amount": "20"},
+        json={"payment_date": credit["invoice_date"], "amount": "20"},
     )
     assert refund.status_code == 201, refund.text
     refund_id = refund.json()["items"][0]["id"]
     assert await _assert_report_equality("0.00") == (baseline_vat, baseline_dashboard)
     updated = await db_client.put(
         f"/api/v1/payments/{refund_id}",
-        json={"payment_date": "2026-09-02", "amount": "30"},
+        json={"payment_date": credit["invoice_date"], "amount": "30"},
     )
     assert updated.status_code == 200, updated.text
     assert await _assert_report_equality("0.00") == (baseline_vat, baseline_dashboard)

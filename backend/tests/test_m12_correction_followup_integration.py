@@ -527,7 +527,7 @@ async def test_receipt_only_standard_replacement_is_rejected_without_new_draft(
     )
     assert issued.status_code == 200, issued.text
     credit = await _issue_credit(
-        db_client, issued.json()["id"], invoice_date="2026-09-01"
+        db_client, issued.json()["id"], invoice_date=issued.json()["invoice_date"]
     )
     rejected = await db_client.post(
         f"/api/v1/credit-notes/{credit['id']}/replacement"
