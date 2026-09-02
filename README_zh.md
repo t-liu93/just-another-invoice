@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-截至 M12 的里程碑均已完成。M12 已交付 Standard/Advance/Final Invoice、Credit Note、Refund 与统一单据流程。M13 是下一阶段规划中的自托管收尾（备份、i18n 补全、文档），目前尚未开始。详见 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
+截至 M12 的里程碑均已完成。M12 已交付 Standard/Advance/Final Invoice、Credit Note、Refund 与统一单据流程。M13 Document Artifact 历史补传现为当前、设计已冻结的里程碑，实现尚未开始。详见 [`docs/plan/milestones/M13_zh.md`](docs/plan/milestones/M13_zh.md) 和 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
 
 ## 文档
 

@@ -2,7 +2,7 @@
 
 > 🌐 [English](M12.md) · **中文**
 
-> **状态**：🟢 已于 2026-09-02 完成、验收并冻结。11 个实现步骤、盲审/返工循环、自动化收尾及作者在测试环境中的风险导向 walkthrough 均已完成。本文继续作为 M12 冻结后的权威设计；M13 尚未开始。
+> **状态**：🟢 已于 2026-09-02 完成、验收并冻结。11 个实现步骤、盲审/返工循环、自动化收尾及作者在测试环境中的风险导向 walkthrough 均已完成。本文继续作为 M12 冻结后的权威设计。稍后于 2026-09-02，原笼统 M13 占位被取消，M13 改为当前 Document Artifact 历史补传里程碑。
 
 ## 执行模式
 
@@ -449,4 +449,4 @@ M12 已于 2026-09-02 验收并冻结。11 个编排步骤及其盲审/返工循
 
 作者在测试环境中的风险导向 walkthrough 覆盖了 Direct Standard、已结清 receipt-only 定金及 VAT offset、50/50 Advance/Final 链、20/50/30 的 21%/0% 混合税率链、绑定来源的 Credit、整项目取消、Refund 结算、Document Chain 审计及 BTW/P&L 投影。最终只读审计对账了单据/行/税务快照、不可变 Final application、Credit basis、incoming/refund 现金、只追加事件、交易方快照、留存 artifact hash 和报表合计，没有发现财务或审计不一致。walkthrough 中发现的问题均在验收前解决：Billing Mode 卡片间距、Document Workflow 瞬时错误及 Document Chain 默认折叠、Invoice 邮件收件人 fallback、已结清 receipt-only 的 BTW 提示，以及按 Quote 编号/百分比/VAT bucket 生成的系统化 Advance 行描述。
 
-作者决定不再人工重复较少使用的 9%、外币或 ICP 路径；这些路径以现有自动化覆盖作为验收证据，未来实际使用时若发现问题再作为 follow-up 处理。正式 M12 Advance/Final 仍保持上文冻结的 `NL_DOMESTIC`、单币种边界。M13 在作者决定开始之前仍保持未启动。
+作者决定不再人工重复较少使用的 9%、外币或 ICP 路径；这些路径以现有自动化覆盖作为验收证据，未来实际使用时若发现问题再作为 follow-up 处理。正式 M12 Advance/Final 仍保持上文冻结的 `NL_DOMESTIC`、单币种边界。M12 验收时，当时笼统的 M13 尚未启动；其后它被单独设计的 [M13 Document Artifact 历史补传](M13_zh.md) 取代。

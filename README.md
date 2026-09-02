@@ -85,7 +85,7 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-Milestones through M12 are complete. M12 delivered Standard/Advance/Final Invoices, Credit Notes, Refunds and the unified document workflow. M13 is the next planned self-hosting wrap-up (backups, i18n completion, docs) and has not started. See [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
+Milestones through M12 are complete. M12 delivered Standard/Advance/Final Invoices, Credit Notes, Refunds and the unified document workflow. M13 Document Artifact Backfill is now the active, design-frozen milestone; implementation has not started. See [`docs/plan/milestones/M13.md`](docs/plan/milestones/M13.md) and [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
 
 ## Documentation
 

@@ -112,7 +112,7 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 ## 4. 里程碑地图 M0–M13（含后插的 M2.5 · 设置 UX 重构 / M6.5 · 成本核算 / M11.5 · 报价定金）
 
 > 依赖：**M0 → M1 → M2 →（M2.5）→ {M3, M4}**，然后分两条可并行的线 ——
-> ① **单据线**：M5 → M6 → **M6.5** → M7；② **开支线**：M8（只依赖 M2 本位币 + M4 字典，可选挂 M3 客户，**不依赖发票/报价/收款**）。两线汇合于 M9 → M10，随后进入 **M11（私人交通工具商业里程）→ M11.5（报价定金与最终发票结算）→ M12（预付款/最终发票与贷项通知单）→ M13（收尾）**。
+> ① **单据线**：M5 → M6 → **M6.5** → M7；② **开支线**：M8（只依赖 M2 本位币 + M4 字典，可选挂 M3 客户，**不依赖发票/报价/收款**）。两线汇合于 M9 → M10，随后进入 **M11（私人交通工具商业里程）→ M11.5（报价定金与最终发票结算）→ M12（预付款/最终发票与贷项通知单）→ M13（Document Artifact 历史补传）**。
 > 可并行：M3‖M4；单据线‖开支线（即 M8 可与 M5/M6/M7 同时进行）。**M2.5 是纯前端 UX 修复，非阻塞**——挂在 M2 之后即可，与 M3/M4 并行做也行，不挡任何功能线。每格结尾的「🟢 部署自测点」是该里程碑的验收信号。
 
 ### M0 · 地基骨架（walking skeleton）｜对应 P0
@@ -243,18 +243,19 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **🟢 部署自测点**：接受一张含税 €8,000 的境内报价；记录 €1,600 和 €4,000 定金；下载 EN/ZH 报价收据并分别核对匹配的单语非 VAT 警示；发送本地化收据并查看来源单据的审计日志；仅转换一次得到显示已付 €5,600、应付 €2,400 的 DRAFT 发票；验证编辑/删除/再次转换/发出守卫；发出完整发票并收 €2,400 尾款；确认跨季度 BTW 提前确认定金且项目累计只计税一次。
 
 ### M12 · 发票生命周期扩展：Advance/Final Invoice 与 Credit Note｜单据线扩展
-- **状态**：🟢 已于 2026-09-02 完成、验收并冻结。全部编排步骤和盲审均已收敛；作者完成测试环境中的风险导向 walkthrough，并以自动化证据验收其余低频路径。M13 仍未开始。详见 `milestones/M12_zh.md`。
+- **状态**：🟢 已于 2026-09-02 完成、验收并冻结。全部编排步骤和盲审均已收敛；作者完成测试环境中的风险导向 walkthrough，并以自动化证据验收其余低频路径。M13 现为当前 Document Artifact follow-on。详见 `milestones/M12_zh.md`。
 - **目标**：把当前 invoice 模型扩展成可审计的单据家族，覆盖一次性 Standard Invoice、分期正式 Advance/Final Invoice、现有个人客户 receipt-only 定金路径，以及用于更正或冲销已发出发票的关联 Credit Note。
 - **关键内容**：Quote 锁定的 `DIRECT_INVOICE`/`RECEIPT_ONLY`/`FORMAL_ADVANCE` 模式；`STANDARD`/`ADVANCE`/`FINAL`/`CREDIT_NOTE` 类型；gross/percentage Advance 与一张受守卫 Final；规范化 application 和不可变剩余 credit basis；全额/部分且绑定来源的 Credit；独立 Credit 编号；正数且关联 Credit 的 Refund 台账；replacement/compensation/project-cancellation 流程；相互独立的 lifecycle/settlement/credit 状态；BTW/ICP/P&L/Dashboard 只计一次；发出时交易方快照；保留实际 Download/Send 的精确 PDF 成品；统一列表和完整单据链时间线。
 - **冻结边界**：正式 Advance/Final 只支持 `NL_DOMESTIC`；Credit 继承来源现有的全部 VAT treatment。Standalone/unallocated credit、receipt-only Quote 定金退款/重新应用、overpayment、selected-line Advance、多币种/FX、荷兰语 locale 和应用内 VAT filing lock 继续延期。更正只产生结构化 warning。
 - **原子交付 / 验收**：11 个实现步骤覆盖底座/迁移、mode+chain 审计、Advance、Final、Credit、重开/取消、Refund 结算、报表、输出/artifact、前端和收尾。自动化覆盖完整 18 项矩阵；作者的风险导向 walkthrough 实测 Direct、receipt-only、50/50、20/50/30 的 21%/0% 混合税率、取消/Credit/Refund 和报表对账；较少使用的 9%、FX、ICP 以自动化证据验收，不再重复人工操作。
 
-### M13 · 收尾 / GA 前体检｜对应 P7
-- **目标**：可长期自托管。
-- **关键内容**：**备份脚本**（pg_dump + 卷快照）；i18n **EN/ZH 补全**；安全/性能打磨；文档（部署 README）。
-- **迁移基线化 —— 取消（2026-06-19 决定）**：原计划是在 1.0 上线*之前*把累积的 Alembic 迁移压成单一 baseline，其唯一前提是「彼时无生产数据（dev 库可随意重建）」。由于 **`v0.1.0` 已上线自用（2026-06-17）**，该窗口已关闭——生产库已有真实数据、`alembic_version` 停在当前 head，此时再 collapse 只会徒增对不上的风险、毫无收益。因此**累积的线性迁移链原样保留**；全新空库首启时只是把整条链重放一遍（功能完全等价、启动开销可忽略）。今后**只做 additive 迁移**，与原文「上线后永不再压」的本意一致。
-- **发布打标签——`latest` 处理（2026-06-17 随 `v0.1.0` 落地）**：`release.yml` 现用 `flavor: latest=auto`，只有非预发布的 semver tag（如 `v0.1.0`）才移动 `:latest`；预发布（`v0.1.0-betaN`）不再碰它。（在正式 `0.1.0` 之前，beta 刻意移动 `:latest`，好让跑 `:latest` 的生产能用上;这个例外在 `0.1.0` 发布的那一刻结束。）
-- **🟢 部署自测点**：跑一次备份/恢复演练；切换 EN/ZH UI 完整。
+### M13 · Document Artifact 历史补传｜单据输出 follow-on
+- **状态**：🟡 当前里程碑；设计于 2026-09-02 冻结，实现尚未开始。详见 `milestones/M13_zh.md`。
+- **目标**：让一张尚无任何保留 artifact 的已开具正式 Invoice，接收一份来自旧 JAI 部署、旧开票系统或外部工具的精确历史 PDF。
+- **关键内容**：全部四种正式 Invoice kind 仅零 artifact 时可上传 PDF；不可变精确字节 + `UPLOAD` provenance；作为当前 locale/fingerprint 的 canonical Download/Send artifact 复用；后续结算/locale/renderer 变化仍可产生新 artifact；固定提示词、显式可选触发且不阻断的 AI 字段对照 EN/ZH checklist；并发安全的 upload/Download/Send 首动作；复用现有 workflow 的紧凑 UI。
+- **冻结边界**：存在任何 artifact 后不可上传；无 replace/delete/primary selector、清理 CLI、artifact/AI audit trail、AI 结果落库、Refund Confirmation 上传、OCR 导入或会计数据变更。保留已有多 artifact 历史。原先的笼统 wrap-up 占位已取消，被移出的运维想法放在 §4.aa。
+- **原子交付**：四个步骤覆盖 contract/enum/文件校验、精确上传+canonical 输出复用、可选 AI 参考对照，以及前端/回归收尾。
+- **🟢 部署自测点**：向零 artifact 的已开具 Invoice 上传旧 PDF；验证可选 AI warning 从不阻断确认；普通 Download/Send 复用上传的精确字节；改变结算状态后验证出现新 artifact，且原件仍 byte-identical 并可下载。
 
 ---
 
@@ -292,6 +293,16 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **是什么**：在客户**结构化地址**（街道 / 门牌 / 邮编 / 省 / 市 / 国家）**下方**，加一个**自由输入文本框**。
 - **场景**：**双语客户**——结构化格子按现有字段填拉丁 / 英文地址；自由文本框里**整段再抄一遍另一种文字**（如中文）的完整地址。
 - **落地草图（真做时）**：`address`（或 customer）模型加一个 additive 文本列（红线 10：`text`）+ schema + 客户编辑器 UI + 发票 / 报价 PDF 在结构化地址块下渲染该自由文本（保留换行、autoescape）。范围有界，但横跨 模型 + UI + PDF 多处。
+
+## 4.aa 路线图之外 · 运维加固与维护积压（仅备忘）
+
+> **状态**：作者于 2026-09-02 取消了原未拆步的 M13“收尾 / GA 前体检”占位，并将 M13 改为范围有界的 Document Artifact 历史补传。下列事项**不是 M13 验收条件**，也没有已排期里程碑。只在某项具有明确价值和范围时，再把它提升为单独设计的里程碑。
+
+- **运维积压**：备份/恢复脚本与完整恢复演练（`pg_dump` + 上传收据 volume）、扩充部署/运维文档，以及今后基于具体 finding 而非笼统 polish 的安全/性能加固。
+- **维护积压**：M8.5 Expense 前端展示 refinement、M10 Dashboard 死 `_MONTH_LABELS`/未用 `dashboard.loadError`、可选报表 PDF/CSV 导出，以及每次变更已强制 symmetry 门禁之外的广泛 EN/ZH 总复查。
+- **持续规则**：i18n symmetry、安全回归覆盖、适用时的性能/query-count 检查、Docker build 和文档对称仍属于日常 Definition of Done；把笼统清理移到这里不会削弱这些门禁。
+- **迁移基线化仍为已取消（2026-06-19 决定）**：`v0.1.0` 已于 2026-06-17 上线自用，生产库已有真实数据，`alembic_version` 跟随现行迁移链。保留累积的线性 Alembic 迁移；新库完整重放，今后只做 additive 迁移。
+- **Release `latest` 处理仍为已完成（2026-06-17）**：`release.yml` 使用 `flavor: latest=auto`；只有稳定 semver tag 移动 `:latest`，预发布不会。
 
 ---
 
@@ -363,12 +374,12 @@ docs/
 | M7 | 收款 | 🟢 完成（2026-06-13；orchestrator 5 步，每步盲审+返工收敛；ruff/mypy/单测 404/集成 641/codegen 无漂移/build 全绿；人工 walkthrough 自测点 1–8 通过，#9 单币种 UI 待 FX 前端落地后补、隔离/cascade 由集成测试覆盖）。收款 sub-cent 边界（3 位总额不可按分收满）顺延 M7.5 |
 | M7.5 | 货币舍入口径修正（落到「分」） | 🟢 完成（2026-06-13；orchestrator 3 步逐步盲审收敛，步骤2 一处 docstring fixup、步骤1/3 零 finding；**行级到分**、`F2026-009`→`3865.16`；ruff/mypy/单测 426/集成 644（+3 F2026-009 收满回归）全绿；零迁移/零契约/无 codegen；payment/costing/estimate 服务代码零改动；作者人工 walkthrough 自测点 1–3 通过、无 finding） |
 | M8 | 开支（含 AI 填单 + AI 供货价单识别，可与单据线并行） | 🟢 完成（2026-06-14；orchestrator 5 步逐步盲审收敛 [expense+分存 / storage 收据 / 周期开支 / AI 票据填单 / 前端收尾]；末轮 walkthrough refinements 单列一轮压进同一收尾 commit [可抵扣随分类联动 / 收据 bind-mount uid1000 / AI 探针 64×64 / 注入当前日期 / 摘要写 note 跟随界面语言 / 选率自动算 VAT 后端端点 / 提示词「默认常驻+自定义追加」]；ruff/mypy/单测 599/集成/build/无漂移全绿；自测点 1–5 人工通过、7 集成覆盖、8 通过，6 周期性开支作者暂不用未走（不影响验收）、9 远端 CI 待确认。AI 走 OpenAI 兼容 Chat Completions（`httpx` 自构造、非 SDK；base_url/model/key/提示词 用户自填 + 多模态测试；PDF 用 pypdfium2 栅格化成图统一走 image_url）。**follow-on 未做**：AI 供货价单 → M4 目录） |
-| M8.5 | 开支记账字段补全（付款来源 / 业务% / 折旧年，对齐 NL 记账 Excel） | 🟢 完成（2026-06-14；orchestrator 2 步逐步盲审收敛，两步**零 finding / 零返工**；3 个**纯存储** additive 字段 [`paid_by` / `business_percentage` / `depreciation_years`]，`expense` + `recurring_expense` parity，迁移 0021 NOT NULL+server_default 自动回填；**不新增算钱**——当年摊销 / 可退 VAT 按年 / 季度 / BTW 全顺延 M10；ruff/mypy/单测 626[+27]/集成切片 79[+19]/build/无 codegen 漂移全绿；作者人工 walkthrough：后端/迁移/契约/周期 parity 通过，旧数据迁移回填因已删旧数据+未上线略过实测、walkthrough 发现的**前端展示问题统一留 GA 前前端翻新处理**；D1–D9 与作者逐列对照 Excel 共定） |
+| M8.5 | 开支记账字段补全（付款来源 / 业务% / 折旧年，对齐 NL 记账 Excel） | 🟢 完成（2026-06-14；orchestrator 2 步逐步盲审收敛，两步**零 finding / 零返工**；3 个**纯存储** additive 字段 [`paid_by` / `business_percentage` / `depreciation_years`]，`expense` + `recurring_expense` parity，迁移 0021 NOT NULL+server_default 自动回填；**不新增算钱**——当年摊销 / 可退 VAT 按年 / 季度 / BTW 全顺延 M10；ruff/mypy/单测 626[+27]/集成切片 79[+19]/build/无 codegen 漂移全绿；作者人工 walkthrough：后端/迁移/契约/周期 parity 通过，旧数据迁移回填因已删旧数据+未上线略过实测、walkthrough 发现的**前端展示问题移入未排期的 §4.aa 维护积压**；D1–D9 与作者逐列对照 Excel 共定） |
 | M9 | PDF（邮件底座在 M1） | 🟢 完成（2026-06-14；orchestrator 8 步逐步盲审收敛，步骤 1/4/5 各 1 轮返工[Content-Disposition RFC6266 filename / 收据标签键 / 集成缺建公司]、步骤 2/3/6/7 零 finding，每步一 commit；WeasyPrint+Jinja，发票/报价/收据 PDF 按 locale 下载[解析链 override>customer>company>en]、公司级可编辑邮件模板+占位符引擎、email_log 发送[附件+抄送, SENT/FAILED 脱敏]、迁移 0022 customer.locale / 0023 email_log、前端下载+发送对话框+Email log；ruff/mypy/默认 760/集成 785/build/i18n EN-ZH 对称 1001/docker build+镜像内中文 PDF 渲染 全绿。**作者人工 walkthrough 通过**，walkthrough 提出并已修[均 Opus 盲审无 finding、各自 commit]：① PDF 应用内预览[`0f75310`，同 commit 含发票/报价版式：删 Description 列+Item 加粗描述下挂+全 2 位小数 money2/pct+`css\|safe` 字体修复] ② SVG logo `<style>` 类内联清洗[`4cfd369`，class-styled logo 不再纯黑，**需重新上传 logo**] ③ 多页每页页脚[`b9090ae`]；改后默认 802/PDF 集成 138 全绿。**顺延**：完整 PDF 抬头模板自定义→§4.y、客户地址自由文本块→§4.z、公开链接/unique_hash、已读回执、收据邮件/多笔汇总收据、PDF 缓存/队列、NL 语言 PDF、VAT 报表→M10、渐变 SVG logo 不支持） |
-| M10 | 报表 / 仪表盘（含 VAT 申报） | 🟢 完成（2026-06-15；orchestrator 5 步逐步盲审收敛 [P/L → ⭐BTW 申报汇总 → ICP → 开支报表 → Dashboard]，每步一 commit `89ab353`→`273ed75`；ruff/mypy/单测 966+集成 788/codegen 无漂移/build/docker build 全绿。**税法决策 2026-06-15 与作者对照官方指南 `docs/insight/btw-aangifte-2026-guide.md`（Opus 通读 41 页）逐条共定冻结**：NL ruleset 按 `company.country_code` 选+其它国 fallback+banner、hoog/laag/zero 税率档位落盘默认 21/9/0、5b 全额抵+私用走 1d（年末按 business% 算）、5a/净应缴为辅助合计（官方只命名 5b、不标 5c）、EU 内采购=4b（非 art.23 进口）、非欧盟进口/境内反向征收/OSS/herziening/KOR 均 N/A v1、报表带免责声明。**作者导入 2026 Q1–Q2 数据人工 walkthrough 通过**，walkthrough 发现并已修 [均 Opus 盲审无 finding、各自 commit]：① Expense 日期选择器 off-by-one [`1a5a94a`] ② 对外单据抬头泄漏客户花名→派生 billing_name [`853f07c`] ③ P/L 月/季粒度换成 MTD/QTD/YTD 周期预设+高亮由区间派生 [`df2ba13`]。详见 `milestones/M10.md` 验收结论。**顺延**：多币种 ICP/3b 列分叉留 FX、Dashboard 死常量/未用键留 M13） |
+| M10 | 报表 / 仪表盘（含 VAT 申报） | 🟢 完成（2026-06-15；orchestrator 5 步逐步盲审收敛 [P/L → ⭐BTW 申报汇总 → ICP → 开支报表 → Dashboard]，每步一 commit `89ab353`→`273ed75`；ruff/mypy/单测 966+集成 788/codegen 无漂移/build/docker build 全绿。**税法决策 2026-06-15 与作者对照官方指南 `docs/insight/btw-aangifte-2026-guide.md`（Opus 通读 41 页）逐条共定冻结**：NL ruleset 按 `company.country_code` 选+其它国 fallback+banner、hoog/laag/zero 税率档位落盘默认 21/9/0、5b 全额抵+私用走 1d（年末按 business% 算）、5a/净应缴为辅助合计（官方只命名 5b、不标 5c）、EU 内采购=4b（非 art.23 进口）、非欧盟进口/境内反向征收/OSS/herziening/KOR 均 N/A v1、报表带免责声明。**作者导入 2026 Q1–Q2 数据人工 walkthrough 通过**，walkthrough 发现并已修 [均 Opus 盲审无 finding、各自 commit]：① Expense 日期选择器 off-by-one [`1a5a94a`] ② 对外单据抬头泄漏客户花名→派生 billing_name [`853f07c`] ③ P/L 月/季粒度换成 MTD/QTD/YTD 周期预设+高亮由区间派生 [`df2ba13`]。详见 `milestones/M10.md` 验收结论。**顺延**：多币种 ICP/3b 列分叉留 FX；Dashboard 死常量/未用键移入未排期的 §4.aa 维护积压） |
 | M11 | 里程支出（私人交通工具商用） | 🟢 完成（2026-08-21；orchestrator 步骤 1–5 盲审收敛；完整自动化门禁全绿；作者 walkthrough 验收；两项 walkthrough UX 修复均经零 finding 复审；见 `milestones/M11_zh.md`） |
 | M11.5 | 报价定金与最终发票结算 | 🟢 完成（2026-08-28；2026-08-27 base 实现的恢复式编排盲审与里程碑跨步骤总审均收敛至无 finding；编排式收据邮件 refinement 增加本地化单语警示与按来源审计的邮件，经三轮 fixup/复审收敛，并通过 Ruff/mypy/默认 1067/integration 872/migrations 14/codegen 无漂移/build/i18n 1236/Docker；作者人工 walkthrough 验收无 finding；无法重建 base milestone 历史逐 Step commits） |
 | M12 | Advance/Final Invoice 与 Credit Note | 🟢 完成（2026-09-02；编排 Step 1–11 与盲审均收敛；Ruff/mypy/默认 1125/integration 1065、迁移、codegen、前端 Node/Vitest 122 + build + EN/ZH 1423、Docker/CJK PDF 全绿；作者风险导向 walkthrough 与最终测试数据只读审计通过；5 项 walkthrough refinement 已修复） |
-| M13 | 收尾 / GA 前体检 | ⬜ |
+| M13 | Document Artifact 历史补传 | 🟡 当前（设计于 2026-09-02 冻结；4 个原子步骤；实现尚未开始） |
 
 > 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）
