@@ -6,18 +6,18 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——Beta（`v0.1.0-beta0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.5.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
-- **发票** —— 后端定价引擎（行/单据折扣、含税/不含税 VAT、多税率）、并发安全的自定义编号、生命周期 + 收款状态。
-- **报价** —— 可复用内容块/模板、一键转发票、到期自动失效。
+- **发票** —— Standard、Advance、Final 以及绑定来源的 Credit Note；后端定价、并发安全编号、相互独立的生命周期/结算/贷记状态和可审计的单据链。
+- **报价** —— 可复用内容块/模板、到期自动失效，并可不可变地选择直接开票、仅收据定金或正式分阶段 Advance/Final 开票。
 - **成本核算 → 报价** —— 内部按 margin 反推卖价，成本/毛利绝不泄漏给客户。
-- **收款** —— 支持分次收款，自动 `UNPAID → PARTIALLY_PAID → PAID` 流转。
+- **收付款与退款** —— 分次收款、Quote 定金、自动结算状态、关联 Credit 的 Refund，以及 Refund Confirmation。
 - **开支** —— AI 票据识别填单、周期性开支、记账字段（付款来源 / 业务使用 % / 折旧年限）。
 - **客户与目录** —— 地址、VAT 号、每客户默认币种与单据语言；产品/材料目录。
-- **单据** —— 发票 / 报价 / 收据 PDF（中英）与可编辑模板的邮件发送。
-- **报表** —— 盈亏（P/L）、**荷兰 BTW 申报汇总**、ICP 清单、开支报表，以及 ECharts 仪表盘。
+- **单据** —— 发票、报价、收据和 Refund Confirmation 的中英 PDF/邮件，包含发出时交易方快照及实际下载/发送成品的精确留存。
+- **报表** —— 盈亏（P/L）、**荷兰 BTW 申报汇总**、ICP 清单、开支报表和 ECharts 仪表盘，包含 Advance/Final/Credit 只计一次的投影。
 - **平台** —— TOTP 两步验证、类型化三层设置、`Decimal` 金额计算、双语界面（English / 中文）、单容器应用经 Docker Compose 部署。
 
 ## 技术栈
@@ -54,7 +54,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 目前指向最新的 beta；想固定版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.1.0-beta0`。想自行 build 而非拉取,在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.5.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-截至 M11.5 的里程碑均已完成。M12 是当前规划中的 Standard/Advance/Final Invoice 与 Credit Note 里程碑；后续 M13 为自托管收尾（备份、i18n 补全、文档）。详见 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
+截至 M12 的里程碑均已完成。M12 已交付 Standard/Advance/Final Invoice、Credit Note、Refund 与统一单据流程。M13 是下一阶段规划中的自托管收尾（备份、i18n 补全、文档），目前尚未开始。详见 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
 
 ## 文档
 

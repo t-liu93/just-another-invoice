@@ -40,7 +40,7 @@ class TestDefaults:
         assert Settings.model_fields["static_dir"].default is None
 
     def test_app_version_default(self) -> None:
-        assert Settings.model_fields["app_version"].default == "0.4.0"
+        assert Settings.model_fields["app_version"].default == "0.5.0"
 
     def test_database_url_default_is_none(self) -> None:
         """Code default is None (assembled by model_validator)."""

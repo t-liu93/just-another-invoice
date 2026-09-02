@@ -6,18 +6,18 @@ Self-hosted invoicing and small-business administration for freelancers and smal
 
 Built with **FastAPI + Vue 3 + PostgreSQL**.
 
-> **Status — beta (`v0.1.0-beta0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and breaking changes before `v1.0`.
+> **Status — pre-1.0 (`v0.5.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
 
 ## Features
 
-- **Invoices** — backend pricing engine (line/document discounts, inclusive/exclusive VAT, multiple rates), concurrency-safe custom numbering, lifecycle + payment status.
-- **Quotes** — reusable content blocks/templates, one-click convert to invoice, auto-expiry.
+- **Invoices** — Standard, Advance, Final and source-bound Credit Notes; backend pricing, concurrency-safe numbering, independent lifecycle/settlement/credit states, and an auditable document chain.
+- **Quotes** — reusable content blocks/templates, auto-expiry, and an immutable choice between direct invoicing, receipt-only deposits, or formal staged Advance/Final invoicing.
 - **Cost estimation → quote** — internal margin-based costing that never leaks cost/margin to the customer.
-- **Payments** — partial payments with automatic `UNPAID → PARTIALLY_PAID → PAID` transitions.
+- **Payments & refunds** — partial payments, Quote deposits, automatic settlement states, Credit-linked Refunds, and Refund Confirmations.
 - **Expenses** — AI receipt extraction, recurring expenses, bookkeeping fields (paid-by / business-use % / depreciation years).
 - **Customers & catalog** — addresses, VAT IDs, per-customer currency & document language; product/material catalog.
-- **Documents** — invoice / quote / receipt PDFs (EN/ZH) and email sending with editable templates.
-- **Reports** — Profit & Loss, **Dutch BTW VAT-return summary**, ICP listing, expense report, and an ECharts dashboard.
+- **Documents** — EN/ZH PDFs and email for invoices, quotes, receipts and Refund Confirmations, with issue-time party snapshots and exact downloaded/sent artifact retention.
+- **Reports** — Profit & Loss, **Dutch BTW VAT-return summary**, ICP listing, expense report, and an ECharts dashboard, including exactly-once Advance/Final/Credit projections.
 - **Platform** — TOTP two-factor auth, typed three-tier settings, `Decimal` money math, bilingual UI (English / 中文), single-container app deployed via Docker Compose.
 
 ## Tech stack
@@ -55,7 +55,7 @@ Open **http://localhost:8000**, register the first (owner) account, and set up T
 
 To stop: `docker compose down` (add `-v` to also drop the database volume).
 
-> `:latest` currently tracks the newest beta; pin a version by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.1.0-beta0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
+> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.5.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
 
 ## Configuration
 
@@ -85,7 +85,7 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-Milestones through M11.5 are complete. M12 is the active planning milestone for Standard/Advance/Final Invoices and Credit Notes; M13 is the subsequent self-hosting wrap-up (backups, i18n completion, docs). See [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
+Milestones through M12 are complete. M12 delivered Standard/Advance/Final Invoices, Credit Notes, Refunds and the unified document workflow. M13 is the next planned self-hosting wrap-up (backups, i18n completion, docs) and has not started. See [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
 
 ## Documentation
 
