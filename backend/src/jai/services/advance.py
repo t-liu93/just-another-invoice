@@ -167,6 +167,51 @@ _MAX_PERCENTAGE_DECIMAL_PLACES = 3
 ExactAdvanceCreditProvider = Callable[[AsyncSession, Quote], Awaitable[list[AdvanceBucket]]]
 
 
+def _normalized_decimal(value: Decimal) -> str:
+    """Render a Decimal without display-only trailing zeroes or exponent notation."""
+    rendered = format(value.normalize(), "f")
+    return "0" if rendered in {"-0", ""} else rendered
+
+
+def format_advance_line_description(
+    *,
+    input_mode: AdvanceInputMode,
+    percentage: Decimal | None,
+    requested_gross_amount: Decimal,
+    currency: str,
+    quote_number: str,
+    vat_rate_percent: Decimal,
+) -> str:
+    """Build the immutable, per-VAT-bucket Advance line description.
+
+    The amount in a gross-mode description deliberately records the customer's
+    requested document gross, rather than an allocated VAT bucket amount.  The
+    line's monetary columns remain the authoritative bucket allocation.
+    """
+    normalized_quote_number = quote_number.strip()
+    if not normalized_quote_number:
+        raise AdvanceValidationError(
+            "ADVANCE_QUOTE_NUMBER_REQUIRED",
+            "An Advance invoice requires a numbered quotation.",
+        )
+    vat_text = _normalized_decimal(vat_rate_percent)
+    quotation = (
+        f"for the goods/services specified in quotation {normalized_quote_number} "
+        f"· VAT {vat_text}%"
+    )
+    if input_mode == AdvanceInputMode.PERCENTAGE:
+        if percentage is None:
+            raise AdvanceValidationError(
+                "ADVANCE_PERCENTAGE_REQUIRED",
+                "A percentage Advance requires a percentage input.",
+            )
+        return f"{_normalized_decimal(percentage)}% advance payment {quotation}"
+    if input_mode == AdvanceInputMode.GROSS_AMOUNT:
+        normalized_gross = quantize_to_minor_unit(requested_gross_amount)
+        return f"{currency.upper()} {normalized_gross:.2f} advance payment {quotation}"
+    raise AdvanceValidationError("ADVANCE_INPUT_MODE_INVALID", "Advance input mode is invalid.")
+
+
 def _units(value: Decimal) -> int:
     return int(quantize_to_minor_unit(value) * _HUNDRED)
 
@@ -719,7 +764,14 @@ async def _persist_advance(
         line = InvoiceLine(
             invoice_id=invoice.id,
             sort_order=position,
-            name="Advance invoice",
+            name=format_advance_line_description(
+                input_mode=body.input_mode,
+                percentage=body.percentage,
+                requested_gross_amount=calculation.requested_gross_amount,
+                currency=quote.currency,
+                quote_number=quote.quote_number,
+                vat_rate_percent=bucket.vat_rate_percent,
+            ),
             description=None,
             quantity=Decimal("1"),
             unit_id=None,
@@ -752,6 +804,11 @@ async def _persist_advance(
             )
         )
     await session.flush()
+    # A DRAFT update replaces child rows with bulk DELETE/INSERT statements.
+    # The locked Invoice may already carry its old selectin-loaded collections,
+    # so invalidate only those relationships before the response loader reads
+    # the fresh persisted snapshots.
+    session.expire(invoice, ["lines", "taxes"])
     return invoice
 
 

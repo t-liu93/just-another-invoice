@@ -6,6 +6,7 @@ import asyncio
 import uuid
 from decimal import Decimal
 
+import pypdfium2
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -191,6 +192,121 @@ async def test_cent_tail_calculate_create_issue_keeps_flat_component_vat_snapsho
             (Decimal("9.000"), Decimal("0.010"), Decimal("0.000")),
             (Decimal("21.000"), Decimal("0.030"), Decimal("0.000")),
         ]
+
+
+async def test_advance_lines_have_systematic_descriptions_without_changing_bucket_amounts(
+    db_client: AsyncClient,
+    db_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """Descriptions identify the intent and Quote, while line amounts stay bucket-local."""
+    await _full_auth(db_client)
+    seeds = await _setup_company(db_client)
+    quote = await _tail_quote(db_client, seeds, include_zero_bucket=True)
+    quote_number = quote["quote_number"]
+
+    created = await db_client.post(
+        f"/api/v1/quotes/{quote['id']}/advance-invoices", json=_advance_payload(percentage="20")
+    )
+    assert created.status_code == 201, created.text
+    draft = created.json()
+    def description(rate: int) -> str:
+        return (
+            f"20% advance payment for the goods/services specified in quotation {quote_number} "
+            f"· VAT {rate}%"
+        )
+
+    expected_20 = {
+        Decimal("0"): description(0),
+        Decimal("9"): description(9),
+        Decimal("21"): description(21),
+    }
+    assert {
+        Decimal(line["vat_rate_percent"]): line["name"] for line in draft["lines"]
+    } == expected_20
+    calculation_20 = await db_client.post(
+        f"/api/v1/quotes/{quote['id']}/advance-invoices/calculate",
+        json={"input_mode": "PERCENTAGE", "percentage": "20"},
+    )
+    assert calculation_20.status_code == 200, calculation_20.text
+    assert {
+        Decimal(line["vat_rate_percent"]): Decimal(line["total_incl_vat"])
+        for line in draft["lines"]
+    } == {
+        Decimal(bucket["vat_rate_percent"]): Decimal(bucket["gross_amount"])
+        for bucket in calculation_20.json()["buckets"]
+    }
+
+    updated = await db_client.put(
+        f"/api/v1/advance-invoices/{draft['id']}", json=_advance_payload(percentage="50")
+    )
+    assert updated.status_code == 200, updated.text
+    expected_50 = {
+        rate: name.replace("20%", "50%") for rate, name in expected_20.items()
+    }
+    assert {
+        Decimal(line["vat_rate_percent"]): line["name"] for line in updated.json()["lines"]
+    } == expected_50
+    calculation_50 = await db_client.post(
+        f"/api/v1/quotes/{quote['id']}/advance-invoices/calculate",
+        json={"input_mode": "PERCENTAGE", "percentage": "50"},
+    )
+    assert calculation_50.status_code == 200, calculation_50.text
+    assert {
+        Decimal(line["vat_rate_percent"]): Decimal(line["total_incl_vat"])
+        for line in updated.json()["lines"]
+    } == {
+        Decimal(bucket["vat_rate_percent"]): Decimal(bucket["gross_amount"])
+        for bucket in calculation_50.json()["buckets"]
+    }
+
+    issued = await db_client.post(
+        f"/api/v1/invoices/{draft['id']}/status", json={"status": "SENT"}
+    )
+    assert issued.status_code == 200, issued.text
+    assert {
+        Decimal(line["vat_rate_percent"]): line["name"] for line in issued.json()["lines"]
+    } == expected_50
+
+    pdf = await db_client.get(f"/api/v1/invoices/{draft['id']}/pdf?locale=en&preview=true")
+    assert pdf.status_code == 200, pdf.text
+    document = pypdfium2.PdfDocument(pdf.content)
+    try:
+        pdf_text = "\n".join(
+            document[index].get_textpage().get_text_range() for index in range(len(document))
+        )
+    finally:
+        document.close()
+    # PDF line wrapping may split a word in text extraction; retain the
+    # customer-visible description check without coupling to page layout.
+    assert "".join(expected_50[Decimal("21")].split()) in "".join(pdf_text.split())
+
+    credit = await db_client.post(
+        f"/api/v1/invoices/{draft['id']}/credit-notes",
+        json={"full_remaining": True, "invoice_date": "2026-02-02"},
+    )
+    assert credit.status_code == 201, credit.text
+    assert {
+        Decimal(line["vat_rate_percent"]): line["name"] for line in credit.json()["lines"]
+    } == expected_50
+
+    # A pre-description issued document is a historical snapshot: normal API
+    # reads must not opportunistically rewrite its generic persisted line name.
+    async with db_session_maker() as session:
+        await set_rls_company(session, seeds["company_id"])
+        await session.execute(
+            text(
+                "UPDATE invoice_line SET name = 'Advance invoice' "
+                "WHERE invoice_id = :invoice_id AND vat_rate_percent = 21"
+            ),
+            {"invoice_id": draft["id"]},
+        )
+        await session.commit()
+    legacy_read = await db_client.get(f"/api/v1/invoices/{draft['id']}")
+    assert legacy_read.status_code == 200, legacy_read.text
+    assert {
+        Decimal(line["vat_rate_percent"]): line["name"]
+        for line in legacy_read.json()["lines"]
+    }[Decimal("21")] == "Advance invoice"
 
 
 async def test_mixed_21_9_0_percentage_advances_close_every_component(

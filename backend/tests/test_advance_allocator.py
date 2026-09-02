@@ -16,6 +16,7 @@ from jai.services.advance import (
     _open_draft,
     _read_calculation,
     allocate_advance_gross,
+    format_advance_line_description,
     is_advance_draft_conflict,
     is_invoice_number_conflict,
     requested_advance_gross,
@@ -33,6 +34,44 @@ def test_percentage_is_applied_to_original_gross_and_rounded_once() -> None:
         input_mode=AdvanceInputMode.PERCENTAGE, percentage=Decimal("20")
     )
     assert requested_advance_gross(request, Decimal("100.03")) == Decimal("20.01")
+
+
+def test_advance_line_description_uses_normalized_percentage_quote_and_vat_rate() -> None:
+    assert format_advance_line_description(
+        input_mode=AdvanceInputMode.PERCENTAGE,
+        percentage=Decimal("20.000"),
+        requested_gross_amount=Decimal("442.00"),
+        currency="EUR",
+        quote_number=" Q2026-019 ",
+        vat_rate_percent=Decimal("21.000"),
+    ) == "20% advance payment for the goods/services specified in quotation Q2026-019 · VAT 21%"
+
+
+def test_advance_line_description_uses_requested_gross_not_bucket_amount() -> None:
+    assert format_advance_line_description(
+        input_mode=AdvanceInputMode.GROSS_AMOUNT,
+        percentage=None,
+        requested_gross_amount=Decimal("442"),
+        currency="eur",
+        quote_number="Q2026-019",
+        vat_rate_percent=Decimal("9.000"),
+    ) == (
+        "EUR 442.00 advance payment for the goods/services specified in quotation "
+        "Q2026-019 · VAT 9%"
+    )
+
+
+def test_advance_line_description_rejects_a_missing_quote_number() -> None:
+    with pytest.raises(AdvanceValidationError) as error:
+        format_advance_line_description(
+            input_mode=AdvanceInputMode.PERCENTAGE,
+            percentage=Decimal("20"),
+            requested_gross_amount=Decimal("20"),
+            currency="EUR",
+            quote_number=" ",
+            vat_rate_percent=Decimal("0"),
+        )
+    assert error.value.code == "ADVANCE_QUOTE_NUMBER_REQUIRED"
 
 
 @pytest.mark.parametrize(
