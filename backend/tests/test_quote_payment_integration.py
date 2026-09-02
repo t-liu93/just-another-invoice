@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -24,6 +24,7 @@ from jai.models.payment import Payment, PaymentTax
 from jai.models.quote import Quote
 from jai.schemas.setting import SmtpSettings
 from jai.services import email as email_service
+from jai.services import invoice as invoice_service
 from jai.services import pdf as pdf_service
 from jai.services.payment import delete_payment
 
@@ -815,6 +816,51 @@ class TestQuotePaymentCrud:
 
 @pytest.mark.integration
 class TestQuotePaymentReporting:
+    async def test_settled_q2026_017_receipt_only_deposits_are_info_notices(
+        self, db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two deposits plus the balance keep BTW facts while their audit notices settle."""
+        class _FrozenQ1Date(date):
+            @classmethod
+            def today(cls) -> date:
+                return cls(2026, 2, 20)
+
+        monkeypatch.setattr(invoice_service, "date", _FrozenQ1Date)
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        quote = await _create_quote(
+            db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
+        )
+        await _accept_quote(db_client, quote["id"])
+        await _record(db_client, quote["id"], "24.20", "2026-02-01")
+        await _record(db_client, quote["id"], "60.50", "2026-02-15")
+
+        converted = await db_client.post(f"/api/v1/quotes/{quote['id']}/convert")
+        assert converted.status_code == 201, converted.text
+        issued = await db_client.post(
+            f"/api/v1/invoices/{converted.json()['id']}/status", json={"status": "SENT"}
+        )
+        assert issued.status_code == 200, issued.text
+        balance = await db_client.post(
+            f"/api/v1/invoices/{converted.json()['id']}/payments",
+            json={"payment_date": "2026-02-20", "amount": "36.30"},
+        )
+        assert balance.status_code == 201, balance.text
+        invoice = await db_client.get(f"/api/v1/invoices/{converted.json()['id']}")
+        assert invoice.status_code == 200, invoice.text
+        assert invoice.json()["settlement_status"] == "SETTLED"
+
+        report = await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1")
+        assert report.status_code == 200, report.text
+        payload = report.json()
+        assert Decimal(payload["boxes"]["box_1a"]["base"]) == Decimal("100.00")
+        assert Decimal(payload["boxes"]["box_1a"]["vat"]) == Decimal("21.00")
+        assert len(payload["infos"]) == 2
+        assert all("receipt-only quote deposit" in info for info in payload["infos"])
+        assert all("no duplicate VAT" in info for info in payload["infos"])
+        assert not any("receipt-only quote deposit" in warning for warning in payload["warnings"])
+
     async def test_payment_date_edit_and_delete_move_dynamic_btw_period(
         self, db_client: AsyncClient
     ) -> None:

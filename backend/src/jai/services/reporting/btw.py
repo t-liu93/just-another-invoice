@@ -61,7 +61,12 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.db import set_rls_company
-from jai.models._enums import InvoiceDocumentKind, InvoiceStatus, VatTreatmentEffect
+from jai.models._enums import (
+    InvoiceDocumentKind,
+    InvoiceSettlementStatus,
+    InvoiceStatus,
+    VatTreatmentEffect,
+)
 from jai.models.document import (
     FinalAdvanceApplication,
     FinalAdvanceApplicationTax,
@@ -97,6 +102,27 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _ZERO = Decimal("0")
+
+
+def _receipt_only_notice_severity(
+    document_kind: InvoiceDocumentKind | None,
+    status: InvoiceStatus | None,
+    settlement_status: InvoiceSettlementStatus | None,
+) -> str | None:
+    """Classify a quote-origin payment notice without changing its tax event.
+
+    Receipt-only quote deposits are the M11.5 path.  A formal Advance can
+    have an associated Quote too, but must never be described as a deposit.
+    """
+    if document_kind == InvoiceDocumentKind.ADVANCE:
+        return None
+    if (
+        document_kind == InvoiceDocumentKind.STANDARD
+        and status in (InvoiceStatus.SENT, InvoiceStatus.COMPLETED)
+        and settlement_status == InvoiceSettlementStatus.SETTLED
+    ):
+        return "info"
+    return "warning"
 
 
 def _event_row_sort_key(row: ReportTaxEventRow) -> tuple[object, ...]:
@@ -416,6 +442,7 @@ async def compute_vat_return(
     await set_rls_company(session, company_id)
 
     warnings: list[str] = []
+    infos: list[str] = []
 
     # D-COUNTRY: only NL is implemented; all others fall back to NL + warning.
     country_code = getattr(company, "country_code", None) or ""
@@ -506,8 +533,16 @@ async def compute_vat_return(
     # not the quote has already been converted. These are locked PaymentTax
     # snapshots; VAT is never inferred from the gross payment amount here.
     advance_result = await session.execute(
-        select(Payment.id, Payment.payment_date, PaymentTax)
+        select(
+            Payment.id,
+            Payment.payment_date,
+            PaymentTax,
+            Invoice.document_kind,
+            Invoice.status,
+            Invoice.settlement_status,
+        )
         .join(PaymentTax, PaymentTax.payment_id == Payment.id)
+        .outerjoin(Invoice, Invoice.id == Payment.invoice_id)
         .where(
             Payment.company_id == company_id,
             Payment.quote_id.is_not(None),
@@ -516,9 +551,21 @@ async def compute_vat_return(
             Payment.payment_date <= date_to,
         )
     )
-    advance_payment_ids: set[uuid.UUID] = set()
-    for payment_id, payment_date, payment_tax in advance_result.all():
-        advance_payment_ids.add(payment_id)
+    advance_info_payment_ids: set[uuid.UUID] = set()
+    advance_warning_payment_ids: set[uuid.UUID] = set()
+    for (
+        payment_id,
+        payment_date,
+        payment_tax,
+        document_kind,
+        status,
+        settlement_status,
+    ) in advance_result.all():
+        severity = _receipt_only_notice_severity(document_kind, status, settlement_status)
+        if severity == "info":
+            advance_info_payment_ids.add(payment_id)
+        elif severity == "warning":
+            advance_warning_payment_ids.add(payment_id)
         apply_tax_event(
             event_kind=ReportTaxEventKind.RECEIPT_ONLY_PAYMENT_TAX,
             event_date=payment_date,
@@ -531,15 +578,23 @@ async def compute_vat_return(
             vat=quantize_to_minor_unit(Decimal(str(payment_tax.base_vat_amount))),
             source_row_id=payment_tax.id,
         )
-    if advance_payment_ids:
+    if advance_info_payment_ids:
+        infos.append(
+            f"Included {len(advance_info_payment_ids)} receipt-only quote deposit(s) "
+            "by payment date. The linked issued Standard is settled; receipt-only "
+            "recognition and offset audit are complete with no duplicate VAT."
+        )
+    if advance_warning_payment_ids:
         warnings.append(
-            f"Included {len(advance_payment_ids)} quote-origin advance payment(s) "
-            "by payment date. Editing a filed-period payment may require a correction."
+            f"Included {len(advance_warning_payment_ids)} receipt-only quote deposit(s) "
+            "by payment date without a fully settled issued Standard. Editing a "
+            "filed-period payment may require a correction."
         )
 
     invoice_ids = [invoice.id for invoice in invoices]
     offsets_by_invoice: dict[uuid.UUID, list[tuple[uuid.UUID, PaymentTax]]] = {}
-    offset_payment_ids: set[uuid.UUID] = set()
+    offset_info_payment_ids: set[uuid.UUID] = set()
+    offset_warning_payment_ids: set[uuid.UUID] = set()
     if invoice_ids:
         offset_result = await session.execute(
             select(Payment.invoice_id, Payment.id, PaymentTax)
@@ -555,7 +610,6 @@ async def compute_vat_return(
             if invoice_id is None:
                 continue
             offsets_by_invoice.setdefault(invoice_id, []).append((payment_id, payment_tax))
-            offset_payment_ids.add(payment_id)
 
     # Track EU B2B invoices that need ICP but have no customer vat_id.
     icp_invoices_missing_vat_id: list[str] = []
@@ -608,6 +662,15 @@ async def compute_vat_return(
         # quote-origin advance snapshots attached to it, including advances
         # recognised in earlier quarters, so the project is filed exactly once.
         for payment_id, payment_tax in offsets_by_invoice.get(inv.id, []):
+            severity = _receipt_only_notice_severity(
+                inv.document_kind,
+                inv.status,
+                inv.settlement_status,
+            )
+            if severity == "info":
+                offset_info_payment_ids.add(payment_id)
+            elif severity == "warning":
+                offset_warning_payment_ids.add(payment_id)
             apply_tax_event(
                 event_kind=ReportTaxEventKind.RECEIPT_ONLY_INVOICE_OFFSET,
                 event_date=inv.invoice_date,
@@ -810,10 +873,17 @@ async def compute_vat_return(
 
     correction_warnings.extend(warnings_by_credit.values())
 
-    if offset_payment_ids:
+    if offset_info_payment_ids:
+        infos.append(
+            f"Applied final-invoice VAT offsets for {len(offset_info_payment_ids)} "
+            "settled receipt-only quote deposit(s). Recognition and offset audit are "
+            "complete with no duplicate VAT."
+        )
+    if offset_warning_payment_ids:
         warnings.append(
-            f"Applied final-invoice VAT offsets for {len(offset_payment_ids)} "
-            "quote-origin advance payment(s)."
+            f"Applied final-invoice VAT offsets for {len(offset_warning_payment_ids)} "
+            "receipt-only quote deposit(s) without a fully settled issued Standard. "
+            "Editing a filed-period payment may require a correction."
         )
 
     # -----------------------------------------------------------------------
@@ -918,6 +988,7 @@ async def compute_vat_return(
         boxes=boxes,
         totals=totals,
         warnings=warnings,
+        infos=infos,
         event_rows=[row for row, _source_row_id in event_rows],
         correction_warnings=correction_warnings,
         disclaimer=_DISCLAIMER,

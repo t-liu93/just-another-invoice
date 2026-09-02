@@ -282,6 +282,19 @@ const periodLabel = computed<string>(() => {
           </ul>
         </n-alert>
 
+        <!-- Informational audit notices -->
+        <n-alert
+          v-if="(store.vatReport.infos ?? []).length > 0"
+          type="info"
+          :show-icon="true"
+          style="margin-bottom: 16px"
+        >
+          <div style="font-weight: 600; margin-bottom: 4px">{{ t('reports.vat.infos') }}</div>
+          <ul style="margin: 0; padding-left: 20px">
+            <li v-for="(info, i) in (store.vatReport.infos ?? [])" :key="i">{{ info }}</li>
+          </ul>
+        </n-alert>
+
         <!-- Boxes table -->
         <n-card :title="t('reports.vat.boxes')" style="margin-bottom: 16px">
           <n-data-table

@@ -44,6 +44,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from jai.models._enums import (
+    InvoiceDocumentKind,
+    InvoiceSettlementStatus,
+    InvoiceStatus,
+)
 from jai.schemas.setting import VatRateTiers
 from jai.services.reporting.btw import (
     _apply_expense_nl,
@@ -52,6 +57,7 @@ from jai.services.reporting.btw import (
     _classify_rate,
     _compute_1d_vat,
     _quarter_date_range,
+    _receipt_only_notice_severity,
     compute_vat_return,
 )
 
@@ -86,6 +92,46 @@ class TestQuarterDateRange:
     def test_leap_year_q1(self) -> None:
         # 2024 is a leap year – Feb has 29 days, but Q1 ends on March 31
         assert _quarter_date_range(2024, 1) == (date(2024, 1, 1), date(2024, 3, 31))
+
+
+@pytest.mark.parametrize(
+    ("document_kind", "status", "settlement_status", "expected"),
+    [
+        (None, None, None, "warning"),
+        (
+            InvoiceDocumentKind.STANDARD,
+            InvoiceStatus.DRAFT,
+            InvoiceSettlementStatus.OPEN,
+            "warning",
+        ),
+        (
+            InvoiceDocumentKind.STANDARD,
+            InvoiceStatus.SENT,
+            InvoiceSettlementStatus.PARTIALLY_SETTLED,
+            "warning",
+        ),
+        (
+            InvoiceDocumentKind.STANDARD,
+            InvoiceStatus.COMPLETED,
+            InvoiceSettlementStatus.SETTLED,
+            "info",
+        ),
+        (
+            InvoiceDocumentKind.ADVANCE,
+            InvoiceStatus.SENT,
+            InvoiceSettlementStatus.SETTLED,
+            None,
+        ),
+    ],
+)
+def test_receipt_only_notice_severity(
+    document_kind: InvoiceDocumentKind | None,
+    status: InvoiceStatus | None,
+    settlement_status: InvoiceSettlementStatus | None,
+    expected: str | None,
+) -> None:
+    """Unconverted/DRAFT/unsettled remain warnings; formal Advance is excluded."""
+    assert _receipt_only_notice_severity(document_kind, status, settlement_status) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +532,9 @@ def _make_invoice(
     inv.vat_treatment_requires_icp = requires_icp
     inv.customer_id = customer_id or uuid.uuid4()
     inv.invoice_number = invoice_number
+    inv.document_kind = InvoiceDocumentKind.STANDARD
+    inv.status = InvoiceStatus.SENT
+    inv.settlement_status = InvoiceSettlementStatus.OPEN
     inv.taxes = taxes or []
     inv.lines = lines or []
     return inv
@@ -571,7 +620,7 @@ def _build_session(
     expenses_in_period: list[MagicMock],
     year_expenses: list[MagicMock] | None = None,
     customer: MagicMock | None = None,
-    advance_rows: list[tuple[uuid.UUID, MagicMock]] | None = None,
+    advance_rows: list[tuple[object, ...]] | None = None,
     offset_rows: list[tuple[uuid.UUID, uuid.UUID, MagicMock]] | None = None,
 ) -> AsyncMock:
     """Build a mock AsyncSession that returns the given data from execute()."""
@@ -602,10 +651,22 @@ def _build_session(
     # Payment-date is now exposed in the auditable event-row contract.  The
     # older financial fixtures intentionally did not care about that date, so
     # give their two-column shorthand a stable in-quarter default.
-    advance_result.all.return_value = [
-        (payment_id, date(2026, 1, 1), payment_tax)
-        for payment_id, payment_tax in (advance_rows or [])
-    ]
+    advance_result.all.return_value = []
+    for row in advance_rows or []:
+        payment_id, payment_tax, *notice_state = row
+        document_kind, status, settlement_status = (
+            notice_state + [None, None, None]
+        )[:3]
+        advance_result.all.return_value.append(
+            (
+                payment_id,
+                date(2026, 1, 1),
+                payment_tax,
+                document_kind,
+                status,
+                settlement_status,
+            )
+        )
     invoke_results.append(advance_result)
 
     if invoices:
@@ -684,7 +745,7 @@ class TestComputeVatReturn:
         )
         assert report.boxes.box_1a.base == Decimal("200.00")
         assert report.boxes.box_1a.vat == Decimal("42.00")
-        assert any("advance payment" in warning for warning in report.warnings)
+        assert any("receipt-only quote deposit" in warning for warning in report.warnings)
 
     @pytest.mark.asyncio
     async def test_final_invoice_subtracts_all_prior_quote_advances(self) -> None:
@@ -717,6 +778,103 @@ class TestComputeVatReturn:
         assert report.boxes.box_1a.base == Decimal("500.00")
         assert report.boxes.box_1a.vat == Decimal("105.00")
         assert any("VAT offsets" in warning for warning in report.warnings)
+
+    @pytest.mark.asyncio
+    async def test_q2026_017_settled_receipt_only_deposits_are_infos_without_drift(self) -> None:
+        """Two deposits plus balance retain their audit events and BTW values exactly."""
+        invoice = _make_invoice(
+            invoice_date=date(2026, 2, 15),
+            tax_mode="DOCUMENT",
+            vat_treatment_effect="APPLY_RATE",
+            vat_treatment_code="NL_DOMESTIC",
+            taxes=[_make_invoice_tax("21", "100.00", "21.00")],
+            invoice_number="Q2026-017",
+        )
+        invoice.status = InvoiceStatus.COMPLETED
+        invoice.settlement_status = InvoiceSettlementStatus.SETTLED
+        first_id, second_id = uuid.uuid4(), uuid.uuid4()
+        first_tax = _make_payment_tax("21", "20.00", "4.20")
+        second_tax = _make_payment_tax("21", "50.00", "10.50")
+        session = _build_session(
+            invoices=[invoice],
+            expenses_in_period=[],
+            advance_rows=[
+                (first_id, first_tax, InvoiceDocumentKind.STANDARD, InvoiceStatus.COMPLETED,
+                 InvoiceSettlementStatus.SETTLED),
+                (second_id, second_tax, InvoiceDocumentKind.STANDARD, InvoiceStatus.COMPLETED,
+                 InvoiceSettlementStatus.SETTLED),
+            ],
+            offset_rows=[
+                (invoice.id, first_id, first_tax),
+                (invoice.id, second_id, second_tax),
+            ],
+        )
+
+        report = await compute_vat_return(
+            session, company=_make_company(), year=2026, quarter=1, tiers=DEFAULT_TIERS
+        )
+
+        assert report.boxes.box_1a.base == Decimal("100.00")
+        assert report.boxes.box_1a.vat == Decimal("21.00")
+        assert [row.event_kind.value for row in report.event_rows].count(
+            "RECEIPT_ONLY_PAYMENT_TAX"
+        ) == 2
+        assert [row.event_kind.value for row in report.event_rows].count(
+            "RECEIPT_ONLY_INVOICE_OFFSET"
+        ) == 2
+        assert [row.event_kind.value for row in report.event_rows].count("DOCUMENT_TAX") == 1
+        assert len(report.infos) == 2
+        assert all("receipt-only quote deposit" in info for info in report.infos)
+        assert not any("receipt-only quote deposit" in warning for warning in report.warnings)
+
+    @pytest.mark.asyncio
+    async def test_receipt_only_notice_severity_splits_unsettled_and_dedupes_tax_buckets(
+        self,
+    ) -> None:
+        """DRAFT/unsettled quote deposits remain warnings; one payment counts once per notice."""
+        settled = _make_invoice(
+            date(2026, 2, 15), "DOCUMENT", "APPLY_RATE", "NL_DOMESTIC", taxes=[]
+        )
+        settled.status = InvoiceStatus.SENT
+        settled.settlement_status = InvoiceSettlementStatus.SETTLED
+        unsettled = _make_invoice(
+            date(2026, 2, 15), "DOCUMENT", "APPLY_RATE", "NL_DOMESTIC", taxes=[]
+        )
+        unsettled.status = InvoiceStatus.SENT
+        unsettled.settlement_status = InvoiceSettlementStatus.PARTIALLY_SETTLED
+        settled_id, unsettled_id, formal_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        first_bucket = _make_payment_tax("21", "20.00", "4.20")
+        second_bucket = _make_payment_tax("9", "10.00", "0.90")
+        session = _build_session(
+            invoices=[settled, unsettled],
+            expenses_in_period=[],
+            advance_rows=[
+                (settled_id, first_bucket, InvoiceDocumentKind.STANDARD, InvoiceStatus.SENT,
+                 InvoiceSettlementStatus.SETTLED),
+                (settled_id, second_bucket, InvoiceDocumentKind.STANDARD, InvoiceStatus.SENT,
+                 InvoiceSettlementStatus.SETTLED),
+                (unsettled_id, first_bucket, InvoiceDocumentKind.STANDARD, InvoiceStatus.SENT,
+                 InvoiceSettlementStatus.PARTIALLY_SETTLED),
+                (formal_id, first_bucket, InvoiceDocumentKind.ADVANCE, InvoiceStatus.SENT,
+                 InvoiceSettlementStatus.SETTLED),
+            ],
+            offset_rows=[
+                (settled.id, settled_id, first_bucket),
+                (settled.id, settled_id, second_bucket),
+                (unsettled.id, unsettled_id, first_bucket),
+            ],
+        )
+
+        report = await compute_vat_return(
+            session, company=_make_company(), year=2026, quarter=1, tiers=DEFAULT_TIERS
+        )
+
+        assert len(report.infos) == 2
+        assert len([info for info in report.infos if "1 settled receipt-only" in info]) == 1
+        assert len(report.warnings) == 2
+        assert all("1 receipt-only quote deposit" in warning for warning in report.warnings)
+        assert all("fully settled issued Standard" in warning for warning in report.warnings)
+        assert all("formal" not in notice.lower() for notice in report.infos + report.warnings)
 
     @pytest.mark.asyncio
     async def test_same_quarter_advance_and_invoice_net_to_full_invoice(self) -> None:

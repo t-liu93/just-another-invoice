@@ -8748,6 +8748,11 @@ export interface components {
              */
             warnings?: string[];
             /**
+             * Infos
+             * @description Informational audit messages, including receipt-only quote deposits whose linked issued Standard invoice is fully settled.
+             */
+            infos?: string[];
+            /**
              * Event Rows
              * @description All signed invoice-side BTW events included exactly once in this period: document tax, receipt-only payment tax, and receipt-only invoice offsets.
              */

@@ -1446,6 +1446,7 @@
       "disclaimer": "Disclaimer",
       "disclaimerHelp": "This output is for bookkeeping assistance only. Always verify with your accountant and/or the Belastingdienst before filing your BTW return.",
       "warnings": "Warnings",
+      "infos": "Information",
       "boxes": "BTW Return Boxes",
       "totals": "Totals",
       "base": "Net (base)",

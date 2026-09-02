@@ -332,6 +332,13 @@ class VatReturnReport(BaseModel):
             "or non-NL company using the NL ruleset as fallback."
         ),
     )
+    infos: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Informational audit messages, including receipt-only quote deposits whose "
+            "linked issued Standard invoice is fully settled."
+        ),
+    )
     event_rows: list[ReportTaxEventRow] = Field(
         default_factory=list,
         description=(

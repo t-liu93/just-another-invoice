@@ -11,7 +11,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from jai.models._enums import InvoiceDocumentKind, VatTreatmentEffect
+from jai.models._enums import (
+    InvoiceDocumentKind,
+    InvoiceSettlementStatus,
+    InvoiceStatus,
+    VatTreatmentEffect,
+)
 from jai.schemas.report import ReportTaxEventKind, ReportTaxEventRow, ReportWarningCode
 from jai.schemas.setting import VatRateTiers
 from jai.services.reporting.btw import compute_vat_return
@@ -155,7 +160,14 @@ async def test_vat_event_rows_include_standard_receipt_payment_and_offset_once()
     payment_tax.base_taxable_amount = Decimal("40")
     payment_tax.base_vat_amount = Decimal("8.40")
     payment_rows = MagicMock()
-    payment_rows.all.return_value = [(payment_id, date(2026, 3, 5), payment_tax)]
+    payment_rows.all.return_value = [(
+        payment_id,
+        date(2026, 3, 5),
+        payment_tax,
+        InvoiceDocumentKind.STANDARD,
+        InvoiceStatus.SENT,
+        InvoiceSettlementStatus.OPEN,
+    )]
     offset_rows = MagicMock()
     offset_rows.all.return_value = [(standard.id, payment_id, payment_tax)]
     session = AsyncMock()
