@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,7 +26,11 @@ from jai.models._enums import (
     DocumentArtifactValidationStatus,
 )
 from jai.services import artifacts as artifact_service
-from jai.services.artifacts import ArtifactFileValidationError, validate_artifact_pdf
+from jai.services.artifacts import (
+    ArtifactFileValidationError,
+    normalize_uploaded_artifact_filename,
+    validate_artifact_pdf,
+)
 
 
 def _multipart_body(parts: list[tuple[str, str, bytes]]) -> tuple[dict[str, str], bytes]:
@@ -57,6 +62,22 @@ def artifact_upload_owner(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         del args, kwargs
 
     monkeypatch.setattr(pdf_api, "ensure_invoice_artifact_upload_eligible", eligible)
+
+    async def retain(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            artifact_kind="FORMAL_DOCUMENT",
+            sha256="a" * 64,
+            render_fingerprint="b" * 64,
+            locale="en",
+            filename=str(kwargs["original_filename"]),
+            creation_reason="UPLOAD",
+            renderer_version="external-upload-v1",
+            created_at=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr(artifact_service, "create_uploaded_invoice_artifact", retain)
     try:
         yield
     finally:
@@ -69,6 +90,11 @@ def _artifact_upload_urls() -> tuple[str, str]:
         f"/api/v1/invoices/{invoice_id}/artifacts",
         f"/api/v1/invoices/{invoice_id}/artifacts/validate-upload?language=en",
     )
+
+
+def _accepted_body_status(url: str) -> int:
+    """Step 2 retains valid uploads; Step 3's validation endpoint remains a stub."""
+    return 501 if "validate-upload" in url else 201
 
 
 @pytest.mark.asyncio
@@ -155,8 +181,7 @@ async def test_artifact_upload_multipart_exact_limit_never_uses_starlette_spool(
 
     for url in _artifact_upload_urls():
         response = await client.post(url, headers=headers, content=body)
-        # Step 1 exposes a contract stub after accepting the bounded valid body.
-        assert response.status_code == 501
+        assert response.status_code == _accepted_body_status(url)
 
 
 @pytest.mark.asyncio
@@ -308,7 +333,7 @@ async def test_artifact_upload_multipart_handles_one_byte_chunks_and_stops_after
                 yield bytes([byte])
 
         response = await client.post(url, headers=headers, content=one_byte_stream())
-        assert response.status_code == 501
+        assert response.status_code == _accepted_body_status(url)
         # The parser recognizes the final delimiter before its conventional
         # trailing CRLF, so even a byte-at-a-time legal request stops early.
         assert one_byte_emitted < len(body)
@@ -324,7 +349,7 @@ async def test_artifact_upload_multipart_handles_one_byte_chunks_and_stops_after
                 yield b"x" * 1024
 
         response = await client.post(url, headers=headers, content=epilogue_stream())
-        assert response.status_code == 501
+        assert response.status_code == _accepted_body_status(url)
         assert epilogue_emitted == 0
 
 
@@ -361,7 +386,7 @@ async def test_artifact_upload_multipart_accepts_same_bytes_regardless_of_epilog
             yield epilogue
 
         split = await client.post(url, headers=headers, content=split_stream())
-        assert split.status_code == 501
+        assert split.status_code == _accepted_body_status(url)
         # The endpoint must not ask ASGI for the already-irrelevant epilogue.
         assert split_emitted == 1
 
@@ -582,3 +607,21 @@ def test_artifact_upload_enums_and_setting_are_independent() -> None:
     assert DocumentArtifactValidationConfidence.LOW == "LOW"
     assert Settings.model_fields["max_artifact_bytes"].default == 10 * 1024 * 1024
     assert Settings.model_fields["max_receipt_bytes"].default == 10 * 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    ("original", "expected"),
+    [
+        ("", "uploaded-document.pdf"),
+        ("...", "uploaded-document.pdf"),
+        ("../../legacy.pdf", "legacy.pdf"),
+        (r"..\\legacy.pdf", "legacy.pdf"),
+        ("safe\x00name\x85.pdf", "safename.pdf"),
+        ("Ｆｕｌｌｗｉｄｔｈ.pdf", "Fullwidth.pdf"),
+        ("x" * 300, "x" * 255),
+    ],
+)
+def test_normalize_uploaded_artifact_filename_is_safe_and_deterministic(
+    original: str, expected: str
+) -> None:
+    assert normalize_uploaded_artifact_filename(original) == expected

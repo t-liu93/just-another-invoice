@@ -766,7 +766,7 @@ async def send_invoice_email_endpoint(
             company=presentation_company, customer=presentation_customer,
             to=str(body.to), cc=cc_list,
             locale=resolved_locale, subject=body.subject, body=body.body,
-            pdf_bytes=artifact.pdf_bytes, filename=filename, creator_id=user.id,
+            pdf_bytes=artifact.pdf_bytes, filename=artifact.filename, creator_id=user.id,
             artifact_id=artifact.id, document_kind=invoice.document_kind,
         )
         if log.status.value == "FAILED" and artifact_created:

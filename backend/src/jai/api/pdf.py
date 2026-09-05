@@ -137,7 +137,7 @@ def _invalid_artifact_file_error() -> HTTPException:
 
 async def _read_single_artifact_multipart(
     request: Request, *, max_bytes: int
-) -> tuple[bytes, str]:
+) -> tuple[bytes, str, str]:
     """Read one PDF part directly from ASGI without Starlette's disk spool.
 
     ``UploadFile`` and ``request.form()`` are intentionally not used here:
@@ -159,6 +159,7 @@ async def _read_single_artifact_multipart(
         header_count = 0
         content = bytearray()
         mime_type = "application/octet-stream"
+        original_filename = ""
         part_count = 0
         completed = False
 
@@ -196,7 +197,7 @@ async def _read_single_artifact_multipart(
             headers[name] = bytes(current_header_value)
 
         def on_headers_finished() -> None:
-            nonlocal mime_type
+            nonlocal mime_type, original_filename
             disposition, disposition_options = parse_options_header(
                 headers.get(b"content-disposition")
             )
@@ -209,6 +210,7 @@ async def _read_single_artifact_multipart(
             mime_type = headers.get(b"content-type", b"application/octet-stream").decode(
                 "latin-1"
             )
+            original_filename = disposition_options[b"filename"].decode("utf-8", "replace")
 
         def on_part_data(data: bytes, start: int, end: int) -> None:
             data_size = end - start
@@ -268,13 +270,13 @@ async def _read_single_artifact_multipart(
 
     if not completed or part_count != 1:
         raise _ArtifactMultipartError
-    return bytes(content), mime_type
+    return bytes(content), mime_type, original_filename
 
 
-async def _read_and_validate_artifact_upload(request: Request) -> bytes:
+async def _read_and_validate_artifact_upload(request: Request) -> tuple[bytes, str]:
     """Apply the shared streaming boundary before the Step 1 endpoint stubs."""
     try:
-        content, mime_type = await _read_single_artifact_multipart(
+        content, mime_type, original_filename = await _read_single_artifact_multipart(
             request, max_bytes=get_settings().max_artifact_bytes
         )
         validate_artifact_pdf(
@@ -282,7 +284,7 @@ async def _read_and_validate_artifact_upload(request: Request) -> bytes:
         )
     except (_ArtifactMultipartError, ArtifactFileValidationError):
         raise _invalid_artifact_file_error() from None
-    return content
+    return content, original_filename
 
 
 def _artifact_upload_not_implemented() -> Never:
@@ -365,12 +367,14 @@ async def download_invoice_pdf(
         )
         await session.commit()
         pdf_bytes = artifact.pdf_bytes
+        filename = artifact.filename
 
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
             "Content-Disposition": build_content_disposition(filename),
+            "X-Content-Type-Options": "nosniff",
         },
     )
 
@@ -393,7 +397,14 @@ async def download_invoice_artifact_endpoint(
     from jai.services.artifacts import get_invoice_artifact
     from jai.services.pdf import build_content_disposition
     artifact = await get_invoice_artifact(session, invoice_id=invoice_id, artifact_id=artifact_id, company_id=_require_company_id(user))
-    return Response(content=artifact.pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": build_content_disposition(artifact.filename)})
+    return Response(
+        content=artifact.pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": build_content_disposition(artifact.filename),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post(
@@ -414,14 +425,23 @@ async def upload_invoice_artifact_endpoint(
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentArtifactRead:
-    """Contract stub; Step 2 will validate and retain the exact uploaded PDF."""
+    """Validate then retain one exact historical formal-document PDF."""
     _owner_only(user)
     await ensure_invoice_artifact_upload_eligible(
         session, invoice_id=invoice_id, company_id=_require_company_id(user)
     )
-    content = await _read_and_validate_artifact_upload(request)
-    del content, invoice_id, session
-    _artifact_upload_not_implemented()
+    content, original_filename = await _read_and_validate_artifact_upload(request)
+    from jai.services.artifacts import create_uploaded_invoice_artifact
+
+    artifact = await create_uploaded_invoice_artifact(
+        session,
+        invoice_id=invoice_id,
+        company_id=_require_company_id(user),
+        pdf_bytes=content,
+        original_filename=original_filename,
+    )
+    await session.commit()
+    return DocumentArtifactRead.model_validate(artifact)
 
 
 @router.post(
@@ -447,7 +467,7 @@ async def validate_invoice_artifact_upload_endpoint(
     await ensure_invoice_artifact_upload_eligible(
         session, invoice_id=invoice_id, company_id=_require_company_id(user)
     )
-    content = await _read_and_validate_artifact_upload(request)
+    content, _ = await _read_and_validate_artifact_upload(request)
     del content, invoice_id, language, session
     _artifact_upload_not_implemented()
 
