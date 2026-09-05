@@ -1380,7 +1380,11 @@ export interface paths {
         /** List Invoice Artifacts Endpoint */
         get: operations["list_invoice_artifacts_endpoint_api_v1_invoices__invoice_id__artifacts_get"];
         put?: never;
-        post?: never;
+        /**
+         * Upload Invoice Artifact Endpoint
+         * @description Contract stub; Step 2 will validate and retain the exact uploaded PDF.
+         */
+        post: operations["upload_invoice_artifact_endpoint_api_v1_invoices__invoice_id__artifacts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1398,6 +1402,26 @@ export interface paths {
         get: operations["download_invoice_artifact_endpoint_api_v1_invoices__invoice_id__artifacts__artifact_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/artifacts/validate-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Invoice Artifact Upload Endpoint
+         * @description Contract stub; Step 3 will perform the explicit advisory AI comparison.
+         */
+        post: operations["validate_invoice_artifact_upload_endpoint_api_v1_invoices__invoice_id__artifacts_validate_upload_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3742,6 +3766,29 @@ export interface components {
          * @enum {string}
          */
         DiscountType: "NONE" | "PERCENTAGE" | "FIXED";
+        /** DocumentArtifactInvalidFileErrorDetail */
+        DocumentArtifactInvalidFileErrorDetail: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "INVALID_ARTIFACT_FILE";
+            /** Message */
+            message: string;
+        };
+        /**
+         * DocumentArtifactInvalidRequestErrorDetail
+         * @description Stable non-file 422 for the two M13 artifact-upload routes.
+         */
+        DocumentArtifactInvalidRequestErrorDetail: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "INVALID_ARTIFACT_UPLOAD_REQUEST";
+            /** Message */
+            message: string;
+        };
         /**
          * DocumentArtifactKind
          * @description The retained PDF's legal/document purpose.
@@ -3752,6 +3799,20 @@ export interface components {
         DocumentArtifactListResponse: {
             /** Items */
             items: components["schemas"]["DocumentArtifactRead"][];
+        };
+        /** DocumentArtifactNotFoundErrorDetail */
+        DocumentArtifactNotFoundErrorDetail: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "ARTIFACT_UPLOAD_NOT_FOUND";
+            /** Message */
+            message: string;
+        };
+        /** DocumentArtifactNotFoundErrorResponse */
+        DocumentArtifactNotFoundErrorResponse: {
+            detail: components["schemas"]["DocumentArtifactNotFoundErrorDetail"];
         };
         /** DocumentArtifactRead */
         DocumentArtifactRead: {
@@ -3783,7 +3844,113 @@ export interface components {
          * @description The user-visible action which first retained the exact PDF bytes.
          * @enum {string}
          */
-        DocumentArtifactReason: "DOWNLOAD" | "SEND";
+        DocumentArtifactReason: "DOWNLOAD" | "SEND" | "UPLOAD";
+        /**
+         * DocumentArtifactUnprocessableErrorResponse
+         * @description The endpoint's file-input and path/query validation alternatives.
+         */
+        DocumentArtifactUnprocessableErrorResponse: {
+            /** Detail */
+            detail: components["schemas"]["DocumentArtifactInvalidFileErrorDetail"] | components["schemas"]["DocumentArtifactInvalidRequestErrorDetail"];
+        };
+        /** DocumentArtifactUploadConflictErrorDetail */
+        DocumentArtifactUploadConflictErrorDetail: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "ARTIFACT_ALREADY_EXISTS";
+            /** Message */
+            message: string;
+        };
+        /** DocumentArtifactUploadConflictErrorResponse */
+        DocumentArtifactUploadConflictErrorResponse: {
+            detail: components["schemas"]["DocumentArtifactUploadConflictErrorDetail"];
+        };
+        /**
+         * DocumentArtifactValidationCheck
+         * @description One advisory comparison between a PDF and an issued-document snapshot.
+         */
+        DocumentArtifactValidationCheck: {
+            field: components["schemas"]["DocumentArtifactValidationField"];
+            status: components["schemas"]["DocumentArtifactValidationCheckStatus"];
+            /** Expected Value */
+            expected_value: string | null;
+            /** Observed Value */
+            observed_value: string | null;
+            /** Note */
+            note: string | null;
+        };
+        /**
+         * DocumentArtifactValidationCheckStatus
+         * @description Advisory outcome for one formal-artifact validation field.
+         * @enum {string}
+         */
+        DocumentArtifactValidationCheckStatus: "MATCH" | "MISMATCH" | "NOT_FOUND";
+        /**
+         * DocumentArtifactValidationConfidence
+         * @description Confidence attached to an advisory formal-artifact validation result.
+         * @enum {string}
+         */
+        DocumentArtifactValidationConfidence: "HIGH" | "MEDIUM" | "LOW";
+        /** DocumentArtifactValidationConflictErrorDetail */
+        DocumentArtifactValidationConflictErrorDetail: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "ARTIFACT_ALREADY_EXISTS" | "AI_NOT_CONFIGURED";
+            /** Message */
+            message: string;
+        };
+        /** DocumentArtifactValidationConflictErrorResponse */
+        DocumentArtifactValidationConflictErrorResponse: {
+            detail: components["schemas"]["DocumentArtifactValidationConflictErrorDetail"];
+        };
+        /** DocumentArtifactValidationFailedErrorDetail */
+        DocumentArtifactValidationFailedErrorDetail: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "AI_VALIDATION_FAILED";
+            /** Message */
+            message: string;
+        };
+        /** DocumentArtifactValidationFailedErrorResponse */
+        DocumentArtifactValidationFailedErrorResponse: {
+            detail: components["schemas"]["DocumentArtifactValidationFailedErrorDetail"];
+        };
+        /**
+         * DocumentArtifactValidationField
+         * @description A persisted issued-document fact checked by advisory validation.
+         * @enum {string}
+         */
+        DocumentArtifactValidationField: "DOCUMENT_NUMBER" | "DOCUMENT_KIND" | "DOCUMENT_DATE" | "SUPPLY_OR_ADVANCE_DATE" | "SELLER" | "BUYER" | "CURRENCY" | "TOTAL_EXCL_VAT" | "VAT_TOTAL" | "TOTAL_INCL_VAT";
+        /**
+         * DocumentArtifactValidationRead
+         * @description Non-persistent advisory result for a selected formal-artifact PDF.
+         */
+        DocumentArtifactValidationRead: {
+            /** File Sha256 */
+            file_sha256: string;
+            status: components["schemas"]["DocumentArtifactValidationStatus"];
+            confidence: components["schemas"]["DocumentArtifactValidationConfidence"] | null;
+            /** Summary */
+            summary: string;
+            /** Total Pages */
+            total_pages: number;
+            /** Checked Pages */
+            checked_pages: number[];
+            /** Checks */
+            checks: components["schemas"]["DocumentArtifactValidationCheck"][];
+        };
+        /**
+         * DocumentArtifactValidationStatus
+         * @description Overall advisory result for a proposed formal-artifact upload.
+         * @enum {string}
+         */
+        DocumentArtifactValidationStatus: "MATCH" | "WARNING" | "INCONCLUSIVE";
         /** DocumentChainApplicationRead */
         DocumentChainApplicationRead: {
             /**
@@ -12064,6 +12231,65 @@ export interface operations {
             };
         };
     };
+    upload_invoice_artifact_endpoint_api_v1_invoices__invoice_id__artifacts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description One historical PDF to retain or compare exactly.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactRead"];
+                };
+            };
+            /** @description Invoice is missing, foreign, or not issued. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactNotFoundErrorResponse"];
+                };
+            };
+            /** @description An artifact already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactUploadConflictErrorResponse"];
+                };
+            };
+            /** @description The supplied file is not an accepted PDF, or request parameters are invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactUnprocessableErrorResponse"];
+                };
+            };
+        };
+    };
     download_invoice_artifact_endpoint_api_v1_invoices__invoice_id__artifacts__artifact_id__get: {
         parameters: {
             query?: never;
@@ -12090,6 +12316,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_invoice_artifact_upload_endpoint_api_v1_invoices__invoice_id__artifacts_validate_upload_post: {
+        parameters: {
+            query: {
+                /** @description Language for advisory summary and notes. */
+                language: "en" | "zh";
+            };
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description One historical PDF to retain or compare exactly.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactValidationRead"];
+                };
+            };
+            /** @description Invoice is missing, foreign, or not issued. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactNotFoundErrorResponse"];
+                };
+            };
+            /** @description An artifact already exists or advisory AI is unavailable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactValidationConflictErrorResponse"];
+                };
+            };
+            /** @description The supplied file is not an accepted PDF, or request parameters are invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactUnprocessableErrorResponse"];
+                };
+            };
+            /** @description The advisory AI validation failed. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentArtifactValidationFailedErrorResponse"];
                 };
             };
         };

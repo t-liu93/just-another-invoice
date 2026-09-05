@@ -71,6 +71,20 @@ def _m12_refund_validation_code(request: Request) -> str | None:
     return None
 
 
+def _m13_artifact_upload_validation_request(request: Request) -> bool:
+    """Recognize only the two M13 request shapes needing a stable 422 body."""
+    if request.method != "POST":
+        return False
+    parts = request.url.path.strip("/").split("/")
+    if len(parts) == 5 and parts[:3] == ["api", "v1", "invoices"]:
+        return parts[4] == "artifacts"
+    return (
+        len(parts) == 6
+        and parts[:3] == ["api", "v1", "invoices"]
+        and parts[4:] == ["artifacts", "validate-upload"]
+    )
+
+
 # ---------------------------------------------------------------------------
 # APScheduler jobs
 # ---------------------------------------------------------------------------
@@ -201,6 +215,16 @@ def create_app() -> FastAPI:
                     "detail": {
                         "code": code,
                         "message": "The payment input is invalid.",
+                    }
+                },
+            )
+        if _m13_artifact_upload_validation_request(request):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": {
+                        "code": "INVALID_ARTIFACT_UPLOAD_REQUEST",
+                        "message": "The artifact upload request is invalid.",
                     }
                 },
             )

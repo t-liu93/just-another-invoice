@@ -42,6 +42,10 @@ class TestDefaults:
     def test_app_version_default(self) -> None:
         assert Settings.model_fields["app_version"].default == "0.5.0"
 
+    def test_artifact_upload_limit_is_independent_from_receipt_limit(self) -> None:
+        assert Settings.model_fields["max_artifact_bytes"].default == 10 * 1024 * 1024
+        assert Settings(max_receipt_bytes=1).max_artifact_bytes == 10 * 1024 * 1024
+
     def test_database_url_default_is_none(self) -> None:
         """Code default is None (assembled by model_validator)."""
         assert Settings.model_fields["database_url"].default is None

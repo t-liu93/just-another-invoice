@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     storage_root: str = "./var/storage"
     # Maximum allowed size for receipt uploads (bytes). Default: 10 MB.
     max_receipt_bytes: int = 10 * 1024 * 1024
+    # Formal historical PDFs are retained in PostgreSQL, independently of
+    # receipt storage.  Do not couple this policy to max_receipt_bytes.
+    max_artifact_bytes: int = 10 * 1024 * 1024
 
     # -- SMTP env fallback (step 4) -----------------------------------------
     # These are used as fallback when no SMTP settings exist in the DB.

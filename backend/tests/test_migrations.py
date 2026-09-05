@@ -334,6 +334,38 @@ class TestMigrations:
             f"upgrade head failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
+    def test_0042_upload_enum_upgrade_and_non_destructive_downgrade_posture(self) -> None:
+        """UPLOAD is additive, and downgrade deliberately keeps the enum label."""
+        assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
+        assert _run_alembic("upgrade", "0041", url=self.url).returncode == 0
+        before = _query(
+            self.url,
+            "SELECT enumlabel FROM pg_enum WHERE enumtypid = 'documentartifactreason'::regtype "
+            "ORDER BY enumsortorder",
+        )
+        assert before == [{"enumlabel": "DOWNLOAD"}, {"enumlabel": "SEND"}]
+
+        assert _run_alembic("upgrade", "0042", url=self.url).returncode == 0
+        upgraded = _query(
+            self.url,
+            "SELECT enumlabel FROM pg_enum WHERE enumtypid = 'documentartifactreason'::regtype "
+            "ORDER BY enumsortorder",
+        )
+        assert upgraded == [
+            {"enumlabel": "DOWNLOAD"},
+            {"enumlabel": "SEND"},
+            {"enumlabel": "UPLOAD"},
+        ]
+
+        assert _run_alembic("downgrade", "0041", url=self.url).returncode == 0
+        retained = _query(
+            self.url,
+            "SELECT enumlabel FROM pg_enum WHERE enumtypid = 'documentartifactreason'::regtype "
+            "ORDER BY enumsortorder",
+        )
+        assert retained == upgraded
+        assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+
     def test_0040_downgrade_round_trip_without_refund_tombstones(self) -> None:
         """0040 remains reversible when no deleted Refund owner exists."""
         assert _run_alembic("upgrade", "0040", url=self.url).returncode == 0

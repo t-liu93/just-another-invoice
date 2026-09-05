@@ -939,6 +939,65 @@ async def test_artifact_database_constraints_are_not_api_only(
         await session.rollback()
 
 
+async def test_upload_artifact_trigger_is_first_invoice_artifact_only(
+    db_client: AsyncClient,
+    db_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """Raw SQL cannot bypass UPLOAD's issued/zero-artifact boundary."""
+    documents, seeds = await _all_formal_documents(db_client)
+    fresh_invoice_id = documents["FINAL"]["id"]
+    pdf_bytes = b"%PDF-1.4 uploaded historical bytes"
+    insert = text(
+        "INSERT INTO document_artifact "
+        "(id, company_id, invoice_id, artifact_kind, pdf_bytes, sha256, render_fingerprint, "
+        "locale, filename, creation_reason, renderer_version) "
+        "VALUES (:id, :company_id, :invoice_id, 'FORMAL_DOCUMENT', :pdf_bytes, :sha, "
+        ":fingerprint, 'en', 'legacy.pdf', 'UPLOAD', 'external-upload')"
+    )
+    params = {
+        "id": uuid.uuid4(),
+        "company_id": seeds["company_id"],
+        "invoice_id": fresh_invoice_id,
+        "pdf_bytes": pdf_bytes,
+        "sha": hashlib.sha256(pdf_bytes).hexdigest(),
+        "fingerprint": "a" * 64,
+    }
+
+    async with db_session_maker() as session:
+        await set_rls_company(session, seeds["company_id"])
+        await session.execute(insert, params)
+        await session.commit()
+
+        await set_rls_company(session, seeds["company_id"])
+        with pytest.raises(
+            DBAPIError, match="uploaded artifact requires an invoice with no artifacts"
+        ):
+            await session.execute(insert, {**params, "id": uuid.uuid4(), "fingerprint": "b" * 64})
+        await session.rollback()
+
+        # Refund artifacts retain their existing DOWNLOAD/SEND multi-version behaviour.
+        refund_bytes = b"%PDF-1.4 refund exact bytes"
+        await set_rls_company(session, seeds["company_id"])
+        await session.execute(
+            text(
+                "INSERT INTO document_artifact "
+                "(id, company_id, refund_payment_id, artifact_kind, pdf_bytes, sha256, "
+                "render_fingerprint, locale, filename, creation_reason, renderer_version) "
+                "VALUES (:id, :company_id, :refund_id, 'REFUND_CONFIRMATION', :pdf_bytes, "
+                ":sha, :fingerprint, 'en', 'refund.pdf', 'DOWNLOAD', 'test')"
+            ),
+            {
+                "id": uuid.uuid4(),
+                "company_id": seeds["company_id"],
+                "refund_id": documents["REFUND"]["id"],
+                "pdf_bytes": refund_bytes,
+                "sha": hashlib.sha256(refund_bytes).hexdigest(),
+                "fingerprint": "c" * 64,
+            },
+        )
+        await session.commit()
+
+
 async def test_artifact_byte_identity_is_owner_kind_and_sha_scoped(
     db_client: AsyncClient,
     db_session_maker: async_sessionmaker[AsyncSession],

@@ -263,6 +263,46 @@ class DocumentArtifactReason(enum.StrEnum):
 
     DOWNLOAD = "DOWNLOAD"
     SEND = "SEND"
+    UPLOAD = "UPLOAD"
+
+
+class DocumentArtifactValidationStatus(enum.StrEnum):
+    """Overall advisory result for a proposed formal-artifact upload."""
+
+    MATCH = "MATCH"
+    WARNING = "WARNING"
+    INCONCLUSIVE = "INCONCLUSIVE"
+
+
+class DocumentArtifactValidationConfidence(enum.StrEnum):
+    """Confidence attached to an advisory formal-artifact validation result."""
+
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+class DocumentArtifactValidationField(enum.StrEnum):
+    """A persisted issued-document fact checked by advisory validation."""
+
+    DOCUMENT_NUMBER = "DOCUMENT_NUMBER"
+    DOCUMENT_KIND = "DOCUMENT_KIND"
+    DOCUMENT_DATE = "DOCUMENT_DATE"
+    SUPPLY_OR_ADVANCE_DATE = "SUPPLY_OR_ADVANCE_DATE"
+    SELLER = "SELLER"
+    BUYER = "BUYER"
+    CURRENCY = "CURRENCY"
+    TOTAL_EXCL_VAT = "TOTAL_EXCL_VAT"
+    VAT_TOTAL = "VAT_TOTAL"
+    TOTAL_INCL_VAT = "TOTAL_INCL_VAT"
+
+
+class DocumentArtifactValidationCheckStatus(enum.StrEnum):
+    """Advisory outcome for one formal-artifact validation field."""
+
+    MATCH = "MATCH"
+    MISMATCH = "MISMATCH"
+    NOT_FOUND = "NOT_FOUND"
 
 
 class EmailStatus(enum.StrEnum):
