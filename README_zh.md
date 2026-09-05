@@ -6,7 +6,7 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——1.0 前版本（`v0.5.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.6.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
@@ -16,7 +16,7 @@
 - **收付款与退款** —— 分次收款、Quote 定金、自动结算状态、关联 Credit 的 Refund，以及 Refund Confirmation。
 - **开支** —— AI 票据识别填单、周期性开支、记账字段（付款来源 / 业务使用 % / 折旧年限）。
 - **客户与目录** —— 地址、VAT 号、每客户默认币种与单据语言；产品/材料目录。
-- **单据** —— 发票、报价、收据和 Refund Confirmation 的中英 PDF/邮件，包含发出时交易方快照及实际下载/发送成品的精确留存。
+- **单据** —— 发票、报价、收据和 Refund Confirmation 的中英 PDF/邮件，包含发出时交易方快照、实际下载/发送成品的精确留存，以及可选 AI 建议性比对的不可变历史 Invoice PDF 补传。
 - **报表** —— 盈亏（P/L）、**荷兰 BTW 申报汇总**、ICP 清单、开支报表和 ECharts 仪表盘，包含 Advance/Final/Credit 只计一次的投影。
 - **平台** —— TOTP 两步验证、类型化三层设置、`Decimal` 金额计算、双语界面（English / 中文）、单容器应用经 Docker Compose 部署。
 
@@ -54,7 +54,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.5.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.6.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-截至 M12 的里程碑均已完成。M12 已交付 Standard/Advance/Final Invoice、Credit Note、Refund 与统一单据流程。M13 Document Artifact 历史补传现为当前、设计已冻结的里程碑，实现尚未开始。详见 [`docs/plan/milestones/M13_zh.md`](docs/plan/milestones/M13_zh.md) 和 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
+M0–M13 里程碑均已完成。M13 为尚无留存 artifact 的已开具正式 Invoice 增加不可变历史 PDF 补传、可选的 AI 建议性比对，以及普通 Download/Send 对该原件的精确规范复用。详见 [`docs/plan/milestones/M13_zh.md`](docs/plan/milestones/M13_zh.md) 和 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
 
 ## 文档
 

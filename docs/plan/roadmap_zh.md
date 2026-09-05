@@ -243,18 +243,18 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **🟢 部署自测点**：接受一张含税 €8,000 的境内报价；记录 €1,600 和 €4,000 定金；下载 EN/ZH 报价收据并分别核对匹配的单语非 VAT 警示；发送本地化收据并查看来源单据的审计日志；仅转换一次得到显示已付 €5,600、应付 €2,400 的 DRAFT 发票；验证编辑/删除/再次转换/发出守卫；发出完整发票并收 €2,400 尾款；确认跨季度 BTW 提前确认定金且项目累计只计税一次。
 
 ### M12 · 发票生命周期扩展：Advance/Final Invoice 与 Credit Note｜单据线扩展
-- **状态**：🟢 已于 2026-09-02 完成、验收并冻结。全部编排步骤和盲审均已收敛；作者完成测试环境中的风险导向 walkthrough，并以自动化证据验收其余低频路径。M13 现为当前 Document Artifact follow-on。详见 `milestones/M12_zh.md`。
+- **状态**：🟢 已于 2026-09-02 完成、验收并冻结。全部编排步骤和盲审均已收敛；作者完成测试环境中的风险导向 walkthrough，并以自动化证据验收其余低频路径。M13 Document Artifact follow-on 随后于 2026-09-05 完成并验收。详见 `milestones/M12_zh.md`。
 - **目标**：把当前 invoice 模型扩展成可审计的单据家族，覆盖一次性 Standard Invoice、分期正式 Advance/Final Invoice、现有个人客户 receipt-only 定金路径，以及用于更正或冲销已发出发票的关联 Credit Note。
 - **关键内容**：Quote 锁定的 `DIRECT_INVOICE`/`RECEIPT_ONLY`/`FORMAL_ADVANCE` 模式；`STANDARD`/`ADVANCE`/`FINAL`/`CREDIT_NOTE` 类型；gross/percentage Advance 与一张受守卫 Final；规范化 application 和不可变剩余 credit basis；全额/部分且绑定来源的 Credit；独立 Credit 编号；正数且关联 Credit 的 Refund 台账；replacement/compensation/project-cancellation 流程；相互独立的 lifecycle/settlement/credit 状态；BTW/ICP/P&L/Dashboard 只计一次；发出时交易方快照；保留实际 Download/Send 的精确 PDF 成品；统一列表和完整单据链时间线。
 - **冻结边界**：正式 Advance/Final 只支持 `NL_DOMESTIC`；Credit 继承来源现有的全部 VAT treatment。Standalone/unallocated credit、receipt-only Quote 定金退款/重新应用、overpayment、selected-line Advance、多币种/FX、荷兰语 locale 和应用内 VAT filing lock 继续延期。更正只产生结构化 warning。
 - **原子交付 / 验收**：11 个实现步骤覆盖底座/迁移、mode+chain 审计、Advance、Final、Credit、重开/取消、Refund 结算、报表、输出/artifact、前端和收尾。自动化覆盖完整 18 项矩阵；作者的风险导向 walkthrough 实测 Direct、receipt-only、50/50、20/50/30 的 21%/0% 混合税率、取消/Credit/Refund 和报表对账；较少使用的 9%、FX、ICP 以自动化证据验收，不再重复人工操作。
 
 ### M13 · Document Artifact 历史补传｜单据输出 follow-on
-- **状态**：🟡 当前里程碑；设计于 2026-09-02 冻结，实现尚未开始。详见 `milestones/M13_zh.md`。
+- **状态**：🟢 已于 2026-09-05 完成、验收并冻结。4 个编排步骤、盲审/返工循环及自动化收尾门禁均已收敛；作者通过 Standard Invoice Happy Path，并以自动化证据验收未执行的负向及 Advance/Final/Credit Note 人工路径。详见 `milestones/M13_zh.md`。
 - **目标**：让一张尚无任何保留 artifact 的已开具正式 Invoice，接收一份来自旧 JAI 部署、旧开票系统或外部工具的精确历史 PDF。
 - **关键内容**：全部四种正式 Invoice kind 仅零 artifact 时可上传 PDF；不可变精确字节 + `UPLOAD` provenance；作为当前 locale/fingerprint 的 canonical Download/Send artifact 复用；后续结算/locale/renderer 变化仍可产生新 artifact；固定提示词、显式可选触发且不阻断的 AI 字段对照 EN/ZH checklist；并发安全的 upload/Download/Send 首动作；复用现有 workflow 的紧凑 UI。
 - **冻结边界**：存在任何 artifact 后不可上传；无 replace/delete/primary selector、清理 CLI、artifact/AI audit trail、AI 结果落库、Refund Confirmation 上传、OCR 导入或会计数据变更。保留已有多 artifact 历史。原先的笼统 wrap-up 占位已取消，被移出的运维想法放在 §4.aa。
-- **原子交付**：四个步骤覆盖 contract/enum/文件校验、精确上传+canonical 输出复用、可选 AI 参考对照，以及前端/回归收尾。
+- **原子交付 / 验收**：四个步骤已交付 contract/enum/文件校验、精确上传+canonical 输出复用、可选 AI 参考对照，以及前端/回归收尾。最终自动化通过 Ruff、mypy、1243 项默认测试和 1074 项 PostgreSQL integration 测试、OpenAPI codegen freshness、148 项前端测试、EN/ZH key 对称、前端与 Docker build 以及 CJK PDF smoke。walkthrough 还产出并验证了按用途限定的 AI 输出预算修正：票据提取 1024 tokens、artifact 比对 4096、能力探测 512。
 - **🟢 部署自测点**：向零 artifact 的已开具 Invoice 上传旧 PDF；验证可选 AI warning 从不阻断确认；普通 Download/Send 复用上传的精确字节；改变结算状态后验证出现新 artifact，且原件仍 byte-identical 并可下载。
 
 ---
@@ -380,6 +380,6 @@ docs/
 | M11 | 里程支出（私人交通工具商用） | 🟢 完成（2026-08-21；orchestrator 步骤 1–5 盲审收敛；完整自动化门禁全绿；作者 walkthrough 验收；两项 walkthrough UX 修复均经零 finding 复审；见 `milestones/M11_zh.md`） |
 | M11.5 | 报价定金与最终发票结算 | 🟢 完成（2026-08-28；2026-08-27 base 实现的恢复式编排盲审与里程碑跨步骤总审均收敛至无 finding；编排式收据邮件 refinement 增加本地化单语警示与按来源审计的邮件，经三轮 fixup/复审收敛，并通过 Ruff/mypy/默认 1067/integration 872/migrations 14/codegen 无漂移/build/i18n 1236/Docker；作者人工 walkthrough 验收无 finding；无法重建 base milestone 历史逐 Step commits） |
 | M12 | Advance/Final Invoice 与 Credit Note | 🟢 完成（2026-09-02；编排 Step 1–11 与盲审均收敛；Ruff/mypy/默认 1125/integration 1065、迁移、codegen、前端 Node/Vitest 122 + build + EN/ZH 1423、Docker/CJK PDF 全绿；作者风险导向 walkthrough 与最终测试数据只读审计通过；5 项 walkthrough refinement 已修复） |
-| M13 | Document Artifact 历史补传 | 🟡 当前（设计于 2026-09-02 冻结；4 个原子步骤；实现尚未开始） |
+| M13 | Document Artifact 历史补传 | 🟢 完成（2026-09-05；编排 Step 1–4 与盲审均收敛；AI 输出预算 walkthrough 修正复审零 finding；Ruff/mypy/默认 1243/integration 1074、迁移、codegen、前端 148 + build + EN/ZH 1458、Docker/CJK PDF 全绿；作者 Standard Invoice Happy Path 通过，其余人工路径以自动化证据验收） |
 
 > 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）

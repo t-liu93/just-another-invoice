@@ -2,7 +2,7 @@
 
 > 🌐 [English](M13.md) · **中文**
 
-> **状态**：🟡 当前里程碑 · 设计于 2026-09-02 冻结；实现尚未开始。本文取代原来未拆步骤的“收尾 / GA 前体检”占位。被移出的运维加固设想改为在[路线图 §4.aa](../roadmap_zh.md) 的当前里程碑之外跟踪。
+> **状态**：🟢 已于 2026-09-05 完成、验收并冻结。4 个编排实现步骤、盲审/返工循环和自动化收尾门禁均已收敛。作者通过 Standard Invoice Happy Path，并以自动化证据验收未执行的负向及 Advance/Final/Credit Note 人工路径。本文取代了原来未拆步骤的“收尾 / GA 前体检”占位。被移出的运维加固设想继续在[路线图 §4.aa](../roadmap_zh.md) 的已完成里程碑路线之外跟踪。
 
 ## 执行模式
 
@@ -252,4 +252,10 @@ PDF 在内存中 rasterise。在 `ai_pdf_max_pages` 上限内，以确定性顺�
 
 ## 验收结论
 
-只在实现完成、盲审收敛、自动化收尾及作者里程碑级 walkthrough 完成后填写。
+M13 已于 2026-09-05 完成、验收并冻结。4 个编排步骤交付了范围有界的零 artifact 上传合同、不可变 `UPLOAD` 持久化、Download/Send 精确规范复用、可选建议性 AI 比对和完整的 Invoice Detail 工作流。每轮实现与返工均由全新 reviewer 盲审，全部 review 循环收敛，当前没有未解决 finding。
+
+最终自动化通过 Ruff、117 个源文件的 strict mypy、1243 项默认测试、1074 项 PostgreSQL integration 测试、到 revision 0042 的 fresh 与 production-head 迁移检查、OpenAPI codegen freshness、148 项前端测试、1458 个 EN/ZH key 对称、前端 build、生产 Docker build 和容器内 CJK PDF smoke。隔离的 tmpfs PostgreSQL 容器和临时 cache 均已删除；开发数据库为 walkthrough 保留，生产数据和服务没有被触碰。
+
+作者使用真实旧系统 PDF 完成 Standard Invoice Happy Path：显式 AI 比对、不可变上传、artifact 历史和默认语言的 canonical 复用均按设计工作。来源应用最初导出的字节在 PDF 前包含一段字面 HTTP 响应头；删除这段非 PDF 前缀后，在不改变 PDF payload 的前提下得到有效文件。walkthrough 证据还暴露了 provider 截断（`finish_reason=length`）；共用 transport 现按用途使用不同 completion 预算：票据提取 1024 tokens、artifact 比对 4096、能力探测 512，后续盲审也已零 finding 收敛。
+
+作者因没有合适 fixture，明确跳过其余人工负向路径以及 Advance、Final、Credit Note 变体；自动化套件中的合同、校验、并发、RLS、artifact identity 和回归覆盖被接受为这些路径的里程碑证据。AI 始终明确为可选建议：provider 失败或结论 inconclusive 都不会改变会计数据，也不会阻断经人工复核的有效上传。M13 没有未解决的验收 finding。

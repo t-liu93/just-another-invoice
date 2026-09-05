@@ -21,7 +21,7 @@
   - **storage 抽象（M8 已立）**：`services/storage.py` 的 `Storage`/`LocalStorage`。**M9 PDF 即时渲染、不落盘**（见〔已冻结决策〕D5），故 storage 仍只服务 M8 收据；M9 不写 storage，但其抽象保持可复用（将来 PDF 缓存接此口）。
   - `invoice.unique_hash` / `quote` 同名列：M5/M6 已留注释「Reserved for M9 public link」——**v1 不启用公开链接**，本里程碑只保留字段、不写入、不暴露。
   - **下游 M10**：VAT 申报 / 报表是另一条线，M9 不碰。
-  - **原收尾占位**：EN/ZH 全局复查和备份原先分配给一个笼统的下游 M13。2026-09-02 该占位被取消，这些未排期想法移入[路线图 §4.aa](../roadmap_zh.md)；当前 M13 已改为 Document Artifact 历史补传。
+  - **原收尾占位**：EN/ZH 全局复查和备份原先分配给一个笼统的下游 M13。2026-09-02 该占位被取消，这些未排期想法移入[路线图 §4.aa](../roadmap_zh.md)；作为替代的 M13 Document Artifact 历史补传已于 2026-09-05 完成并验收。
 
 ---
 

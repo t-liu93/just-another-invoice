@@ -6,7 +6,7 @@ Self-hosted invoicing and small-business administration for freelancers and smal
 
 Built with **FastAPI + Vue 3 + PostgreSQL**.
 
-> **Status — pre-1.0 (`v0.5.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
+> **Status — pre-1.0 (`v0.6.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
 
 ## Features
 
@@ -16,7 +16,7 @@ Built with **FastAPI + Vue 3 + PostgreSQL**.
 - **Payments & refunds** — partial payments, Quote deposits, automatic settlement states, Credit-linked Refunds, and Refund Confirmations.
 - **Expenses** — AI receipt extraction, recurring expenses, bookkeeping fields (paid-by / business-use % / depreciation years).
 - **Customers & catalog** — addresses, VAT IDs, per-customer currency & document language; product/material catalog.
-- **Documents** — EN/ZH PDFs and email for invoices, quotes, receipts and Refund Confirmations, with issue-time party snapshots and exact downloaded/sent artifact retention.
+- **Documents** — EN/ZH PDFs and email for invoices, quotes, receipts and Refund Confirmations, with issue-time party snapshots, exact downloaded/sent artifact retention, and immutable historical Invoice PDF backfill with optional advisory AI comparison.
 - **Reports** — Profit & Loss, **Dutch BTW VAT-return summary**, ICP listing, expense report, and an ECharts dashboard, including exactly-once Advance/Final/Credit projections.
 - **Platform** — TOTP two-factor auth, typed three-tier settings, `Decimal` money math, bilingual UI (English / 中文), single-container app deployed via Docker Compose.
 
@@ -55,7 +55,7 @@ Open **http://localhost:8000**, register the first (owner) account, and set up T
 
 To stop: `docker compose down` (add `-v` to also drop the database volume).
 
-> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.5.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
+> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.6.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
 
 ## Configuration
 
@@ -85,7 +85,7 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-Milestones through M12 are complete. M12 delivered Standard/Advance/Final Invoices, Credit Notes, Refunds and the unified document workflow. M13 Document Artifact Backfill is now the active, design-frozen milestone; implementation has not started. See [`docs/plan/milestones/M13.md`](docs/plan/milestones/M13.md) and [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
+Milestones M0–M13 are complete. M13 adds immutable historical PDF backfill for issued formal Invoices with no retained artifact, optional advisory AI comparison, and exact canonical reuse by ordinary Download/Send actions. See [`docs/plan/milestones/M13.md`](docs/plan/milestones/M13.md) and [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
 
 ## Documentation
 
