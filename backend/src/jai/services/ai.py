@@ -281,23 +281,9 @@ def _attachment_to_images(mime_type: str, raw_bytes: bytes) -> list[bytes]:
 
         doc = pdfium.PdfDocument(raw_bytes)
         try:
-            page_count = len(doc)
-            max_pages = settings.ai_pdf_max_pages
-            pages_to_render = min(page_count, max_pages)
-            scale = settings.ai_pdf_render_scale
-
-            images: list[bytes] = []
-            for i in range(pages_to_render):
-                page = doc[i]
-                bitmap = page.render(scale=scale)
-                pil_image = bitmap.to_pil()
-                # Convert to RGB if necessary (avoids issues with RGBA PDFs)
-                if pil_image.mode not in ("RGB", "L"):
-                    pil_image = pil_image.convert("RGB")
-                buf = io.BytesIO()
-                pil_image.save(buf, format="PNG", optimize=False)
-                images.append(buf.getvalue())
-            return images
+            return rasterize_pdf_pages(
+                raw_bytes, list(range(min(len(doc), settings.ai_pdf_max_pages)))
+            )
         finally:
             doc.close()
 
@@ -305,6 +291,36 @@ def _attachment_to_images(mime_type: str, raw_bytes: bytes) -> list[bytes]:
         f"Unsupported MIME type for AI extraction: {mime_type!r}. "
         "Only image/* and application/pdf are supported."
     )
+
+
+def rasterize_pdf_pages(raw_bytes: bytes, page_indexes: list[int]) -> list[bytes]:
+    """Rasterise selected zero-based PDF pages to PNG bytes in memory.
+
+    The caller owns page selection.  Keeping it separate allows formal-artifact
+    validation to include both the first and final pages without changing the
+    receipt extractor's historical first-N behaviour.
+    """
+    import pypdfium2 as pdfium
+
+    document = pdfium.PdfDocument(raw_bytes)
+    try:
+        page_count = len(document)
+        if not page_indexes or any(index < 0 or index >= page_count for index in page_indexes):
+            raise ValueError("PDF page selection is invalid.")
+        scale = get_settings().ai_pdf_render_scale
+        images: list[bytes] = []
+        for index in page_indexes:
+            page = document[index]
+            bitmap = page.render(scale=scale)
+            pil_image = bitmap.to_pil()
+            if pil_image.mode not in ("RGB", "L"):
+                pil_image = pil_image.convert("RGB")
+            buffer = io.BytesIO()
+            pil_image.save(buffer, format="PNG", optimize=False)
+            images.append(buffer.getvalue())
+        return images
+    finally:
+        document.close()
 
 
 # ---------------------------------------------------------------------------
@@ -394,12 +410,10 @@ async def _call_chat_completions(
     }
     url = f"{base_url.rstrip('/')}/chat/completions"
 
-    async def _do_post(
-        _client: httpx.AsyncClient, body: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _do_post(_client: httpx.AsyncClient, body: dict[str, Any]) -> object:
         resp = await _client.post(url, json=body, headers=headers)
         resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        return resp.json()
 
     base_body: dict[str, Any] = {
         "model": model,
@@ -433,13 +447,24 @@ async def _call_chat_completions(
             else:
                 data = await _do_post(_client, base_body)
 
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError("AI response contained no choices.")
-    message = choices[0].get("message") or {}
-    content = message.get("content", "")
+    # OpenAI-compatible gateways occasionally return successful HTTP responses
+    # with a provider-specific error envelope.  Validate every node before
+    # accessing it, and never include that envelope in the exception: it can
+    # contain model output or provider diagnostics that must not reach logs.
+    if not isinstance(data, dict):
+        raise RuntimeError("AI response has an invalid chat completion envelope.")
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("AI response has an invalid chat completion envelope.")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise RuntimeError("AI response has an invalid chat completion envelope.")
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        raise RuntimeError("AI response has an invalid chat completion envelope.")
+    content = message.get("content")
     if not isinstance(content, str):
-        raise RuntimeError(f"Unexpected AI response content type: {type(content)!r}")
+        raise RuntimeError("AI response has an invalid chat completion envelope.")
     return content
 
 

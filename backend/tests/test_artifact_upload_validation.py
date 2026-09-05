@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -25,7 +26,13 @@ from jai.models._enums import (
     DocumentArtifactValidationField,
     DocumentArtifactValidationStatus,
 )
+from jai.schemas.artifact import DocumentArtifactValidationRead
+from jai.services import artifact_validation as validation_service
 from jai.services import artifacts as artifact_service
+from jai.services.artifact_validation import (
+    ArtifactAIConfigurationError,
+    ArtifactAIValidationError,
+)
 from jai.services.artifacts import (
     ArtifactFileValidationError,
     normalize_uploaded_artifact_filename,
@@ -78,6 +85,29 @@ def artifact_upload_owner(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         )
 
     monkeypatch.setattr(artifact_service, "create_uploaded_invoice_artifact", retain)
+
+    async def validate(*args: object, **kwargs: object) -> DocumentArtifactValidationRead:
+        del args
+        return DocumentArtifactValidationRead(
+            file_sha256="c" * 64,
+            status=DocumentArtifactValidationStatus.INCONCLUSIVE,
+            confidence=None,
+            summary="Advisory result.",
+            total_pages=1,
+            checked_pages=[1],
+            checks=[
+                {
+                    "field": field,
+                    "status": DocumentArtifactValidationCheckStatus.NOT_FOUND,
+                    "expected_value": None,
+                    "observed_value": None,
+                    "note": None,
+                }
+                for field in DocumentArtifactValidationField
+            ],
+        )
+
+    monkeypatch.setattr(pdf_api, "validate_uploaded_invoice_artifact", validate)
     try:
         yield
     finally:
@@ -93,8 +123,8 @@ def _artifact_upload_urls() -> tuple[str, str]:
 
 
 def _accepted_body_status(url: str) -> int:
-    """Step 2 retains valid uploads; Step 3's validation endpoint remains a stub."""
-    return 501 if "validate-upload" in url else 201
+    """Both endpoints accept a valid bounded body before their later work."""
+    return 200 if "validate-upload" in url else 201
 
 
 @pytest.mark.asyncio
@@ -156,6 +186,91 @@ async def test_artifact_upload_parameter_validation_has_stable_non_file_envelope
                 "message": "The artifact upload request is invalid.",
             }
         }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_status", "expected_code"),
+    [
+        (ArtifactAIConfigurationError("private configuration detail"), 409, "AI_NOT_CONFIGURED"),
+        (ArtifactAIValidationError("private provider detail"), 502, "AI_VALIDATION_FAILED"),
+    ],
+)
+async def test_artifact_validation_maps_only_stable_ai_errors(
+    client: AsyncClient,
+    valid_pdf: bytes,
+    artifact_upload_owner: None,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    async def fail(*args: object, **kwargs: object) -> DocumentArtifactValidationRead:
+        del args, kwargs
+        raise failure
+
+    monkeypatch.setattr(pdf_api, "validate_uploaded_invoice_artifact", fail)
+    headers, body = _multipart_body([("file", "historic.pdf", valid_pdf)])
+    response = await client.post(_artifact_upload_urls()[1], headers=headers, content=body)
+    assert response.status_code == expected_status
+    assert response.json() == {
+        "detail": {
+            "code": expected_code,
+            "message": (
+                "AI validation is not configured."
+                if expected_status == 409
+                else "AI validation failed."
+            ),
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_empty_expected_match_with_unexpected_value_maps_to_stable_502(
+    client: AsyncClient,
+    valid_pdf: bytes,
+    artifact_upload_owner: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The parser's conservative empty-expected rule reaches the stable API error."""
+    async def parse_inconsistent_result(
+        *args: object, **kwargs: object
+    ) -> DocumentArtifactValidationRead:
+        del args, kwargs
+        expected = {field: "expected" for field in DocumentArtifactValidationField}
+        field = DocumentArtifactValidationField.SUPPLY_OR_ADVANCE_DATE
+        expected[field] = None
+        raw = json.dumps(
+            {
+                "summary": "Checked document.",
+                "confidence": "HIGH",
+                "checks": [
+                    {
+                        "field": item.value,
+                        "status": "MATCH",
+                        "observed_value": "unexpected-date" if item == field else "seen",
+                        "note": None,
+                    }
+                    for item in DocumentArtifactValidationField
+                ],
+            }
+        )
+        validation_service._parse_result(raw, expected)
+        raise AssertionError("inconsistent AI result must not parse")
+
+    monkeypatch.setattr(
+        pdf_api, "validate_uploaded_invoice_artifact", parse_inconsistent_result
+    )
+    headers, body = _multipart_body([("file", "historic.pdf", valid_pdf)])
+    response = await client.post(_artifact_upload_urls()[1], headers=headers, content=body)
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": {
+            "code": "AI_VALIDATION_FAILED",
+            "message": "AI validation failed.",
+        }
+    }
 
 
 @pytest.mark.asyncio

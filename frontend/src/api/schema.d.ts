@@ -1382,7 +1382,7 @@ export interface paths {
         put?: never;
         /**
          * Upload Invoice Artifact Endpoint
-         * @description Contract stub; Step 2 will validate and retain the exact uploaded PDF.
+         * @description Validate then retain one exact historical formal-document PDF.
          */
         post: operations["upload_invoice_artifact_endpoint_api_v1_invoices__invoice_id__artifacts_post"];
         delete?: never;
@@ -1419,7 +1419,7 @@ export interface paths {
         put?: never;
         /**
          * Validate Invoice Artifact Upload Endpoint
-         * @description Contract stub; Step 3 will perform the explicit advisory AI comparison.
+         * @description Explicit, advisory-only comparison; neither AI nor PDF bytes are retained.
          */
         post: operations["validate_invoice_artifact_upload_endpoint_api_v1_invoices__invoice_id__artifacts_validate_upload_post"];
         delete?: never;

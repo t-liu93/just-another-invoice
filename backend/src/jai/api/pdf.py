@@ -51,6 +51,11 @@ from jai.schemas.artifact import (
     DocumentArtifactValidationFailedErrorResponse,
     DocumentArtifactValidationRead,
 )
+from jai.services.artifact_validation import (
+    ArtifactAIConfigurationError,
+    ArtifactAIValidationError,
+    validate_uploaded_invoice_artifact,
+)
 from jai.services.artifacts import (
     ArtifactFileValidationError,
     ensure_invoice_artifact_upload_eligible,
@@ -462,14 +467,31 @@ async def validate_invoice_artifact_upload_endpoint(
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentArtifactValidationRead:
-    """Contract stub; Step 3 will perform the explicit advisory AI comparison."""
+    """Explicit, advisory-only comparison; neither AI nor PDF bytes are retained."""
     _owner_only(user)
+    company_id = _require_company_id(user)
     await ensure_invoice_artifact_upload_eligible(
-        session, invoice_id=invoice_id, company_id=_require_company_id(user)
+        session, invoice_id=invoice_id, company_id=company_id
     )
     content, _ = await _read_and_validate_artifact_upload(request)
-    del content, invoice_id, language, session
-    _artifact_upload_not_implemented()
+    try:
+        return await validate_uploaded_invoice_artifact(
+            session,
+            invoice_id=invoice_id,
+            company_id=company_id,
+            pdf_bytes=content,
+            language=language,
+        )
+    except ArtifactAIConfigurationError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "AI_NOT_CONFIGURED", "message": "AI validation is not configured."},
+        ) from None
+    except ArtifactAIValidationError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "AI_VALIDATION_FAILED", "message": "AI validation failed."},
+        ) from None
 
 
 @router.get(
