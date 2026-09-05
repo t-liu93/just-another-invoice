@@ -97,7 +97,8 @@
 ### 基于角色选择模型（harness 原生，提示词可覆盖）
 - 下列模型名称只是**示例映射，不是跨厂商硬性要求**。每种 agent harness 应从自身实际支持的模型与 reasoning 等级中选择；示例不可用时，使用该 harness 中最接近的等价项。
 - **orchestrator / reviewer**：使用该 harness 中能力最强的推理模型，并采用相当于 extra-high 的 reasoning 等级。例如：Claude Code → **Opus + Extra High Reasoning**；OpenAI 系 harness → **`gpt-5.6-sol` + `xhigh`**。
-- **implementer / fixer**：同一类、逻辑一致；使用该 harness 中均衡型的编码模型，并根据任务复杂度采用 **medium 或 high reasoning**，不要求最高 reasoning 等级。例如：Claude Code → **Sonnet + Medium/High Reasoning**；OpenAI 系 harness → **`gpt-5.6-terra` + `medium`/`high`**。
+- **implementer / fixer**：默认使用该 harness 中均衡型的编码模型，并采用 **medium reasoning**。例如：Claude Code → **Sonnet + Medium Reasoning**；OpenAI 系 harness → **`gpt-5.6-terra` + `medium`**。
+- **fixer 成本优化**：当 finding 只需很小、局部、低风险的改动，且不是阻碍该步骤推进的问题时，fixer 可以使用该 harness 中更经济的原生模型。例如：OpenAI 系 harness → **`gpt-5.6-luna`**。否则继续使用上面的默认均衡型编码模型。
 - 作者在提示词里显式指定别的模型 / reasoning 等级时，当前 harness 支持则**以提示词为准**；不支持时使用最接近的可用等价项。
 
 ### 逐步循环（orchestrator 模式 · 作者要求“一步一步实现”时）

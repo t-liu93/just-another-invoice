@@ -97,7 +97,8 @@ A self-hosted **invoicing / personal-company management system**, for the author
 ### Role-based model selection (harness-native; prompt can override)
 - The model names below are **illustrative mappings, not cross-provider requirements**. Each agent harness selects from the models and reasoning levels it actually supports; if an example is unavailable, use the closest harness-native equivalent.
 - **orchestrator / reviewer**: use the harness's highest-capability reasoning model with its extra-high-equivalent reasoning level. Examples: Claude Code → **Opus + Extra High Reasoning**; OpenAI harnesses → **`gpt-5.6-sol` + `xhigh`**.
-- **implementer / fixer**: same kind, consistent logic; use the harness's balanced coding model with **medium or high reasoning**, chosen according to task complexity. The highest reasoning level is not required. Examples: Claude Code → **Sonnet + Medium/High Reasoning**; OpenAI harnesses → **`gpt-5.6-terra` + `medium`/`high`**.
+- **implementer / fixer**: use the harness's balanced coding model with **medium reasoning** by default. Examples: Claude Code → **Sonnet + Medium Reasoning**; OpenAI harnesses → **`gpt-5.6-terra` + `medium`**.
+- **fixer cost optimization**: when a finding requires only a small, localized, low-risk change and is not blocking the step, the fixer may use a more cost-efficient harness-native model. Example: OpenAI harnesses → **`gpt-5.6-luna`**. Otherwise, keep the default balanced coding model above.
 - When the author explicitly specifies a different model / reasoning level in the prompt, **the prompt wins** when supported; otherwise use the closest available equivalent.
 
 ### Per-step loop (orchestrator mode · when the author asks to "implement step by step")
