@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import en from '../../src/locales/en.json'
+import zh from '../../src/locales/zh.json'
 
-const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() }))
+const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), postFile: vi.fn(), put: vi.fn(), del: vi.fn(), downloadBlob: vi.fn(), ApiError: class ApiError extends Error { detail: unknown; constructor(detail: unknown) { super('API error'); this.detail = detail } } }))
 const naive = vi.hoisted(() => ({
   inheritAttrs: false,
   emits: ['click', 'positive-click', 'update:show'],
@@ -28,7 +29,7 @@ modal: {
   template: '<section v-if="show"><slot /><button data-positive @click="$emit(\'positive-click\')">confirm</button><button data-negative @click="$emit(\'negative-click\')">cancel</button></section>',
 },
 }))
-vi.mock('../../src/api/http', () => ({ ...http, downloadBlob: vi.fn(), ApiError: class ApiError extends Error {} }))
+vi.mock('../../src/api/http', () => ({ ...http, ApiError: http.ApiError }))
 vi.mock('naive-ui', () => ({
   NAlert: naive, NButton: actionButton, NCard: naive, NCollapse: naive, NCollapseItem: naive, NDatePicker: naive,
   NDescriptions: naive, NDescriptionsItem: naive, NDivider: naive,
@@ -125,6 +126,244 @@ describe('DocumentWorkflowPanel target action projection', () => {
 
     expect(http.get).toHaveBeenCalledWith('/api/v1/invoices/source/artifacts')
     expect(wrapper.text()).toContain('issued.pdf')
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('No retained documents yet.')
+  })
+
+  it('keeps the original-upload workflow explicit, advisory, and refreshes after upload', async () => {
+    http.get.mockResolvedValue({ items: [] })
+    http.postFile.mockResolvedValueOnce({ file_sha256: 'a'.repeat(64), status: 'MATCH', confidence: 'HIGH', summary: 'Looks consistent', total_pages: 1, checked_pages: [1], checks: [{ field: 'DOCUMENT_NUMBER', status: 'MATCH', expected_value: 'INV-1', observed_value: 'INV-1', note: null }] })
+      .mockResolvedValueOnce({ id: 'uploaded' })
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    expect(http.postFile).not.toHaveBeenCalled()
+    const file = new File(['%PDF-1.7'], 'historical original.pdf', { type: 'application/pdf' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+    expect(http.postFile).not.toHaveBeenCalled()
+    await action(wrapper, 'Check with AI').trigger('click')
+    await flushPromises()
+    expect(http.postFile).toHaveBeenCalledWith('/api/v1/invoices/source/artifacts/validate-upload?language=en', file)
+    expect(wrapper.text()).toContain('Looks consistent')
+    await action(wrapper, 'Upload as original artifact').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('historical original.pdf')
+    expect(wrapper.text()).toContain('Invoice')
+    expect(wrapper.text()).toContain('no delete or replace action')
+    await wrapper.findAll('[data-positive]').at(-1)!.trigger('click')
+    await flushPromises()
+    expect(http.postFile).toHaveBeenLastCalledWith('/api/v1/invoices/source/artifacts', file)
+    expect(http.get.mock.calls.filter(([url]) => url === '/api/v1/invoices/source/artifacts').length).toBeGreaterThan(1)
+  })
+
+  it.each([
+    ['en', en, 'Partial check: pages 1, 5 of 5 were checked.', 'Partial check'],
+    ['zh', zh, '部分检查：已检查第 1, 5 页，共 5 页。', '部分检查'],
+  ] as const)('shows advisory page coverage and keeps upload available in %s', async (locale, messages, coverage, partialLabel) => {
+    http.get.mockReset(); http.postFile.mockReset()
+    http.get.mockResolvedValue({ items: [] })
+    http.postFile.mockResolvedValueOnce({ file_sha256: 'b'.repeat(64), status: 'MATCH', confidence: 'MEDIUM', summary: 'Advisory result', total_pages: 5, checked_pages: [1, 5], checks: [] })
+    const localizedI18n = createI18n({ legacy: false, locale, messages: { [locale]: messages } })
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [localizedI18n], stubs } })
+    await flushPromises()
+    const file = new File(['%PDF-1.7'], 'partial.pdf', { type: 'application/pdf' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+    await action(wrapper, locale === 'en' ? 'Check with AI' : '使用 AI 检查').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="validation-page-coverage"]').text()).toContain(coverage)
+    expect(wrapper.text()).toContain(partialLabel)
+    expect(wrapper.text()).toContain('1, 5')
+    expect(wrapper.text()).toContain('5')
+    expect(action(wrapper, locale === 'en' ? 'Upload as original artifact' : '上传为原始文档').exists()).toBe(true)
+  })
+
+  it('uploads directly after selecting a file without calling AI', async () => {
+    http.get.mockReset(); http.postFile.mockReset()
+    http.get.mockResolvedValue({ items: [] })
+    http.postFile.mockResolvedValueOnce({ id: 'uploaded' })
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, invoice_number: 'INV-42', document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const file = new File(['%PDF-1.7'], 'original exact name.pdf', { type: 'application/pdf' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+    expect(http.postFile).not.toHaveBeenCalled()
+    await action(wrapper, 'Upload as original artifact').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('INV-42')
+    expect(wrapper.text()).toContain('original exact name.pdf')
+    expect(wrapper.text()).toContain('no delete or replace action')
+    await wrapper.findAll('[data-positive]').at(-1)!.trigger('click')
+    await flushPromises()
+    expect(http.postFile).toHaveBeenCalledTimes(1)
+    expect(http.postFile).toHaveBeenCalledWith('/api/v1/invoices/source/artifacts', file)
+    expect(http.postFile.mock.calls.some(([url]) => String(url).includes('/validate-upload'))).toBe(false)
+  })
+
+  it('rejects bad browser files and clears an earlier AI result when the selection changes', async () => {
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    ;(wrapper.vm as any).validation = { status: 'MATCH', summary: 'old', checks: [] }
+    ;(wrapper.vm as any).onArtifactFileChange({ target: { files: [new File(['x'], 'not.pdf', { type: 'text/plain' })] } })
+    expect((wrapper.vm as any).validation).toBeNull()
+    expect((wrapper.vm as any).uploadError).toContain('PDF')
+    ;(wrapper.vm as any).onArtifactFileChange({ target: { files: [new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'large.pdf', { type: 'application/pdf' })] } })
+    expect((wrapper.vm as any).uploadError).toContain('10 MiB')
+    const boundary = new File([new Uint8Array(10 * 1024 * 1024)], 'limit.pdf', { type: 'application/pdf' })
+    ;(wrapper.vm as any).onArtifactFileChange({ target: { files: [boundary] } })
+    expect((wrapper.vm as any).uploadError).toBeNull()
+    expect((wrapper.vm as any).uploadFile.name).toBe('limit.pdf')
+  })
+
+  it('leaves uploads available after skipped or failed AI checks and refreshes a 409 winner', async () => {
+    http.get.mockReset(); http.postFile.mockReset()
+    http.get.mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce({ items: [{ id: 'winner', filename: 'winner.pdf', locale: 'en', creation_reason: 'DOWNLOAD' }] })
+    http.postFile.mockRejectedValueOnce(new http.ApiError({ detail: { code: 'AI_NOT_CONFIGURED' } }))
+      .mockRejectedValueOnce(new http.ApiError({ detail: { code: 'ARTIFACT_ALREADY_EXISTS' } }))
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const file = new File(['%PDF-1.7'], 'exact name.pdf', { type: 'application/pdf' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+    await action(wrapper, 'Check with AI').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('AI is not configured')
+    expect((wrapper.vm as any).uploadFile.name).toBe(file.name)
+    expect(action(wrapper, 'Upload as original artifact').exists()).toBe(true)
+    await action(wrapper, 'Upload as original artifact').trigger('click'); await wrapper.vm.$nextTick()
+    await wrapper.findAll('[data-positive]').at(-1)!.trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('Another Download')
+    expect(wrapper.text()).toContain('winner.pdf')
+    expect(wrapper.text()).not.toContain('Upload as original artifact')
+    expect(wrapper.text()).not.toContain('No retained documents yet.')
+    expect(http.get.mock.calls.filter(([url]) => url === '/api/v1/invoices/source/artifacts').length).toBeGreaterThan(1)
+  })
+
+  it('refreshes a validate 409 to the winner while retaining the conflict explanation', async () => {
+    http.get.mockReset(); http.postFile.mockReset()
+    http.get.mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce({ items: [{ id: 'winner', filename: 'download-winner.pdf', locale: 'en', creation_reason: 'DOWNLOAD' }] })
+    http.postFile.mockRejectedValueOnce(new http.ApiError({ detail: { code: 'ARTIFACT_ALREADY_EXISTS' } }))
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['%PDF'], 'original.pdf', { type: 'application/pdf' })] })
+    await input.trigger('change')
+    await action(wrapper, 'Check with AI').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('Another Download')
+    expect(wrapper.text()).toContain('download-winner.pdf')
+    expect(wrapper.text()).not.toContain('Upload as original artifact')
+    expect(wrapper.text()).not.toContain('No retained documents yet.')
+  })
+
+  it('does not let stale AI success, failure, or finally mutate a newer owner, file, or lifecycle state', async () => {
+    http.get.mockReset(); http.postFile.mockReset(); http.get.mockResolvedValue({ items: [] })
+    const first = deferred<any>(); const second = deferred<any>()
+    http.postFile.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise)
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, id: 'A', document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const fileA = new File(['%PDF'], 'a.pdf', { type: 'application/pdf' })
+    ;(wrapper.vm as any).uploadFile = fileA
+    const requestA = (wrapper.vm as any).checkArtifactWithAi()
+    await wrapper.setProps({ invoice: { ...invoice, id: 'B', document_kind: 'STANDARD' } })
+    await flushPromises()
+    const fileB = new File(['%PDF'], 'b.pdf', { type: 'application/pdf' })
+    ;(wrapper.vm as any).uploadFile = fileB
+    const requestB = (wrapper.vm as any).checkArtifactWithAi()
+    first.resolve({ file_sha256: 'c'.repeat(64), status: 'MATCH', confidence: 'HIGH', summary: 'A-only result', total_pages: 1, checked_pages: [1], checks: [] })
+    await requestA; await wrapper.vm.$nextTick()
+    expect((wrapper.vm as any).validatingUpload).toBe(true)
+    expect(wrapper.text()).not.toContain('A-only result')
+    second.resolve({ file_sha256: 'd'.repeat(64), status: 'MATCH', confidence: 'HIGH', summary: 'B-only result', total_pages: 1, checked_pages: [1], checks: [] })
+    await requestB; await flushPromises()
+    expect(wrapper.text()).toContain('B-only result')
+    expect((wrapper.vm as any).validatingUpload).toBe(false)
+
+    const stale = deferred<any>(); http.postFile.mockImplementationOnce(() => stale.promise)
+    const requestC = (wrapper.vm as any).checkArtifactWithAi()
+    await wrapper.setProps({ invoice: { ...invoice, id: 'B', document_kind: 'STANDARD', status: 'DRAFT' } })
+    stale.reject(new http.ApiError({ detail: { code: 'AI_VALIDATION_FAILED' } }))
+    await requestC; await flushPromises()
+    expect(wrapper.text()).not.toContain('AI check could not be completed')
+    expect((wrapper.vm as any).validatingUpload).toBe(false)
+  })
+
+  it.each(['MATCH', 'WARNING', 'INCONCLUSIVE', 'NOT_FOUND'] as const)('keeps upload available after advisory AI %s', async (status) => {
+    http.get.mockReset(); http.postFile.mockReset(); http.get.mockResolvedValue({ items: [] })
+    http.postFile.mockResolvedValueOnce({ file_sha256: 'e'.repeat(64), status, confidence: null, summary: status, total_pages: 1, checked_pages: [1], checks: [] })
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    ;(wrapper.vm as any).uploadFile = new File(['%PDF'], `${status}.pdf`, { type: 'application/pdf' })
+    await wrapper.vm.$nextTick()
+    await action(wrapper, 'Check with AI').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain(status === 'MATCH' ? 'Match' : status === 'WARNING' ? 'Warning' : status === 'NOT_FOUND' ? 'Not found' : 'Inconclusive')
+    expect(action(wrapper, 'Upload as original artifact').attributes('disabled')).toBeUndefined()
+  })
+
+  it('shows a recoverable provider/file error with the localized Settings entry and blocks duplicate AI/upload actions', async () => {
+    http.get.mockReset(); http.postFile.mockReset(); http.get.mockResolvedValue({ items: [] })
+    const pending = deferred<any>(); const pendingUpload = deferred<any>()
+    http.postFile.mockImplementationOnce(() => pending.promise).mockImplementationOnce(() => pendingUpload.promise)
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['%PDF'], 'retry.pdf', { type: 'application/pdf' })] })
+    await input.trigger('change')
+    const checking = action(wrapper, 'Check with AI').trigger('click'); await action(wrapper, 'Check with AI').trigger('click')
+    expect(http.postFile).toHaveBeenCalledTimes(1)
+    pending.reject(new http.ApiError({ detail: { code: 'AI_VALIDATION_FAILED' } })); await checking; await flushPromises()
+    expect(wrapper.text()).toContain('AI check could not be completed')
+    expect(wrapper.text()).toContain('Open Settings → AI')
+    expect(action(wrapper, 'Upload as original artifact').exists()).toBe(true)
+    await action(wrapper, 'Upload as original artifact').trigger('click'); await wrapper.vm.$nextTick()
+    const confirm = wrapper.findAll('[data-positive]').at(-1)!
+    await confirm.trigger('click'); await wrapper.vm.$nextTick()
+    expect(action(wrapper, 'Upload as original artifact').attributes('disabled')).toBeDefined()
+    await confirm.trigger('click');
+    expect(http.postFile).toHaveBeenCalledTimes(2)
+    pendingUpload.resolve({ id: 'uploaded' }); await flushPromises()
+  })
+
+  it.each(['STANDARD', 'ADVANCE', 'FINAL', 'CREDIT_NOTE'] as const)('shows the empty-artifact form for issued %s but never for drafts', async (document_kind) => {
+    http.get.mockReset(); http.get.mockResolvedValue({ items: [] })
+    const issued = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, id: `issued-${document_kind}`, document_kind, status: 'SENT' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises(); expect(issued.find('input[type="file"]').exists()).toBe(true)
+    ;(issued.vm as any).uploadFile = new File(['%PDF'], `${document_kind}.pdf`, { type: 'application/pdf' })
+    await issued.vm.$nextTick(); expect(issued.text()).toContain('Upload as original artifact')
+    const draft = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, id: `draft-${document_kind}`, document_kind, status: 'DRAFT' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises(); expect(draft.text()).not.toContain('Upload as original artifact')
+  })
+
+  it('uses the retained filename for historical download', async () => {
+    http.get.mockReset(); http.get.mockResolvedValue({ items: [{ id: 'retained', filename: 'exact historical name.pdf', locale: 'en', creation_reason: 'UPLOAD' }] })
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    await (wrapper.vm as any).downloadArtifact('retained', 'exact historical name.pdf')
+    expect(http.downloadBlob).toHaveBeenCalledWith('/api/v1/invoices/source/artifacts/retained', 'exact historical name.pdf')
+  })
+
+  it.each([
+    ['en', en, 'Original historical PDF', 'Choose a valid PDF file and try again.', 'Check with AI', 'Upload as original artifact', ['AI check could not be completed', 'Open Settings → AI', 'external AI provider']],
+    ['zh', zh, '历史原始 PDF', '请选择有效的 PDF 文件后重试。', '使用 AI 检查', '上传为原始文档', ['AI 检查未能完成', '打开设置 → AI', '外部 AI 服务商']],
+  ] as const)('shows the localized invalid-PDF error and requires reselection after AI validation in %s', async (_locale, messages, fileLabel, invalidMessage, checkLabel, submitLabel, absentPrompts) => {
+    http.get.mockReset(); http.postFile.mockReset(); http.get.mockResolvedValue({ items: [] })
+    http.postFile.mockRejectedValueOnce(new http.ApiError({ detail: { code: 'INVALID_ARTIFACT_FILE' } }))
+    const localizedI18n = createI18n({ legacy: false, locale: _locale, messages: { [_locale]: messages } })
+    const wrapper = mount(DocumentWorkflowPanel, { props: { invoice: { ...invoice, document_kind: 'STANDARD' }, documentChain: baseChain }, global: { plugins: [localizedI18n], stubs } })
+    await flushPromises()
+    const input = wrapper.find('input[type="file"]')
+    expect(input.attributes('aria-label')).toBe(fileLabel)
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['%PDF'], 'bad.pdf', { type: 'application/pdf' })] })
+    await input.trigger('change')
+    await action(wrapper, checkLabel).trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(invalidMessage)
+    for (const prompt of absentPrompts) expect(wrapper.text()).not.toContain(prompt)
+    expect((wrapper.vm as any).uploadFile).toBeNull()
+    expect(wrapper.findAll('button[data-action-button]').some(button => button.text().includes(submitLabel))).toBe(false)
+    expect(http.postFile).toHaveBeenCalledTimes(1)
   })
 
   it('loads Credit refunds and their retained output only after the Credit is issued', async () => {

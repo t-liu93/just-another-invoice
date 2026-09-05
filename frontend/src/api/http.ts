@@ -142,6 +142,17 @@ export function uploadFile<T>(
   })
 }
 
+/** POST multipart/form-data without manually setting the boundary. */
+export function postFile<T>(
+  url: string,
+  file: File,
+  fieldName: string = 'file',
+): Promise<T> {
+  const formData = new FormData()
+  formData.append(fieldName, file)
+  return http<T>(url, { method: 'POST', body: formData })
+}
+
 /**
  * Fetch a binary resource (e.g. PDF) and trigger a browser download.
  *

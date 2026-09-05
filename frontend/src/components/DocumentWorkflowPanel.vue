@@ -7,13 +7,14 @@ import {
   NCollapse, NCollapseItem, NDivider, NEmpty, NForm, NFormItem, NInput, NList,
   NListItem, NModal, NSelect, NSpace, NSpin, NTag, NText,
 } from 'naive-ui'
-import { del, get, post, put, downloadBlob, ApiError } from '../api/http'
+import { del, get, post, postFile, put, downloadBlob, ApiError } from '../api/http'
 import type { components } from '../api/schema'
 import { localDateStr } from '../utils/date'
 import { advanceIntent, availableAction, creditIntent, type CreditIntentRow, uniqueTimelineNodes } from '../utils/lifecycleWorkflow'
 import { invoiceDocumentKindLabelKey } from '../utils/documentKind'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
 import DocumentSendDialog from './DocumentSendDialog.vue'
+import { useSettingsPanel } from '../composables/useSettingsPanel'
 
 type Chain = components['schemas']['DocumentChainRead']
 type InvoiceRead = components['schemas']['InvoiceRead']
@@ -24,6 +25,7 @@ type DocumentArtifactListResponse = components['schemas']['DocumentArtifactListR
 type PaymentInput = components['schemas']['PaymentInput']
 type PaymentRead = components['schemas']['PaymentRead']
 type PaymentMutationResponse = components['schemas']['PaymentMutationResponse']
+type DocumentArtifactValidationRead = components['schemas']['DocumentArtifactValidationRead']
 
 const props = defineProps<{
   quoteId?: string | null
@@ -38,8 +40,9 @@ const props = defineProps<{
   chainError?: string | null
 }>()
 const emit = defineEmits<{ changed: []; continuationCancelled: [] }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
+const { open: openSettings } = useSettingsPanel()
 
 const chain = ref<Chain | null>(null)
 const loading = ref(false)
@@ -80,6 +83,15 @@ const refundSendShow = ref(false)
 const refundPreviewShow = ref(false)
 const refundPreviewSrc = ref<string | null>(null)
 const artifacts = ref<DocumentArtifactListResponse | null>(null)
+const uploadFile = ref<File | null>(null)
+const artifactFileInput = ref<HTMLInputElement | null>(null)
+const uploadError = ref<string | null>(null)
+type UploadNoticeKind = 'AI_REVIEW' | 'ARTIFACT_CONFLICT'
+const uploadNotice = ref<{ kind: UploadNoticeKind; message: string } | null>(null)
+const validation = ref<DocumentArtifactValidationRead | null>(null)
+const validatingUpload = ref(false)
+const uploadingArtifact = ref(false)
+const showArtifactUploadConfirm = ref(false)
 const refundArtifacts = ref<Record<string, DocumentArtifactListResponse>>({})
 const refundMethodId = ref<string | null>(null)
 const refundReference = ref<string | null>(null)
@@ -106,6 +118,7 @@ let cancellationGeneration = 0
 let loadGeneration = 0
 let issuedOutputGeneration = 0
 let contextGeneration = 0
+let artifactUploadGeneration = 0
 let busyOwner: 'advance-preview' | 'credit-preview' | 'credit-source' | 'cancellation-preview' | null = null
 const paymentMethods = ref<Array<{ id: string; name: string }>>([])
 
@@ -117,6 +130,7 @@ const isCredit = computed(() => props.invoice?.document_kind === 'CREDIT_NOTE')
 // still need their parent-owned chain, totals, and actions, but must not ask
 // issued-only endpoints for resources that do not exist yet.
 const hasIssuedOutput = computed(() => ['SENT', 'COMPLETED'].includes(props.invoice?.status ?? ''))
+const canUploadArtifact = computed(() => hasIssuedOutput.value && artifacts.value?.items.length === 0)
 // An invoice and a quote can share a UUID in imported data, but they are
 // separate route owners and must not inherit one another's UI state.
 const documentOwnerKey = computed(() => {
@@ -214,6 +228,106 @@ function errorText(cause: unknown): string {
   }
   return t('workflow.errors.UNKNOWN')
 }
+function apiCode(cause: unknown): string | null {
+  if (!(cause instanceof ApiError)) return null
+  const detail = cause.detail as { detail?: { code?: string }; code?: string }
+  return detail?.detail?.code ?? detail?.code ?? null
+}
+function invalidateArtifactUpload(): void {
+  ++artifactUploadGeneration
+  validatingUpload.value = false
+  uploadingArtifact.value = false
+  showArtifactUploadConfirm.value = false
+}
+function resetUploadSelection(): void {
+  invalidateArtifactUpload()
+  uploadFile.value = null
+  validation.value = null
+  uploadError.value = null
+  uploadNotice.value = null
+  showArtifactUploadConfirm.value = false
+}
+function onArtifactFileChange(event: Event): void {
+  invalidateArtifactUpload()
+  const file = (event.target as HTMLInputElement).files?.[0] ?? null
+  validation.value = null
+  uploadError.value = null
+  uploadNotice.value = null
+  showArtifactUploadConfirm.value = false
+  if (!file) { uploadFile.value = null; return }
+  if (file.type !== 'application/pdf') { uploadFile.value = null; uploadError.value = t('workflow.upload.invalidType'); return }
+  if (file.size > 10 * 1024 * 1024) { uploadFile.value = null; uploadError.value = t('workflow.upload.tooLarge'); return }
+  uploadFile.value = file
+}
+function rejectInvalidArtifactFile(cause: unknown): void {
+  // Server-side PDF parsing can reject a browser-accepted MIME/size pair.
+  // Drop that File so it cannot be confirmed without an explicit re-selection.
+  invalidateArtifactUpload()
+  uploadFile.value = null
+  validation.value = null
+  uploadNotice.value = null
+  uploadError.value = errorText(cause)
+  if (artifactFileInput.value) artifactFileInput.value.value = ''
+}
+async function checkArtifactWithAi(): Promise<void> {
+  if (!invoiceId.value || !uploadFile.value || validatingUpload.value || uploadingArtifact.value) return
+  const generation = ++artifactUploadGeneration
+  const owner = documentOwnerKey.value
+  const id = invoiceId.value
+  const file = uploadFile.value
+  validatingUpload.value = true; uploadError.value = null; uploadNotice.value = null
+  try {
+    const result = await postFile<DocumentArtifactValidationRead>(`/api/v1/invoices/${id}/artifacts/validate-upload?language=${locale.value === 'zh' ? 'zh' : 'en'}`, file)
+    if (generation !== artifactUploadGeneration || owner !== documentOwnerKey.value || id !== invoiceId.value || file !== uploadFile.value || !canUploadArtifact.value) return
+    validation.value = result
+  } catch (cause) {
+    if (generation !== artifactUploadGeneration || owner !== documentOwnerKey.value || id !== invoiceId.value || file !== uploadFile.value || !canUploadArtifact.value) return
+    validation.value = null
+    const code = apiCode(cause)
+    if (code === 'ARTIFACT_ALREADY_EXISTS') {
+      uploadNotice.value = { kind: 'ARTIFACT_CONFLICT', message: t('workflow.upload.conflict') }
+      await loadIssuedOutput(++issuedOutputGeneration)
+    } else if (code === 'INVALID_ARTIFACT_FILE') {
+      rejectInvalidArtifactFile(cause)
+    } else {
+      uploadNotice.value = { kind: 'AI_REVIEW', message: code === 'AI_NOT_CONFIGURED' ? t('workflow.upload.aiNotConfigured') : t('workflow.upload.aiFailed') }
+    }
+  } finally {
+    if (generation === artifactUploadGeneration && owner === documentOwnerKey.value && id === invoiceId.value && file === uploadFile.value) validatingUpload.value = false
+  }
+}
+function requestArtifactUpload(): void {
+  if (!uploadFile.value || uploadingArtifact.value || validatingUpload.value) return
+  showArtifactUploadConfirm.value = true
+}
+async function confirmArtifactUpload(): Promise<void> {
+  if (!invoiceId.value || !uploadFile.value || uploadingArtifact.value) return
+  const generation = ++artifactUploadGeneration
+  const owner = documentOwnerKey.value
+  const id = invoiceId.value
+  const file = uploadFile.value
+  uploadingArtifact.value = true; uploadError.value = null; uploadNotice.value = null
+  try {
+    await postFile(`/api/v1/invoices/${id}/artifacts`, file)
+    if (generation !== artifactUploadGeneration || owner !== documentOwnerKey.value || id !== invoiceId.value || file !== uploadFile.value || !canUploadArtifact.value) return
+    showArtifactUploadConfirm.value = false
+    resetUploadSelection()
+    await loadIssuedOutput(++issuedOutputGeneration)
+  } catch (cause) {
+    if (generation !== artifactUploadGeneration || owner !== documentOwnerKey.value || id !== invoiceId.value || file !== uploadFile.value || !canUploadArtifact.value) return
+    showArtifactUploadConfirm.value = false
+    if (apiCode(cause) === 'ARTIFACT_ALREADY_EXISTS') {
+      uploadNotice.value = { kind: 'ARTIFACT_CONFLICT', message: t('workflow.upload.conflict') }
+      await loadIssuedOutput(++issuedOutputGeneration)
+    } else uploadError.value = errorText(cause)
+  } finally {
+    if (generation === artifactUploadGeneration && owner === documentOwnerKey.value && id === invoiceId.value && file === uploadFile.value) uploadingArtifact.value = false
+  }
+}
+function validationStatusType(status: string): 'success' | 'warning' | 'info' {
+  return status === 'MATCH' ? 'success' : status === 'MISMATCH' || status === 'WARNING' ? 'warning' : 'info'
+}
+function validationFieldText(field: string): string { return t(`workflow.upload.fields.${field}`, field) }
 async function loadPaymentMethods(): Promise<void> {
   if (paymentMethods.value.length) return
   try {
@@ -254,6 +368,7 @@ function resetWorkflowState(invoice: InvoiceRead | null | undefined): void {
   refundSendId.value = null; refundSendShow.value = false; refundPreviewShow.value = false; refundPreviewSrc.value = null
   pendingFollowup.value = null; showFollowupConfirm.value = false; showRefundConfirm.value = false; showCancellationConfirm.value = false
   showAdvance.value = false; showFinal.value = false; showCredit.value = false; showCancellation.value = false
+  resetUploadSelection()
   busy.value = false; busyOwner = null; error.value = null
   if (invoice?.document_kind === 'ADVANCE') {
     advanceMode.value = invoice.advance_input_mode ?? 'GROSS_AMOUNT'
@@ -372,6 +487,10 @@ watch(
       return
     }
     if (status === previous[1]) return
+    invalidateArtifactUpload()
+    validation.value = null
+    uploadError.value = null
+    uploadNotice.value = null
     if (hasIssuedOutput.value) void loadIssuedOutput(++issuedOutputGeneration)
     else invalidateIssuedOutput()
   },
@@ -540,10 +659,10 @@ async function downloadRefundConfirmation(paymentId: string): Promise<void> {
 }
 function openRefundSend(paymentId: string): void { refundSendId.value = paymentId; refundSendShow.value = true }
 async function refundSent(): Promise<void> { await load() }
-async function downloadArtifact(id: string): Promise<void> {
+async function downloadArtifact(id: string, filename: string): Promise<void> {
   if (!invoiceId.value || busy.value) return
   busy.value = true
-  try { await downloadBlob(`/api/v1/invoices/${invoiceId.value}/artifacts/${id}`, `artifact-${id}.pdf`) }
+  try { await downloadBlob(`/api/v1/invoices/${invoiceId.value}/artifacts/${id}`, filename) }
   catch (cause) { error.value = errorText(cause) } finally { busy.value = false }
 }
 async function downloadRefundArtifact(paymentId: string, artifactId: string, filename: string): Promise<void> {
@@ -646,8 +765,19 @@ async function downloadRefundArtifact(paymentId: string, artifactId: string, fil
         <template v-if="artifacts">
           <n-divider>{{ t('workflow.artifacts') }}</n-divider>
           <n-text depth="3">{{ t('workflow.artifactHint') }}</n-text>
-          <n-list v-if="artifacts.items.length" bordered class="workflow-scroll"><n-list-item v-for="artifact in artifacts.items" :key="artifact.id">{{ artifact.filename }} · {{ artifact.locale }} · {{ artifactReasonText(artifact.creation_reason) }} <n-button text :disabled="busy" @click="downloadArtifact(artifact.id)">{{ t('workflow.historicalDownload') }}</n-button></n-list-item></n-list>
-          <n-empty v-else :description="t('workflow.noArtifacts')" size="small" />
+          <n-list v-if="artifacts.items.length" bordered class="workflow-scroll"><n-list-item v-for="artifact in artifacts.items" :key="artifact.id">{{ artifact.filename }} · {{ artifact.locale }} · {{ artifactReasonText(artifact.creation_reason) }} <n-button text :disabled="busy" @click="downloadArtifact(artifact.id, artifact.filename)">{{ t('workflow.historicalDownload') }}</n-button></n-list-item></n-list>
+          <n-alert v-if="uploadNotice" type="info" style="margin-top:8px">{{ uploadNotice.message }} <n-button v-if="uploadNotice.kind === 'AI_REVIEW'" text type="primary" @click="openSettings('ai')">{{ t('workflow.upload.openAiSettings') }}</n-button></n-alert>
+          <template v-if="canUploadArtifact && uploadNotice?.kind !== 'ARTIFACT_CONFLICT'">
+            <n-alert type="warning" style="margin-top:8px">{{ t('workflow.upload.permanentWarning') }}</n-alert>
+            <n-form class="workflow-form" style="margin-top:8px">
+              <n-form-item :label="t('workflow.upload.fileLabel')"><input ref="artifactFileInput" :aria-label="t('workflow.upload.fileLabel')" type="file" accept="application/pdf,.pdf" :disabled="validatingUpload || uploadingArtifact" @change="onArtifactFileChange" /></n-form-item>
+              <n-text depth="3">{{ t('workflow.upload.sizeHint') }}</n-text>
+              <n-alert v-if="uploadError" type="error" style="margin-top:8px">{{ uploadError }}</n-alert>
+              <template v-if="uploadFile"><n-alert type="info" style="margin-top:8px">{{ t('workflow.upload.aiPrivacy') }}</n-alert><n-space style="margin-top:8px"><n-button :loading="validatingUpload" :disabled="uploadingArtifact" @click="checkArtifactWithAi">{{ t('workflow.upload.checkAi') }}</n-button><n-button type="primary" :loading="uploadingArtifact" :disabled="validatingUpload || uploadingArtifact" @click="requestArtifactUpload">{{ t('workflow.upload.submit') }}</n-button></n-space></template>
+            </n-form>
+            <n-alert v-if="validation" :type="validationStatusType(validation.status)" style="margin-top:8px"><strong>{{ t(`workflow.upload.status.${validation.status}`) }}</strong> · {{ validation.summary }}<div data-testid="validation-page-coverage" style="margin-top:8px">{{ t(validation.checked_pages.length < validation.total_pages ? 'workflow.upload.partialPageCheck' : 'workflow.upload.completePageCheck', { pages: validation.checked_pages.join(', '), total: validation.total_pages }) }}</div><n-list bordered style="margin-top:8px"><n-list-item v-for="check in validation.checks" :key="check.field"><n-tag :type="validationStatusType(check.status)">{{ t(`workflow.upload.status.${check.status}`) }}</n-tag> {{ validationFieldText(check.field) }}: {{ check.expected_value ?? '—' }} → {{ check.observed_value ?? '—' }}<span v-if="check.note"> · {{ check.note }}</span></n-list-item></n-list></n-alert>
+          </template>
+          <n-empty v-if="!artifacts.items.length && !(canUploadArtifact && uploadNotice?.kind !== 'ARTIFACT_CONFLICT')" :description="t('workflow.noArtifacts')" size="small" />
         </template>
       </n-space>
     </n-spin>
@@ -662,6 +792,7 @@ async function downloadRefundArtifact(paymentId: string, artifactId: string, fil
   <n-modal v-model:show="showFollowupConfirm" preset="dialog" class="workflow-modal" :title="t('workflow.followupConfirmTitle')" :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" :loading="busy" @positive-click="createFollowup"><n-alert v-if="error" type="error">{{ error }}</n-alert><n-text>{{ t('workflow.creditTitle') }}: {{ invoice?.invoice_number ?? invoice?.id }} · {{ t('workflow.basisLine') }}: {{ nodeLabels.get(followupContext?.source_invoice_id ?? '') ?? sourceLabel }} · {{ t(`workflow.relations.${followupContext?.relation_type ?? ''}`, followupContext?.relation_type ?? '—') }} · {{ followupContext ? t(invoiceDocumentKindLabelKey(followupContext.target_document_kind)) : '—' }} · {{ followupContext?.gross_amount ?? '—' }}</n-text></n-modal>
   <n-modal v-model:show="showCancellation" preset="card" class="workflow-modal" :title="t('workflow.cancellationTitle')" style="max-width: 520px"><n-button :loading="busy" @click="previewCancellation">{{ t('workflow.previewCancellation') }}</n-button><n-list v-if="cancellationPreview" bordered class="workflow-scroll" style="margin-top: 12px"><n-list-item v-for="source in cancellationPreview.sources" :key="source.source_invoice_id">{{ source.source_invoice_number }} · {{ source.remaining_gross_amount }}</n-list-item></n-list><n-button v-if="cancellationPreview" type="error" :disabled="busy" style="margin-top: 12px" @click="requestCancellation">{{ t('workflow.createCancellationDrafts') }}</n-button></n-modal>
   <n-modal v-model:show="showCancellationConfirm" preset="dialog" class="workflow-modal" :title="t('workflow.cancellationConfirmTitle')" :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" :loading="busy" @positive-click="createCancellation"><n-alert v-if="error" type="error">{{ error }}</n-alert><n-text>{{ t('workflow.cancellationConfirm') }}</n-text><n-list v-if="cancellationPreview" bordered style="margin-top:8px"><n-list-item v-for="source in cancellationPreview.sources" :key="source.source_invoice_id">{{ source.source_invoice_number }} · {{ t(invoiceDocumentKindLabelKey(source.document_kind)) }} · {{ source.remaining_net_amount }} + {{ source.remaining_vat_amount }} = {{ source.remaining_gross_amount }}</n-list-item></n-list></n-modal>
+  <n-modal v-model:show="showArtifactUploadConfirm" preset="dialog" class="workflow-modal" :title="t('workflow.upload.confirmTitle')" :positive-text="t('workflow.upload.confirm')" :negative-text="t('common.cancel')" :loading="uploadingArtifact" @positive-click="confirmArtifactUpload"><n-text>{{ t('workflow.upload.confirmBody', { invoice: invoice?.invoice_number ?? invoiceId, filename: uploadFile?.name }) }}</n-text></n-modal>
   <PdfPreviewDialog v-model:show="refundPreviewShow" :src="refundPreviewSrc" fallback-filename="refund-confirmation.pdf" />
   <DocumentSendDialog v-if="refundSendId" v-model:show="refundSendShow" doc-type="refund" :doc-id="refundSendId" :customer-email="invoice?.party_snapshot_customer_email" :customer-locale="invoice?.party_snapshot_locale" @sent="refundSent" />
 </template>
