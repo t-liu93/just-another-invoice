@@ -40,6 +40,7 @@ Coverage:
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -54,6 +55,7 @@ from jai.services.ai import (
     _PROBE_PNG_BYTES,
     DEFAULT_RECEIPT_PROMPT,
     _attachment_to_images,
+    _call_chat_completions,
     _language_context,
     _parse_model_output,
     _safe_date,
@@ -137,6 +139,40 @@ def test_default_receipt_prompt_not_empty() -> None:
 def test_output_contract_not_empty() -> None:
     assert len(_OUTPUT_CONTRACT) > 20
     assert "JSON" in _OUTPUT_CONTRACT
+
+
+_MISSING_FINISH_REASON = object()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "finish_reason",
+    [_MISSING_FINISH_REASON, None, "stop", "tool_calls"],
+    ids=["missing", "explicit-null", "stop", "other-provider-value"],
+)
+async def test_chat_completion_accepts_normal_or_missing_finish_reason(
+    finish_reason: object,
+) -> None:
+    choice: dict[str, object] = {"message": {"content": "{}"}}
+    if finish_reason is not _MISSING_FINISH_REASON:
+        choice["finish_reason"] = finish_reason
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"choices": [choice]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _call_chat_completions(
+            base_url="https://example.test",
+            api_key="test-key",
+            model="vision",
+            messages=[{"role": "user", "content": []}],
+            client=client,
+        )
+
+    assert result == "{}"
+    assert len(captured) == 1
 
 
 def test_output_contract_in_default_prompt_combination() -> None:
@@ -398,9 +434,15 @@ def test_parse_model_output_extra_keys_ignored() -> None:
     assert result["supplier_name"] == "X"
 
 
-def test_parse_model_output_malformed_json() -> None:
-    result = _parse_model_output("not json at all {")
+def test_parse_model_output_malformed_json_does_not_log_raw_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="jai.ai")
+    private_raw_content = "private-receipt-raw-model-output sk-secret prompt-data-url"
+    result = _parse_model_output(private_raw_content + " {")
     assert result == {}
+    assert "AI: could not parse JSON from model output" in caplog.text
+    assert private_raw_content not in caplog.text
 
 
 def test_parse_model_output_empty_string() -> None:
@@ -1655,6 +1697,7 @@ async def test_probe_request_does_not_contain_response_format() -> None:
         "Probe request must not contain response_format; "
         "it would misclassify json-mode-unsupported endpoints as non-multimodal"
     )
+    assert body["max_tokens"] == 512
 
 
 @pytest.mark.asyncio
@@ -1731,6 +1774,8 @@ async def test_extraction_retries_without_response_format_on_400() -> None:
     second_body = _json.loads(calls[1].content)
     assert "response_format" in first_body
     assert "response_format" not in second_body
+    assert first_body["max_tokens"] == 1024
+    assert second_body["max_tokens"] == 1024
     # Result is correctly populated from the retry
     assert prefill.supplier_name == "RetryShop"
     assert prefill.net_amount == Decimal("42")
@@ -1782,6 +1827,7 @@ async def test_extraction_request_contains_response_format_on_success() -> None:
     # response_format should be present in normal extraction
     assert "response_format" in body
     assert body["response_format"] == {"type": "json_object"}
+    assert body["max_tokens"] == 1024
     assert prefill.supplier_name == "OKShop"
 
 

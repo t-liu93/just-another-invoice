@@ -70,6 +70,10 @@ from jai.services.storage import get_storage
 
 logger = logging.getLogger("jai.ai")
 
+_DEFAULT_COMPLETION_MAX_TOKENS = 512
+RECEIPT_EXTRACTION_MAX_TOKENS = 1_024
+ARTIFACT_VALIDATION_MAX_TOKENS = 4_096
+
 # ---------------------------------------------------------------------------
 # Probe image (built-in minimal PNG, used for connectivity/multimodal testing)
 # ---------------------------------------------------------------------------
@@ -194,6 +198,10 @@ class _ChatChoice(BaseModel):
 
 class _ChatResponse(BaseModel):
     choices: list[_ChatChoice]
+
+
+class ChatCompletionTruncatedError(RuntimeError):
+    """The provider stopped because the requested completion budget was exhausted."""
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +384,7 @@ async def _call_chat_completions(
     client: httpx.AsyncClient | None = None,
     *,
     request_json_mode: bool = True,
+    max_tokens: int = _DEFAULT_COMPLETION_MAX_TOKENS,
 ) -> str:
     """POST to {base_url}/chat/completions and return the response text.
 
@@ -418,7 +427,7 @@ async def _call_chat_completions(
     base_body: dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "max_tokens": 512,
+        "max_tokens": max_tokens,
     }
     body_with_json_mode = {**base_body, "response_format": {"type": "json_object"}}
 
@@ -459,6 +468,10 @@ async def _call_chat_completions(
     choice = choices[0]
     if not isinstance(choice, dict):
         raise RuntimeError("AI response has an invalid chat completion envelope.")
+    if choice.get("finish_reason") == "length":
+        # Do not parse or report partial content: it may be incomplete JSON and
+        # must never appear in an exception or log message.
+        raise ChatCompletionTruncatedError("AI response was truncated.")
     message = choice.get("message")
     if not isinstance(message, dict):
         raise RuntimeError("AI response has an invalid chat completion envelope.")
@@ -534,7 +547,7 @@ def _parse_model_output(raw_text: str) -> dict[str, Any]:
         cleaned = _strip_code_fence(raw_text)
         data = json.loads(cleaned)
     except (json.JSONDecodeError, ValueError):
-        logger.debug("AI: could not parse JSON from model output: %r", raw_text[:200])
+        logger.debug("AI: could not parse JSON from model output")
         return {}
 
     if not isinstance(data, dict):
@@ -685,6 +698,7 @@ async def extract_from_attachment(
             model=ai_cfg.model,
             messages=messages,
             client=client,
+            max_tokens=RECEIPT_EXTRACTION_MAX_TOKENS,
         )
     except httpx.TimeoutException as exc:
         logger.warning("AI: request timed out for attachment %s", attachment_id)

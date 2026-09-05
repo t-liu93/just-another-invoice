@@ -278,7 +278,7 @@ async def test_validation_prompt_and_expected_values_use_complete_frozen_party_s
         )
 
     async def call(*, messages: list[dict[str, Any]], **kwargs: object) -> str:
-        del kwargs
+        assert kwargs["max_tokens"] == 4096
         captured_prompts.append(messages[0]["content"][-1]["text"])
         return _response({field: "MATCH" for field in DocumentArtifactValidationField})
 
@@ -517,6 +517,138 @@ async def test_malformed_chat_completion_envelopes_map_to_safe_artifact_error(
     assert "private-envelope" not in caplog.text
     assert "top-secret" not in caplog.text
     assert "private-pdf" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_length_finish_reason_is_safe_artifact_error_without_retry_or_content_logging(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def config(session: object) -> AiSettings:
+        del session
+        return AiSettings(
+            enabled=True,
+            base_url="https://example.test",
+            api_key="top-secret",
+            model="vision",
+        )
+
+    class OnePage:
+        def __init__(self, data: bytes) -> None:
+            del data
+
+        def __len__(self) -> int:
+            return 1
+
+        def close(self) -> None:
+            pass
+
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        assert json.loads(request.content)["max_tokens"] == 4096
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": "private-raw-model-content"},
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(validation.ai_service, "_get_ai_config", config)  # type: ignore[attr-defined]
+    monkeypatch.setattr(validation.pdfium, "PdfDocument", OnePage)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        validation.ai_service, "rasterize_pdf_pages", lambda *args: [b"png"]
+    )  # type: ignore[attr-defined]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(validation.ArtifactAIValidationError, match="AI validation failed"):
+            await validation.validate_uploaded_invoice_artifact(
+                _Session(_invoice()),  # type: ignore[arg-type]
+                invoice_id=uuid.uuid4(),
+                company_id=uuid.uuid4(),
+                pdf_bytes=b"private-pdf",
+                language="en",
+                client=client,
+            )
+
+    assert len(calls) == 1
+    for private_value in ("private-raw-model-content", "top-secret", "private-pdf"):
+        assert private_value not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_artifact_json_mode_400_fallback_preserves_4096_token_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def config(session: object) -> AiSettings:
+        del session
+        return AiSettings(
+            enabled=True,
+            base_url="https://example.test",
+            api_key="top-secret",
+            model="vision",
+        )
+
+    class OnePage:
+        def __init__(self, data: bytes) -> None:
+            del data
+
+        def __len__(self) -> int:
+            return 1
+
+        def close(self) -> None:
+            pass
+
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        body = json.loads(request.content)
+        assert body["max_tokens"] == 4096
+        if "response_format" in body:
+            return httpx.Response(400, json={"error": {"message": "unsupported"}})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": _response(
+                                {field: "MATCH" for field in DocumentArtifactValidationField}
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(validation.ai_service, "_get_ai_config", config)  # type: ignore[attr-defined]
+    monkeypatch.setattr(validation.pdfium, "PdfDocument", OnePage)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        validation.ai_service, "rasterize_pdf_pages", lambda *args: [b"png"]
+    )  # type: ignore[attr-defined]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await validation.validate_uploaded_invoice_artifact(
+            _Session(_invoice()),  # type: ignore[arg-type]
+            invoice_id=uuid.uuid4(),
+            company_id=uuid.uuid4(),
+            pdf_bytes=b"private-pdf",
+            language="en",
+            client=client,
+        )
+
+    assert result.status == DocumentArtifactValidationStatus.MATCH
+    assert len(calls) == 2
+    first_body = json.loads(calls[0].content)
+    second_body = json.loads(calls[1].content)
+    assert "response_format" in first_body
+    assert "response_format" not in second_body
+    assert first_body["max_tokens"] == 4096
+    assert second_body["max_tokens"] == 4096
 
 
 @pytest.mark.asyncio
