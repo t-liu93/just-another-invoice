@@ -16,14 +16,18 @@ Coverage:
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
-from jai.models._enums import InvoicePaidStatus, InvoiceStatus
+from jai.models._enums import InvoicePaidStatus, InvoiceStatus, PaymentDirection
 from jai.services.money import quantize_money
 from jai.services.payment import (
     TaxBucketSnapshot,
+    _payment_to_list_item,
+    _payment_to_read,
     allocate_quote_payment_taxes,
     recompute_payment_state,
     tax_bucket_key,
@@ -387,6 +391,110 @@ def test_payment_tax_bucket_key_uses_only_immutable_snapshots() -> None:
     assert tax_bucket_key(
         Decimal("21.000"), "NL_DOMESTIC", "APPLY_RATE", False
     ) == "NL_DOMESTIC|APPLY_RATE|0|21.000"
+
+
+def _payment_tax(percent: str, taxable: str, vat: str) -> SimpleNamespace:
+    gross = Decimal(taxable) + Decimal(vat)
+    return SimpleNamespace(
+        vat_rate_id=None,
+        vat_rate_label=f"VAT {percent}%",
+        vat_rate_percent=Decimal(percent),
+        taxable_amount=Decimal(taxable),
+        vat_amount=Decimal(vat),
+        gross_amount=gross,
+        base_taxable_amount=Decimal(taxable),
+        base_vat_amount=Decimal(vat),
+        base_gross_amount=gross,
+    )
+
+
+def _payment_read_stub(
+    *, quote_id: uuid.UUID | None, direction: PaymentDirection, taxes: list[SimpleNamespace]
+) -> SimpleNamespace:
+    now = datetime.now(UTC)
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        invoice_id=None,
+        quote_id=quote_id,
+        credit_note_id=None,
+        direction=direction.value,
+        payment_date=date(2026, 9, 9),
+        amount=sum((tax.gross_amount for tax in taxes), Decimal("0")),
+        base_amount=sum((tax.base_gross_amount for tax in taxes), Decimal("0")),
+        currency="EUR",
+        payment_method_id=None,
+        payment_method_name=None,
+        reference=None,
+        note=None,
+        created_at=now,
+        updated_at=now,
+        taxes=taxes,
+    )
+
+
+def test_quote_deposit_read_has_authoritative_mixed_rate_vat_totals() -> None:
+    payment = _payment_read_stub(
+        quote_id=uuid.uuid4(),
+        direction=PaymentDirection.INCOMING,
+        taxes=[_payment_tax("21", "100.00", "21.00"), _payment_tax("9", "50.00", "4.50")],
+    )
+
+    read = _payment_to_read(payment, invoice_number=None, quote_number="Q-1")
+
+    assert read.deposit_taxable_amount == Decimal("150.00")
+    assert read.deposit_vat_amount == Decimal("25.50")
+    assert [(row.vat_rate_percent, row.vat_amount) for row in read.tax_breakdown] == [
+        (Decimal("21"), Decimal("21.00")),
+        (Decimal("9"), Decimal("4.50")),
+    ]
+
+
+def test_quote_deposit_read_preserves_zero_percent_vat_as_applicable() -> None:
+    payment = _payment_read_stub(
+        quote_id=uuid.uuid4(),
+        direction=PaymentDirection.INCOMING,
+        taxes=[_payment_tax("0", "42.10", "0.00")],
+    )
+
+    read = _payment_to_read(payment, invoice_number=None, quote_number="Q-1")
+
+    assert read.deposit_taxable_amount == Decimal("42.10")
+    assert read.deposit_vat_amount == Decimal("0.00")
+
+
+def test_global_payment_row_uses_the_same_deposit_snapshot_totals() -> None:
+    payment = _payment_read_stub(
+        quote_id=uuid.uuid4(),
+        direction=PaymentDirection.INCOMING,
+        taxes=[_payment_tax("21", "100.00", "21.00"), _payment_tax("0", "29.00", "0.00")],
+    )
+
+    row = _payment_to_list_item(
+        payment,
+        invoice_number=None,
+        quote_number="Q-1",
+        credit_note_number=None,
+        customer_id=uuid.uuid4(),
+        customer_name="Customer",
+    )
+
+    assert row.deposit_taxable_amount == Decimal("129.00")
+    assert row.deposit_vat_amount == Decimal("21.00")
+
+
+def test_non_deposit_and_refund_reads_have_no_vat_split() -> None:
+    taxes = [_payment_tax("21", "100.00", "21.00")]
+    invoice_payment = _payment_read_stub(
+        quote_id=None, direction=PaymentDirection.INCOMING, taxes=taxes
+    )
+    refund = _payment_read_stub(
+        quote_id=uuid.uuid4(), direction=PaymentDirection.REFUND, taxes=taxes
+    )
+
+    for payment in (invoice_payment, refund):
+        read = _payment_to_read(payment, invoice_number="INV-1", quote_number=None)
+        assert read.deposit_taxable_amount is None
+        assert read.deposit_vat_amount is None
 
 
 def test_quote_payment_allocation_rejects_overpayment() -> None:

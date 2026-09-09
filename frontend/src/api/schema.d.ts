@@ -6945,6 +6945,10 @@ export interface components {
             payment_date: string;
             /** Amount */
             amount: string;
+            /** Deposit Taxable Amount */
+            deposit_taxable_amount?: string | null;
+            /** Deposit Vat Amount */
+            deposit_vat_amount?: string | null;
             /** Payment Method Name */
             payment_method_name?: string | null;
             /**
@@ -7083,6 +7087,10 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Deposit Taxable Amount */
+            deposit_taxable_amount?: string | null;
+            /** Deposit Vat Amount */
+            deposit_vat_amount?: string | null;
             /**
              * Tax Breakdown
              * @default []

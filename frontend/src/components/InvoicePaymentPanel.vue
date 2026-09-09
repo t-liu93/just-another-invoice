@@ -33,6 +33,7 @@ import type { components } from '../api/schema'
 import { localDateStr, formatDate } from '../utils/date'
 import { isPaymentMutationBusy } from '../utils/quotePaymentPanelState'
 import { openReceiptDialog } from '../utils/receiptEmail'
+import PaymentTaxBreakdown from './PaymentTaxBreakdown.vue'
 
 type PaymentMethodRead = components['schemas']['PaymentMethodRead']
 type PaymentMethodListResponse = components['schemas']['PaymentMethodListResponse']
@@ -430,6 +431,7 @@ function handleDelete(payment: PaymentRead) {
                 <n-text v-if="payment.note" depth="3" style="margin-left: 8px; font-size: 13px">
                   · {{ payment.note }}
                 </n-text>
+                <PaymentTaxBreakdown :payment="payment" />
               </div>
               <n-space size="small" :wrap-item="false" class="payment-item-actions">
                 <!-- Receipt PDF preview dropdown (always visible, not gated by canRecord) -->

@@ -63,6 +63,7 @@ declare module 'vue' {
     NTabs: typeof import('naive-ui')['NTabs']
     NTag: typeof import('naive-ui')['NTag']
     NText: typeof import('naive-ui')['NText']
+    PaymentTaxBreakdown: typeof import('./components/PaymentTaxBreakdown.vue')['default']
     PdfPreviewDialog: typeof import('./components/PdfPreviewDialog.vue')['default']
     PreferenceSettings: typeof import('./components/settings/PreferenceSettings.vue')['default']
     QuotePaymentPanel: typeof import('./components/QuotePaymentPanel.vue')['default']

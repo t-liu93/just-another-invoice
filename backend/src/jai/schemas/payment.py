@@ -100,6 +100,11 @@ class PaymentRead(BaseModel):
     note: str | None = None
     created_at: datetime
     updated_at: datetime
+    # Quote deposits retain a tax snapshot.  These nullable totals deliberately
+    # distinguish a 0% deposit (VAT total = 0) from an ordinary payment where a
+    # VAT split is not applicable.
+    deposit_taxable_amount: Decimal | None = None
+    deposit_vat_amount: Decimal | None = None
     tax_breakdown: list[PaymentTaxRead] = []
 
 
@@ -198,6 +203,10 @@ class PaymentListItem(BaseModel):
     customer_name: str
     payment_date: date
     amount: Decimal
+    # Authoritative, service-derived totals for quote-origin deposits only.
+    # ``None`` means that this payment has no deposit VAT snapshot.
+    deposit_taxable_amount: Decimal | None = None
+    deposit_vat_amount: Decimal | None = None
     payment_method_name: str | None = None
     created_at: datetime
 

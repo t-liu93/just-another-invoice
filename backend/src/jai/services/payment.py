@@ -414,6 +414,7 @@ def _payment_to_read(
     quote_number: str | None,
     credit_note_number: str | None = None,
 ) -> PaymentRead:
+    deposit_taxable_amount, deposit_vat_amount = _deposit_tax_totals(payment)
     return PaymentRead(
         id=payment.id,
         origin_type=(
@@ -438,6 +439,8 @@ def _payment_to_read(
         note=payment.note,
         created_at=payment.created_at,
         updated_at=payment.updated_at,
+        deposit_taxable_amount=deposit_taxable_amount,
+        deposit_vat_amount=deposit_vat_amount,
         tax_breakdown=[
             PaymentTaxRead(
                 vat_rate_id=tax.vat_rate_id,
@@ -452,6 +455,20 @@ def _payment_to_read(
             )
             for tax in payment.taxes
         ],
+    )
+
+
+def _deposit_tax_totals(payment: Payment) -> tuple[Decimal | None, Decimal | None]:
+    """Return the persisted VAT totals only for incoming quote deposits.
+
+    The overview and payment panels consume these authoritative service totals;
+    they must never derive VAT from a gross cash amount in the frontend.
+    """
+    if payment.quote_id is None or PaymentDirection(payment.direction) != PaymentDirection.INCOMING:
+        return None, None
+    return (
+        sum((Decimal(str(tax.taxable_amount)) for tax in payment.taxes), Decimal("0")),
+        sum((Decimal(str(tax.vat_amount)) for tax in payment.taxes), Decimal("0")),
     )
 
 
@@ -2272,23 +2289,14 @@ async def list_payments(
         if linked_customer_id is None:
             continue
         items.append(
-            PaymentListItem(
-                id=payment.id,
-                origin_type=(
-                    "CREDIT_NOTE"
-                    if payment.credit_note_id is not None
-                    else ("QUOTE" if payment.quote_id is not None else "INVOICE")
-                ),
-                invoice_id=payment.invoice_id,
+            _payment_to_list_item(
+                payment,
                 invoice_number=(
                     invoice_map.get(payment.invoice_id) if payment.invoice_id is not None else None
                 ),
-                quote_id=payment.quote_id,
                 quote_number=(
                     quote_map.get(payment.quote_id) if payment.quote_id is not None else None
                 ),
-                direction=PaymentDirection(payment.direction),
-                credit_note_id=payment.credit_note_id,
                 credit_note_number=(
                     credit_map.get(payment.credit_note_id)
                     if payment.credit_note_id is not None
@@ -2296,10 +2304,42 @@ async def list_payments(
                 ),
                 customer_id=linked_customer_id,
                 customer_name=customer_map.get(linked_customer_id, ""),
-                payment_date=payment.payment_date,
-                amount=Decimal(str(payment.amount)),
-                payment_method_name=payment.payment_method_name,
-                created_at=payment.created_at,
             )
         )
     return PaymentListResponse(items=items, total=total)
+
+
+def _payment_to_list_item(
+    payment: Payment,
+    *,
+    invoice_number: str | None,
+    quote_number: str | None,
+    credit_note_number: str | None,
+    customer_id: uuid.UUID,
+    customer_name: str,
+) -> PaymentListItem:
+    """Serialize one global-list row with the same deposit snapshot totals."""
+    deposit_taxable_amount, deposit_vat_amount = _deposit_tax_totals(payment)
+    return PaymentListItem(
+        id=payment.id,
+        origin_type=(
+            "CREDIT_NOTE"
+            if payment.credit_note_id is not None
+            else ("QUOTE" if payment.quote_id is not None else "INVOICE")
+        ),
+        invoice_id=payment.invoice_id,
+        invoice_number=invoice_number,
+        quote_id=payment.quote_id,
+        quote_number=quote_number,
+        direction=PaymentDirection(payment.direction),
+        credit_note_id=payment.credit_note_id,
+        credit_note_number=credit_note_number,
+        customer_id=customer_id,
+        customer_name=customer_name,
+        payment_date=payment.payment_date,
+        amount=Decimal(str(payment.amount)),
+        deposit_taxable_amount=deposit_taxable_amount,
+        deposit_vat_amount=deposit_vat_amount,
+        payment_method_name=payment.payment_method_name,
+        created_at=payment.created_at,
+    )

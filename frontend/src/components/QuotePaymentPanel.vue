@@ -43,6 +43,7 @@ import {
 } from '../utils/quotePaymentPanelState'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
 import DocumentSendDialog from './DocumentSendDialog.vue'
+import PaymentTaxBreakdown from './PaymentTaxBreakdown.vue'
 import { openReceiptDialog } from '../utils/receiptEmail'
 
 type PaymentMethodRead = components['schemas']['PaymentMethodRead']
@@ -490,6 +491,7 @@ async function downloadReceipt(key: string) {
               <n-text depth="3">{{ formatDate(payment.payment_date) }}</n-text>
               <n-text v-if="payment.payment_method_name" depth="3">{{ payment.payment_method_name }}</n-text>
               <n-text v-if="payment.reference" depth="3">{{ payment.reference }}</n-text>
+              <PaymentTaxBreakdown :payment="payment" />
             </div>
             <n-space size="small" :wrap-item="false">
               <n-dropdown :options="receiptOptions(payment.id)" @select="previewReceipt">

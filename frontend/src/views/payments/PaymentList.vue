@@ -170,6 +170,20 @@ const columns = computed(() => [
     },
   },
   {
+    title: t('payments.depositVatSplit'),
+    key: 'deposit_vat',
+    minWidth: 190,
+    render(row: PaymentListItem) {
+      if (row.deposit_taxable_amount == null || row.deposit_vat_amount == null) {
+        return h(NText, { depth: 3 }, () => '—')
+      }
+      return h('div', { class: 'deposit-vat-list-cell' }, [
+        h('div', () => `${t('payments.depositTaxableAmount')}: ${fmtMoney(row.deposit_taxable_amount!)}`),
+        h('div', () => `${t('payments.depositVatAmount')}: ${fmtMoney(row.deposit_vat_amount!)}`),
+      ])
+    },
+  },
+  {
     title: t('payments.paymentMethod'),
     key: 'payment_method_name',
     width: 150,
